@@ -163,6 +163,7 @@ cc_library_shared {
     defaults: [
         "aconfig_lib_cc_static_link.defaults",
         "egl_libs_defaults",
+        "egl_display_array_defaults",
     ],
     llndk: {
         symbol_file: "libEGL.map.txt",
