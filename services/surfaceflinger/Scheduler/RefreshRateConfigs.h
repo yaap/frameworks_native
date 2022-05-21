@@ -415,6 +415,9 @@ private:
     std::optional<IdleTimerCallbacks> mIdleTimerCallbacks GUARDED_BY(mIdleTimerCallbacksMutex);
     // Used to detect (lack of) frame activity.
     std::optional<scheduler::OneShotTimer> mIdleTimer;
+
+    // Display mode pointer for opportunistically entering idle state (60 Hz)
+    std::shared_ptr<const DisplayMode> mIdleRefreshRate;
 };
 
 } // namespace android::scheduler
