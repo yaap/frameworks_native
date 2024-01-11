@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/* Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 
 #pragma clang diagnostic push
@@ -1334,7 +1340,10 @@ void Layer::gatherBufferInfo() {
             SFTRACE_NAME("getDataspace");
             err = mapper.getDataspace(mBufferInfo.mBuffer->getBuffer()->handle, &dataspace);
         }
-        if (err != OK || dataspace != mBufferInfo.mDataspace) {
+        if ((err != OK || dataspace != mBufferInfo.mDataspace)
+            /* QTI_BEGIN */
+            && dataspace != ui::Dataspace::UNKNOWN) {
+            /* QTI_END */
             {
                 SFTRACE_NAME("setDataspace");
                 err = mapper.setDataspace(mBufferInfo.mBuffer->getBuffer()->handle,
