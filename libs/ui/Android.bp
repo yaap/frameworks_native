@@ -207,6 +207,10 @@ cc_library_shared {
             exclude_shared_libs: [
             ],
         },
+        android_arm64: {
+            cflags: ["-fsplit-machine-functions"],
+            ldflags: ["-fsplit-machine-functions"],
+        },
     },
 
     header_libs: [
