@@ -141,6 +141,12 @@ cc_defaults {
     sanitize: {
         fuzzer: false,
     },
+    target: {
+        android_arm64: {
+            cflags: ["-fsplit-machine-functions"],
+            ldflags: ["-fsplit-machine-functions"],
+        },
+    },
 }
 
 cc_library_headers {
