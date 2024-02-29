@@ -377,6 +377,10 @@ cc_library {
                 "jni_headers",
             ],
         },
+        android_arm64: {                                                                                                                
+            cflags: ["-fsplit-machine-functions"],       
+            ldflags: ["-fsplit-machine-functions"],
+        },                  
     },
 
     afdo: true,
