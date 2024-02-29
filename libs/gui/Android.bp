@@ -309,6 +309,13 @@ cc_defaults {
 
     afdo: true,
 
+    target: {
+        android_arm64: {
+            cflags: ["-fsplit-machine-functions"],
+            ldflags: ["-fsplit-machine-functions"],
+        },
+    },
+
     lto: {
         thin: true,
     },
