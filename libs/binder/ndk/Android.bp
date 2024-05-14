@@ -140,6 +140,7 @@ cc_library {
         "portability*",
     ],
     afdo: true,
+    lto_Instr100: true,
 }
 
 cc_library_headers {
