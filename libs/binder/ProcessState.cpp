@@ -312,6 +312,7 @@ extern sp<BBinder> the_context_object;
 sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
 {
     sp<IBinder> result;
+    std::function<void()> postTask;
 
     std::unique_lock<std::mutex> _l(mLock);
 
@@ -359,7 +360,7 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
                    return nullptr;
             }
 
-            sp<BpBinder> b = BpBinder::PrivateAccessor::create(handle);
+            sp<BpBinder> b = BpBinder::PrivateAccessor::create(handle, &postTask);
             e->binder = b.get();
             if (b) e->refs = b->getWeakRefs();
             result = b;
@@ -371,6 +372,10 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
             e->refs->decWeak(this);
         }
     }
+
+    _l.unlock();
+
+    if (postTask) postTask();
 
     return result;
 }

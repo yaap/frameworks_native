@@ -134,7 +134,9 @@ public:
         friend class ::android::RpcState;
         explicit PrivateAccessor(const BpBinder* binder) : mBinder(binder) {}
 
-        static sp<BpBinder> create(int32_t handle) { return BpBinder::create(handle); }
+        static sp<BpBinder> create(int32_t handle, std::function<void()>* postTask) {
+            return BpBinder::create(handle, postTask);
+        }
         static sp<BpBinder> create(const sp<RpcSession>& session, uint64_t address) {
             return BpBinder::create(session, address);
         }
@@ -154,7 +156,7 @@ private:
     friend PrivateAccessor;
     friend class sp<BpBinder>;
 
-    static sp<BpBinder> create(int32_t handle);
+    static sp<BpBinder> create(int32_t handle, std::function<void()>* postTask);
     static sp<BpBinder> create(const sp<RpcSession>& session, uint64_t address);
 
     struct BinderHandle {
