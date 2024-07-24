@@ -503,4 +503,53 @@ TEST_F(MultifileBlobCacheTest, MismatchedBuildIdClears) {
     ASSERT_EQ(getCacheEntries().size(), 0);
 }
 
+// Ensure cache size is correct when a key is re-used
+TEST_F(MultifileBlobCacheTest, SameKeyDifferentSizes) {
+    unsigned char buf[4] = {0xee, 0xee, 0xee, 0xee};
+
+    size_t startingSize = mMBC->getTotalSize();
+
+    // New cache should be empty
+    ASSERT_EQ(startingSize, 0);
+
+    // Set an initial value
+    mMBC->set("ab", 2, "cdef", 4);
+
+    // Grab the new size
+    size_t firstSize = mMBC->getTotalSize();
+
+    // Ensure the size went up
+    // Note: Checking for an exact size is challenging, as the
+    // file size can differ between platforms.
+    ASSERT_GT(firstSize, startingSize);
+
+    // Verify the cache is correct
+    ASSERT_EQ(size_t(4), mMBC->get("ab", 2, buf, 4));
+    ASSERT_EQ('c', buf[0]);
+    ASSERT_EQ('d', buf[1]);
+    ASSERT_EQ('e', buf[2]);
+    ASSERT_EQ('f', buf[3]);
+
+    // Now re-use the key with a smaller value
+    mMBC->set("ab", 2, "gh", 2);
+
+    // Grab the new size
+    size_t secondSize = mMBC->getTotalSize();
+
+    // Ensure it decreased in size
+    ASSERT_LT(secondSize, firstSize);
+
+    // Verify the cache is correct
+    ASSERT_EQ(size_t(2), mMBC->get("ab", 2, buf, 2));
+    ASSERT_EQ('g', buf[0]);
+    ASSERT_EQ('h', buf[1]);
+
+    // Now put back the original value
+    mMBC->set("ab", 2, "cdef", 4);
+
+    // And we should get back a stable size
+    size_t finalSize = mMBC->getTotalSize();
+    ASSERT_EQ(firstSize, finalSize);
+}
+
 } // namespace android
