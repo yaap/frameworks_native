@@ -30,6 +30,7 @@
 
 #include <android/gui/DropInputMode.h>
 #include <android/gui/FocusRequest.h>
+#include <android/gui/TrustedOverlay.h>
 
 #include <ftl/flags.h>
 #include <gui/DisplayCaptureArgs.h>
@@ -127,6 +128,8 @@ public:
 
     client_cache_t cachedBuffer;
 
+    nsecs_t dequeueTime;
+
     // Generates the release callback id based on the buffer id and frame number.
     // This is used as an identifier when release callbacks are invoked.
     ReleaseCallbackId generateReleaseCallbackId() const;
@@ -179,7 +182,6 @@ struct layer_state_t {
         eCachingHintChanged = 0x00000200,
         eDimmingEnabledChanged = 0x00000400,
         eShadowRadiusChanged = 0x00000800,
-        eRenderBorderChanged = 0x00001000,
         eBufferCropChanged = 0x00002000,
         eRelativeLayerChanged = 0x00004000,
         eReparent = 0x00008000,
@@ -258,8 +260,8 @@ struct layer_state_t {
             layer_state_t::eBlurRegionsChanged | layer_state_t::eColorChanged |
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
-            layer_state_t::eHdrMetadataChanged | layer_state_t::eRenderBorderChanged |
-            layer_state_t::eShadowRadiusChanged | layer_state_t::eStretchChanged;
+            layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
+            layer_state_t::eStretchChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -276,9 +278,9 @@ struct layer_state_t {
             layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFixedTransformHintChanged;
 
     // Changes affecting data sent to input.
-    static constexpr uint64_t INPUT_CHANGES = layer_state_t::eInputInfoChanged |
-            layer_state_t::eDropInputModeChanged | layer_state_t::eTrustedOverlayChanged |
-            layer_state_t::eLayerStackChanged;
+    static constexpr uint64_t INPUT_CHANGES = layer_state_t::eAlphaChanged |
+            layer_state_t::eInputInfoChanged | layer_state_t::eDropInputModeChanged |
+            layer_state_t::eTrustedOverlayChanged | layer_state_t::eLayerStackChanged;
 
     // Changes that affect the visible region on a display.
     static constexpr uint64_t VISIBLE_REGION_CHANGES = layer_state_t::GEOMETRY_CHANGES |
@@ -386,12 +388,7 @@ struct layer_state_t {
 
     // An inherited state that indicates that this surface control and its children
     // should be trusted for input occlusion detection purposes
-    bool isTrustedOverlay;
-
-    // Flag to indicate if border needs to be enabled on the layer
-    bool borderEnabled;
-    float borderWidth;
-    half4 borderColor;
+    gui::TrustedOverlay trustedOverlay;
 
     // Stretch effect to be applied to this layer
     StretchEffect stretchEffect;

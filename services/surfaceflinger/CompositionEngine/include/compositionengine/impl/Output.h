@@ -104,7 +104,7 @@ public:
     std::optional<base::unique_fd> composeSurfaces(const Region&,
                                                    std::shared_ptr<renderengine::ExternalTexture>,
                                                    base::unique_fd&) override;
-    void presentFrameAndReleaseLayers() override;
+    void presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) override;
     void renderCachedSets(const CompositionRefreshArgs&) override;
     void cacheClientCompositionRequests(uint32_t) override;
     bool canPredictCompositionStrategy(const CompositionRefreshArgs&) override;
@@ -123,7 +123,8 @@ public:
     virtual std::future<bool> chooseCompositionStrategyAsync(
             std::optional<android::HWComposer::DeviceRequestedChanges>*);
     virtual void resetCompositionStrategy();
-    virtual ftl::Future<std::monostate> presentFrameAndReleaseLayersAsync();
+    virtual ftl::Future<std::monostate> presentFrameAndReleaseLayersAsync(
+            bool flushEvenWhenDisabled);
 
 protected:
     std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(const sp<LayerFE>&) const;
@@ -137,6 +138,7 @@ protected:
     void applyCompositionStrategy(const std::optional<DeviceRequestedChanges>&) override{};
     bool getSkipColorTransform() const override;
     compositionengine::Output::FrameFences presentFrame() override;
+    void executeCommands() override {}
     virtual renderengine::DisplaySettings generateClientCompositionDisplaySettings(
             const std::shared_ptr<renderengine::ExternalTexture>& buffer) const;
     std::vector<LayerFE::LayerSettings> generateClientCompositionRequests(
@@ -144,8 +146,11 @@ protected:
             std::vector<LayerFE*>& outLayerFEs) override;
     void appendRegionFlashRequests(const Region&, std::vector<LayerFE::LayerSettings>&) override;
     void setExpensiveRenderingExpected(bool enabled) override;
+    void setHintSessionGpuStart(TimePoint startTime) override;
     void setHintSessionGpuFence(std::unique_ptr<FenceTime>&& gpuFence) override;
+    void setHintSessionRequiresRenderEngine(bool requiresRenderEngine) override;
     bool isPowerHintSessionEnabled() override;
+    bool isPowerHintSessionGpuReportingEnabled() override;
     void dumpBase(std::string&) const;
 
     // Implemented by the final implementation for the final state it uses.
@@ -162,7 +167,6 @@ protected:
 
 private:
     void dirtyEntireOutput();
-    void updateCompositionStateForBorder(const compositionengine::CompositionRefreshArgs&);
     compositionengine::OutputLayer* findLayerRequestingBackgroundComposition() const;
     void finishPrepareFrame();
     ui::Dataspace getBestDataspace(ui::Dataspace*, bool*) const;

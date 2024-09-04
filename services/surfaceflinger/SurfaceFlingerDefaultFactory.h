@@ -29,7 +29,6 @@ public:
     std::unique_ptr<HWComposer> createHWComposer(const std::string& serviceName) override;
     std::unique_ptr<scheduler::VsyncConfiguration> createVsyncConfiguration(
             Fps currentRefreshRate) override;
-    sp<StartPropertySetThread> createStartPropertySetThread(bool timestampPropertyValue) override;
     sp<DisplayDevice> createDisplayDevice(DisplayDeviceCreationArgs&) override;
     sp<GraphicBuffer> createGraphicBuffer(uint32_t width, uint32_t height, PixelFormat format,
                                           uint32_t layerCount, uint64_t usage,
@@ -42,7 +41,7 @@ public:
     std::unique_ptr<compositionengine::CompositionEngine> createCompositionEngine() override;
     sp<Layer> createBufferStateLayer(const LayerCreationArgs& args) override;
     sp<Layer> createEffectLayer(const LayerCreationArgs& args) override;
-    sp<LayerFE> createLayerFE(const std::string& layerName) override;
+    sp<LayerFE> createLayerFE(const std::string& layerName, const Layer* owner) override;
     std::unique_ptr<FrameTracer> createFrameTracer() override;
     std::unique_ptr<frametimeline::FrameTimeline> createFrameTimeline(
             std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid) override;

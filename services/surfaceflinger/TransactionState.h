@@ -23,6 +23,7 @@
 #include "FrontEnd/LayerCreationArgs.h"
 #include "renderengine/ExternalTexture.h"
 
+#include <common/FlagManager.h>
 #include <gui/LayerState.h>
 #include <system/window.h>
 
@@ -86,7 +87,7 @@ struct TransactionState {
     }
 
     template <typename Visitor>
-    void traverseStatesWithBuffersWhileTrue(Visitor&& visitor) {
+    void traverseStatesWithBuffersWhileTrue(Visitor&& visitor) NO_THREAD_SAFETY_ANALYSIS {
         for (auto state = states.begin(); state != states.end();) {
             if (state->state.hasBufferChanges() && state->externalTexture && state->state.surface) {
                 int result = visitor(*state);
@@ -108,9 +109,22 @@ struct TransactionState {
 
         for (const auto& state : states) {
             const bool frameRateChanged = state.state.what & layer_state_t::eFrameRateChanged;
-            if (!frameRateChanged ||
-                state.state.frameRateCompatibility != ANATIVEWINDOW_FRAME_RATE_NO_VOTE) {
-                return true;
+            if (FlagManager::getInstance().vrr_bugfix_24q4()) {
+                const bool frameRateIsNoVote = frameRateChanged &&
+                        state.state.frameRateCompatibility == ANATIVEWINDOW_FRAME_RATE_NO_VOTE;
+                const bool frameRateCategoryChanged =
+                        state.state.what & layer_state_t::eFrameRateCategoryChanged;
+                const bool frameRateCategoryIsNoPreference = frameRateCategoryChanged &&
+                        state.state.frameRateCategory ==
+                                ANATIVEWINDOW_FRAME_RATE_CATEGORY_NO_PREFERENCE;
+                if (!frameRateIsNoVote && !frameRateCategoryIsNoPreference) {
+                    return true;
+                }
+            } else {
+                if (!frameRateChanged ||
+                    state.state.frameRateCompatibility != ANATIVEWINDOW_FRAME_RATE_NO_VOTE) {
+                    return true;
+                }
             }
         }
 

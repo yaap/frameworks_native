@@ -76,6 +76,11 @@ public:
                                       InputDeviceSensorAccuracy accuracy) = 0;
     virtual void notifyVibratorState(int32_t deviceId, bool isOn) = 0;
 
+    /*
+     * Notifies the system that focused display has changed.
+     */
+    virtual void notifyFocusedDisplayChanged(ui::LogicalDisplayId displayId) = 0;
+
     /* Filters an input event.
      * Return true to dispatch the event unmodified, false to consume the event.
      * A filter can also transform and inject events later by passing POLICY_FLAG_FILTERED
@@ -99,8 +104,9 @@ public:
      * This method is expected to set the POLICY_FLAG_PASS_TO_USER policy flag if the event
      * should be dispatched to applications.
      */
-    virtual void interceptMotionBeforeQueueing(int32_t displayId, uint32_t source, int32_t action,
-                                               nsecs_t when, uint32_t& policyFlags) = 0;
+    virtual void interceptMotionBeforeQueueing(ui::LogicalDisplayId displayId, uint32_t source,
+                                               int32_t action, nsecs_t when,
+                                               uint32_t& policyFlags) = 0;
 
     /* Allows the policy a chance to intercept a key before dispatching. */
     virtual nsecs_t interceptKeyBeforeDispatching(const sp<IBinder>& token,
@@ -119,7 +125,8 @@ public:
                               uint32_t policyFlags) = 0;
 
     /* Poke user activity for an event dispatched to a window. */
-    virtual void pokeUserActivity(nsecs_t eventTime, int32_t eventType, int32_t displayId) = 0;
+    virtual void pokeUserActivity(nsecs_t eventTime, int32_t eventType,
+                                  ui::LogicalDisplayId displayId) = 0;
 
     /*
      * Return true if the provided event is stale, and false otherwise. Used for determining

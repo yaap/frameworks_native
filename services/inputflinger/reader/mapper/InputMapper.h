@@ -78,7 +78,7 @@ public:
                                                             const InputReaderConfiguration& config,
                                                             ConfigurationChanges changes);
     [[nodiscard]] virtual std::list<NotifyArgs> reset(nsecs_t when);
-    [[nodiscard]] virtual std::list<NotifyArgs> process(const RawEvent* rawEvent) = 0;
+    [[nodiscard]] virtual std::list<NotifyArgs> process(const RawEvent& rawEvent) = 0;
     [[nodiscard]] virtual std::list<NotifyArgs> timeoutExpired(nsecs_t when);
 
     virtual int32_t getKeyCodeState(uint32_t sourceMask, int32_t keyCode);
@@ -117,7 +117,7 @@ public:
 
     [[nodiscard]] virtual std::list<NotifyArgs> updateExternalStylusState(const StylusState& state);
 
-    virtual std::optional<int32_t> getAssociatedDisplayId() { return std::nullopt; }
+    virtual std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() { return std::nullopt; }
     virtual void updateLedState(bool reset) {}
 
 protected:

@@ -27,6 +27,9 @@
 
 #include "LayerFE.h"
 #include "SurfaceFlinger.h"
+#include "common/FlagManager.h"
+#include "ui/FenceResult.h"
+#include "ui/LayerStack.h"
 
 namespace android {
 
@@ -78,12 +81,21 @@ void getDrawingTransformMatrix(const std::shared_ptr<renderengine::ExternalTextu
 
 LayerFE::LayerFE(const std::string& name) : mName(name) {}
 
+LayerFE::~LayerFE() {
+    // Ensures that no promise is left unfulfilled before the LayerFE is destroyed.
+    // An unfulfilled promise could occur when a screenshot is attempted, but the
+    // render area is invalid and there is no memory for the capture result.
+    if (FlagManager::getInstance().ce_fence_promise() &&
+        mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
+        setReleaseFence(Fence::NO_FENCE);
+    }
+}
+
 const compositionengine::LayerFECompositionState* LayerFE::getCompositionState() const {
     return mSnapshot.get();
 }
 
-bool LayerFE::onPreComposition(nsecs_t refreshStartTime, bool) {
-    mCompositionResult.refreshStartTime = refreshStartTime;
+bool LayerFE::onPreComposition(bool) {
     return mSnapshot->hasReadyFrame;
 }
 
@@ -388,4 +400,29 @@ const sp<GraphicBuffer> LayerFE::getBuffer() const {
     return mSnapshot->externalTexture ? mSnapshot->externalTexture->getBuffer() : nullptr;
 }
 
+void LayerFE::setReleaseFence(const FenceResult& releaseFence) {
+    // Promises should not be fulfilled more than once. This case can occur if virtual
+    // displays with the same layerstack ID are being created and destroyed in quick
+    // succession, such as in tests. This would result in a race condition in which
+    // multiple displays have the same layerstack ID within the same vsync interval.
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::FULFILLED) {
+        return;
+    }
+    mReleaseFence.set_value(releaseFence);
+    mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::FULFILLED;
+}
+
+// LayerFEs are reused and a new fence needs to be created whevever a buffer is latched.
+ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
+        LOG_ALWAYS_FATAL("Attempting to create a new promise while one is still unfulfilled.");
+    }
+    mReleaseFence = std::promise<FenceResult>();
+    mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::INITIALIZED;
+    return mReleaseFence.get_future();
+}
+
+LayerFE::ReleaseFencePromiseStatus LayerFE::getReleaseFencePromiseStatus() {
+    return mReleaseFencePromiseStatus;
+}
 } // namespace android

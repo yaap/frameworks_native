@@ -28,6 +28,7 @@ namespace android {
 class ColorMatrixTest : public CommitAndCompositeTest {};
 
 TEST_F(ColorMatrixTest, colorMatrixChanged) {
+    mFlinger.enableLayerLifecycleManager();
     EXPECT_COLOR_MATRIX_CHANGED(true, true);
     mFlinger.mutableTransactionFlags() |= eTransactionNeeded;
 
@@ -45,13 +46,15 @@ TEST_F(ColorMatrixTest, colorMatrixChanged) {
 }
 
 TEST_F(ColorMatrixTest, colorMatrixChangedAfterDisplayTransaction) {
+    mFlinger.enableLayerLifecycleManager();
     EXPECT_COLOR_MATRIX_CHANGED(true, true);
     mFlinger.mutableTransactionFlags() |= eTransactionNeeded;
 
     mFlinger.commitAndComposite();
     EXPECT_COLOR_MATRIX_CHANGED(false, false);
 
-    mFlinger.createDisplay(String8("Test Display"), false);
+    static const std::string kDisplayName("Test Display");
+    mFlinger.createVirtualDisplay(kDisplayName, false /*isSecure=*/);
 
     mFlinger.commit();
     EXPECT_COLOR_MATRIX_CHANGED(false, true);

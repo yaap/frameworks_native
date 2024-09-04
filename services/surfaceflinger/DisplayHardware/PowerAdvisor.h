@@ -29,6 +29,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 #include <aidl/android/hardware/power/IPower.h>
+#include <fmq/AidlMessageQueue.h>
 #include <powermanager/PowerHalController.h>
 #pragma clang diagnostic pop
 
@@ -59,6 +60,7 @@ public:
     // set before onBootFinished, which gates all methods that run on threads other than SF main
     virtual bool usePowerHintSession() = 0;
     virtual bool supportsPowerHintSession() = 0;
+    virtual bool supportsGpuReporting() = 0;
 
     // Sends a power hint that updates to the target work duration for the frame
     virtual void updateTargetWorkDuration(Duration targetDuration) = 0;
@@ -68,6 +70,8 @@ public:
     virtual void enablePowerHintSession(bool enabled) = 0;
     // Initializes the power hint session
     virtual bool startPowerHintSession(std::vector<int32_t>&& threadIds) = 0;
+    // Provides PowerAdvisor with gpu start time
+    virtual void setGpuStartTime(DisplayId displayId, TimePoint startTime) = 0;
     // Provides PowerAdvisor with a copy of the gpu fence so it can determine the gpu end time
     virtual void setGpuFenceTime(DisplayId displayId, std::unique_ptr<FenceTime>&& fenceTime) = 0;
     // Reports the start and end times of a hwc validate call this frame for a given display
@@ -80,9 +84,8 @@ public:
     virtual void setExpectedPresentTime(TimePoint expectedPresentTime) = 0;
     // Reports the most recent present fence time and end time once known
     virtual void setSfPresentTiming(TimePoint presentFenceTime, TimePoint presentEndTime) = 0;
-    // Reports whether a display used client composition this frame
-    virtual void setRequiresClientComposition(DisplayId displayId,
-                                              bool requiresClientComposition) = 0;
+    // Reports whether a display requires RenderEngine to draw
+    virtual void setRequiresRenderEngine(DisplayId displayId, bool requiresRenderEngine) = 0;
     // Reports whether a given display skipped validation this frame
     virtual void setSkippedValidate(DisplayId displayId, bool skipped) = 0;
     // Reports when a hwc present is delayed, and the time that it will resume
@@ -121,17 +124,19 @@ public:
     bool isUsingExpensiveRendering() override { return mNotifiedExpensiveRendering; };
     bool usePowerHintSession() override;
     bool supportsPowerHintSession() override;
+    bool supportsGpuReporting() override;
     void updateTargetWorkDuration(Duration targetDuration) override;
     void reportActualWorkDuration() override;
     void enablePowerHintSession(bool enabled) override;
     bool startPowerHintSession(std::vector<int32_t>&& threadIds) override;
+    void setGpuStartTime(DisplayId displayId, TimePoint startTime) override;
     void setGpuFenceTime(DisplayId displayId, std::unique_ptr<FenceTime>&& fenceTime) override;
     void setHwcValidateTiming(DisplayId displayId, TimePoint validateStartTime,
                               TimePoint validateEndTime) override;
     void setHwcPresentTiming(DisplayId displayId, TimePoint presentStartTime,
                              TimePoint presentEndTime) override;
     void setSkippedValidate(DisplayId displayId, bool skipped) override;
-    void setRequiresClientComposition(DisplayId displayId, bool requiresClientComposition) override;
+    void setRequiresRenderEngine(DisplayId displayId, bool requiresRenderEngine);
     void setExpectedPresentTime(TimePoint expectedPresentTime) override;
     void setSfPresentTiming(TimePoint presentFenceTime, TimePoint presentEndTime) override;
     void setHwcPresentDelayedTime(DisplayId displayId, TimePoint earliestFrameStartTime) override;
@@ -192,7 +197,7 @@ private:
         std::optional<TimePoint> hwcValidateStartTime;
         std::optional<TimePoint> hwcValidateEndTime;
         std::optional<TimePoint> hwcPresentDelayedTime;
-        bool usedClientComposition = false;
+        bool requiresRenderEngine = false;
         bool skippedValidate = false;
         // Calculate high-level timing milestones from more granular display timing data
         DisplayTimeline calculateDisplayTimeline(TimePoint fenceTime);
@@ -224,15 +229,17 @@ private:
     // Filter and sort the display ids by a given property
     std::vector<DisplayId> getOrderedDisplayIds(
             std::optional<TimePoint> DisplayTimingData::*sortBy);
-    // Estimates a frame's total work duration including gpu time.
-    std::optional<Duration> estimateWorkDuration();
+    // Estimates a frame's total work duration including gpu and gpu time.
+    std::optional<aidl::android::hardware::power::WorkDuration> estimateWorkDuration();
     // There are two different targets and actual work durations we care about,
     // this normalizes them together and takes the max of the two
     Duration combineTimingEstimates(Duration totalDuration, Duration flingerDuration);
+    // Whether to use the new "createHintSessionWithConfig" method
+    bool shouldCreateSessionWithConfig() REQUIRES(mHintSessionMutex);
 
     bool ensurePowerHintSessionRunning() REQUIRES(mHintSessionMutex);
+    void setUpFmq() REQUIRES(mHintSessionMutex);
     std::unordered_map<DisplayId, DisplayTimingData> mDisplayTimingData;
-
     // Current frame's delay
     Duration mFrameDelayDuration{0ns};
     // Last frame's post-composition duration
@@ -259,17 +266,25 @@ private:
     std::optional<bool> mSupportsHintSession;
 
     std::mutex mHintSessionMutex;
-    std::shared_ptr<aidl::android::hardware::power::IPowerHintSession> mHintSession
-            GUARDED_BY(mHintSessionMutex) = nullptr;
+    std::shared_ptr<power::PowerHintSessionWrapper> mHintSession GUARDED_BY(mHintSessionMutex) =
+            nullptr;
 
     // Initialize to true so we try to call, to check if it's supported
     bool mHasExpensiveRendering = true;
     bool mHasDisplayUpdateImminent = true;
     // Queue of actual durations saved to report
     std::vector<aidl::android::hardware::power::WorkDuration> mHintSessionQueue;
+    std::unique_ptr<::android::AidlMessageQueue<
+            aidl::android::hardware::power::ChannelMessage,
+            ::aidl::android::hardware::common::fmq::SynchronizedReadWrite>>
+            mMsgQueue GUARDED_BY(mHintSessionMutex);
+    std::unique_ptr<::android::AidlMessageQueue<
+            int8_t, ::aidl::android::hardware::common::fmq::SynchronizedReadWrite>>
+            mFlagQueue GUARDED_BY(mHintSessionMutex);
+    android::hardware::EventFlag* mEventFlag;
+    uint32_t mFmqWriteMask;
     // The latest values we have received for target and actual
     Duration mTargetDuration = kDefaultTargetDuration;
-    std::optional<Duration> mActualDuration;
     // The list of thread ids, stored so we can restart the session from this class if needed
     std::vector<int32_t> mHintSessionThreadIds;
     Duration mLastTargetDurationSent = kDefaultTargetDuration;
@@ -277,6 +292,13 @@ private:
     // Used to manage the execution ordering of reportActualWorkDuration for concurrency testing
     std::promise<bool> mDelayReportActualMutexAcquisitonPromise;
     bool mTimingTestingMode = false;
+
+    // Hint session configuration data
+    aidl::android::hardware::power::SessionConfig mSessionConfig;
+
+    // Whether createHintSessionWithConfig is supported, assume true until it fails
+    bool mSessionConfigSupported = true;
+    bool mFirstConfigSupportCheck = true;
 
     // Whether we should emit ATRACE_INT data for hint sessions
     static const bool sTraceHintSessionData;
@@ -295,6 +317,12 @@ private:
     // How long we expect hwc to run after the present call until it waits for the fence
     static constexpr const Duration kFenceWaitStartDelayValidated{150us};
     static constexpr const Duration kFenceWaitStartDelaySkippedValidate{250us};
+
+    void sendHintSessionHint(aidl::android::hardware::power::SessionHint hint);
+
+    template <aidl::android::hardware::power::ChannelMessage::ChannelMessageContents::Tag T,
+              class In>
+    bool writeHintSessionMessage(In* elements, size_t count) REQUIRES(mHintSessionMutex);
 };
 
 } // namespace impl

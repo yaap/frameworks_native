@@ -77,11 +77,11 @@ std::list<NotifyArgs> InputDevice::updateEnableState(nsecs_t when,
 
         // If a device is associated with a specific display but there is no
         // associated DisplayViewport, don't enable the device.
-        if (enable && (mAssociatedDisplayPort || mAssociatedDisplayUniqueId) &&
+        if (enable && (mAssociatedDisplayPort || mAssociatedDisplayUniqueIdByPort) &&
             !mAssociatedViewport) {
             const std::string desc = mAssociatedDisplayPort
                     ? "port " + std::to_string(*mAssociatedDisplayPort)
-                    : "uniqueId " + *mAssociatedDisplayUniqueId;
+                    : "uniqueId " + *mAssociatedDisplayUniqueIdByPort;
             ALOGW("Cannot enable input device %s because it is associated "
                   "with %s, but the corresponding viewport is not found",
                   getName().c_str(), desc.c_str());
@@ -124,9 +124,15 @@ void InputDevice::dump(std::string& dump, const std::string& eventHubDevStr) {
     } else {
         dump += "<none>\n";
     }
-    dump += StringPrintf(INDENT2 "AssociatedDisplayUniqueId: ");
-    if (mAssociatedDisplayUniqueId) {
-        dump += StringPrintf("%s\n", mAssociatedDisplayUniqueId->c_str());
+    dump += StringPrintf(INDENT2 "AssociatedDisplayUniqueIdByPort: ");
+    if (mAssociatedDisplayUniqueIdByPort) {
+        dump += StringPrintf("%s\n", mAssociatedDisplayUniqueIdByPort->c_str());
+    } else {
+        dump += "<none>\n";
+    }
+    dump += StringPrintf(INDENT2 "AssociatedDisplayUniqueIdByDescriptor: ");
+    if (mAssociatedDisplayUniqueIdByDescriptor) {
+        dump += StringPrintf("%s\n", mAssociatedDisplayUniqueIdByDescriptor->c_str());
     } else {
         dump += "<none>\n";
     }
@@ -231,6 +237,12 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
     mIsExternal = mClasses.test(InputDeviceClass::EXTERNAL);
     mHasMic = mClasses.test(InputDeviceClass::MIC);
 
+    // Update keyboard type
+    if (mClasses.test(InputDeviceClass::KEYBOARD)) {
+        mContext->getKeyboardClassifier().notifyKeyboardChanged(mId, mIdentifier, mClasses.get());
+        mKeyboardType = mContext->getKeyboardClassifier().getKeyboardType(mId);
+    }
+
     using Change = InputReaderConfiguration::Change;
 
     if (!changes.any() || !isIgnored()) {
@@ -269,22 +281,42 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
 
             // In most situations, no port or name will be specified.
             mAssociatedDisplayPort = std::nullopt;
-            mAssociatedDisplayUniqueId = std::nullopt;
+            mAssociatedDisplayUniqueIdByPort = std::nullopt;
             mAssociatedViewport = std::nullopt;
+            // Find the display port that corresponds to the current input device descriptor
+            const std::string& inputDeviceDescriptor = mIdentifier.descriptor;
+            if (!inputDeviceDescriptor.empty()) {
+                const std::unordered_map<std::string, uint8_t>& ports =
+                        readerConfig.inputPortToDisplayPortAssociations;
+                const auto& displayPort = ports.find(inputDeviceDescriptor);
+                if (displayPort != ports.end()) {
+                    mAssociatedDisplayPort = std::make_optional(displayPort->second);
+                } else {
+                    const std::unordered_map<std::string, std::string>&
+                            displayUniqueIdsByDescriptor =
+                                    readerConfig.inputDeviceDescriptorToDisplayUniqueIdAssociations;
+                    const auto& displayUniqueIdByDescriptor =
+                            displayUniqueIdsByDescriptor.find(inputDeviceDescriptor);
+                    if (displayUniqueIdByDescriptor != displayUniqueIdsByDescriptor.end()) {
+                        mAssociatedDisplayUniqueIdByDescriptor =
+                                displayUniqueIdByDescriptor->second;
+                    }
+                }
+            }
             // Find the display port that corresponds to the current input port.
             const std::string& inputPort = mIdentifier.location;
             if (!inputPort.empty()) {
                 const std::unordered_map<std::string, uint8_t>& ports =
-                        readerConfig.portAssociations;
+                        readerConfig.inputPortToDisplayPortAssociations;
                 const auto& displayPort = ports.find(inputPort);
                 if (displayPort != ports.end()) {
                     mAssociatedDisplayPort = std::make_optional(displayPort->second);
                 } else {
-                    const std::unordered_map<std::string, std::string>& displayUniqueIds =
-                            readerConfig.uniqueIdAssociations;
-                    const auto& displayUniqueId = displayUniqueIds.find(inputPort);
-                    if (displayUniqueId != displayUniqueIds.end()) {
-                        mAssociatedDisplayUniqueId = displayUniqueId->second;
+                    const std::unordered_map<std::string, std::string>& displayUniqueIdsByPort =
+                            readerConfig.inputPortToDisplayUniqueIdAssociations;
+                    const auto& displayUniqueIdByPort = displayUniqueIdsByPort.find(inputPort);
+                    if (displayUniqueIdByPort != displayUniqueIdsByPort.end()) {
+                        mAssociatedDisplayUniqueIdByPort = displayUniqueIdByPort->second;
                     }
                 }
             }
@@ -299,13 +331,21 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
                           "but the corresponding viewport is not found.",
                           getName().c_str(), *mAssociatedDisplayPort);
                 }
-            } else if (mAssociatedDisplayUniqueId != std::nullopt) {
-                mAssociatedViewport =
-                        readerConfig.getDisplayViewportByUniqueId(*mAssociatedDisplayUniqueId);
+            } else if (mAssociatedDisplayUniqueIdByDescriptor != std::nullopt) {
+                mAssociatedViewport = readerConfig.getDisplayViewportByUniqueId(
+                        *mAssociatedDisplayUniqueIdByDescriptor);
                 if (!mAssociatedViewport) {
                     ALOGW("Input device %s should be associated with display %s but the "
                           "corresponding viewport cannot be found",
-                          getName().c_str(), mAssociatedDisplayUniqueId->c_str());
+                          getName().c_str(), mAssociatedDisplayUniqueIdByDescriptor->c_str());
+                }
+            } else if (mAssociatedDisplayUniqueIdByPort != std::nullopt) {
+                mAssociatedViewport = readerConfig.getDisplayViewportByUniqueId(
+                        *mAssociatedDisplayUniqueIdByPort);
+                if (!mAssociatedViewport) {
+                    ALOGW("Input device %s should be associated with display %s but the "
+                          "corresponding viewport cannot be found",
+                          getName().c_str(), mAssociatedDisplayUniqueIdByPort->c_str());
                 }
             }
 
@@ -369,7 +409,7 @@ std::list<NotifyArgs> InputDevice::process(const RawEvent* rawEvents, size_t cou
             mDropUntilNextSync = true;
         } else {
             for_each_mapper_in_subdevice(rawEvent->deviceId, [&](InputMapper& mapper) {
-                out += mapper.process(rawEvent);
+                out += mapper.process(*rawEvent);
             });
         }
         --count;
@@ -408,8 +448,10 @@ std::list<NotifyArgs> InputDevice::updateExternalStylusState(const StylusState& 
 InputDeviceInfo InputDevice::getDeviceInfo() {
     InputDeviceInfo outDeviceInfo;
     outDeviceInfo.initialize(mId, mGeneration, mControllerNumber, mIdentifier, mAlias, mIsExternal,
-                             mHasMic, getAssociatedDisplayId().value_or(ADISPLAY_ID_NONE),
-                             {mShouldSmoothScroll});
+                             mHasMic,
+                             getAssociatedDisplayId().value_or(ui::LogicalDisplayId::INVALID),
+                             {mShouldSmoothScroll}, isEnabled());
+    outDeviceInfo.setKeyboardType(static_cast<int32_t>(mKeyboardType));
 
     for_each_mapper(
             [&outDeviceInfo](InputMapper& mapper) { mapper.populateDeviceInfo(outDeviceInfo); });
@@ -482,12 +524,8 @@ std::vector<std::unique_ptr<InputMapper>> InputDevice::createMappers(
 
     // Keyboard-like devices.
     uint32_t keyboardSource = 0;
-    int32_t keyboardType = AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC;
     if (classes.test(InputDeviceClass::KEYBOARD)) {
         keyboardSource |= AINPUT_SOURCE_KEYBOARD;
-    }
-    if (classes.test(InputDeviceClass::ALPHAKEY)) {
-        keyboardType = AINPUT_KEYBOARD_TYPE_ALPHABETIC;
     }
     if (classes.test(InputDeviceClass::DPAD)) {
         keyboardSource |= AINPUT_SOURCE_DPAD;
@@ -497,8 +535,8 @@ std::vector<std::unique_ptr<InputMapper>> InputDevice::createMappers(
     }
 
     if (keyboardSource != 0) {
-        mappers.push_back(createInputMapper<KeyboardInputMapper>(contextPtr, readerConfig,
-                                                                 keyboardSource, keyboardType));
+        mappers.push_back(
+                createInputMapper<KeyboardInputMapper>(contextPtr, readerConfig, keyboardSource));
     }
 
     // Cursor-like devices.
@@ -507,10 +545,7 @@ std::vector<std::unique_ptr<InputMapper>> InputDevice::createMappers(
     }
 
     // Touchscreens and touchpad devices.
-    static const bool ENABLE_TOUCHPAD_GESTURES_LIBRARY =
-            sysprop::InputProperties::enable_touchpad_gestures_library().value_or(true);
-    if (ENABLE_TOUCHPAD_GESTURES_LIBRARY && classes.test(InputDeviceClass::TOUCHPAD) &&
-        classes.test(InputDeviceClass::TOUCH_MT)) {
+    if (classes.test(InputDeviceClass::TOUCHPAD) && classes.test(InputDeviceClass::TOUCH_MT)) {
         mappers.push_back(createInputMapper<TouchpadInputMapper>(contextPtr, readerConfig));
     } else if (classes.test(InputDeviceClass::TOUCH_MT)) {
         mappers.push_back(createInputMapper<MultiTouchInputMapper>(contextPtr, readerConfig));
@@ -668,14 +703,14 @@ NotifyDeviceResetArgs InputDevice::notifyReset(nsecs_t when) {
     return NotifyDeviceResetArgs(mContext->getNextId(), when, mId);
 }
 
-std::optional<int32_t> InputDevice::getAssociatedDisplayId() {
+std::optional<ui::LogicalDisplayId> InputDevice::getAssociatedDisplayId() {
     // Check if we had associated to the specific display.
     if (mAssociatedViewport) {
         return mAssociatedViewport->displayId;
     }
 
     // No associated display port, check if some InputMapper is associated.
-    return first_in_mappers<int32_t>(
+    return first_in_mappers<ui::LogicalDisplayId>(
             [](InputMapper& mapper) { return mapper.getAssociatedDisplayId(); });
 }
 
@@ -696,6 +731,13 @@ void InputDevice::updateLedState(bool reset) {
 
 std::optional<int32_t> InputDevice::getBatteryEventHubId() const {
     return mController ? std::make_optional(mController->getEventHubId()) : std::nullopt;
+}
+
+void InputDevice::setKeyboardType(KeyboardType keyboardType) {
+    if (mKeyboardType != keyboardType) {
+        mKeyboardType = keyboardType;
+        bumpGeneration();
+    }
 }
 
 InputDeviceContext::InputDeviceContext(InputDevice& device, int32_t eventHubId)

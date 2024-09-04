@@ -55,8 +55,6 @@ public:
 
     void monitor() { reader->monitor(); }
 
-    bool isInputDeviceEnabled(int32_t deviceId) { return reader->isInputDeviceEnabled(deviceId); }
-
     status_t start() { return reader->start(); }
 
     status_t stop() { return reader->stop(); }
@@ -119,7 +117,7 @@ public:
         return reader->getSensors(deviceId);
     }
 
-    bool canDispatchToDisplay(int32_t deviceId, int32_t displayId) {
+    bool canDispatchToDisplay(int32_t deviceId, ui::LogicalDisplayId displayId) {
         return reader->canDispatchToDisplay(deviceId, displayId);
     }
 
@@ -169,6 +167,8 @@ public:
         reader->sysfsNodeChanged(sysfsNodePath);
     }
 
+    DeviceId getLastUsedInputDeviceId() override { return reader->getLastUsedInputDeviceId(); }
+
 private:
     std::unique_ptr<InputReaderInterface> reader;
 };
@@ -204,7 +204,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                 },
                 [&]() -> void { reader->monitor(); },
                 [&]() -> void { reader->getInputDevices(); },
-                [&]() -> void { reader->isInputDeviceEnabled(fdp->ConsumeIntegral<int32_t>()); },
                 [&]() -> void {
                     reader->getScanCodeState(fdp->ConsumeIntegral<int32_t>(),
                                              fdp->ConsumeIntegral<uint32_t>(),
@@ -241,7 +240,8 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                 },
                 [&]() -> void {
                     reader->canDispatchToDisplay(fdp->ConsumeIntegral<int32_t>(),
-                                                 fdp->ConsumeIntegral<int32_t>());
+                                                 ui::LogicalDisplayId{
+                                                         fdp->ConsumeIntegral<int32_t>()});
                 },
                 [&]() -> void {
                     reader->getKeyCodeForKeyLocation(fdp->ConsumeIntegral<int32_t>(),

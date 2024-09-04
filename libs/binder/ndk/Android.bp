@@ -32,16 +32,10 @@ license {
     ],
 }
 
-cc_library {
-    name: "libbinder_ndk",
-
+cc_defaults {
+    name: "libbinder_ndk_common_defaults",
     host_supported: true,
     recovery_available: true,
-
-    llndk: {
-        symbol_file: "libbinder_ndk.map.txt",
-        export_llndk_headers: ["libvendorsupport_llndk_headers"],
-    },
 
     export_include_dirs: [
         "include_cpp",
@@ -52,19 +46,54 @@ cc_library {
     cflags: [
         "-Wall",
         "-Wextra",
+        "-Wextra-semi",
         "-Werror",
     ],
 
     srcs: [
         "ibinder.cpp",
-        "ibinder_jni.cpp",
         "libbinder.cpp",
         "parcel.cpp",
+        "stability.cpp",
+        "status.cpp",
+    ],
+}
+
+cc_library_host_shared {
+    name: "libbinder_ndk_sdk",
+
+    defaults: [
+        "libbinder_ndk_common_defaults",
+        "binder_sdk_defaults",
+    ],
+    cmake_snapshot_supported: true,
+
+    shared_libs: [
+        "libbinder_sdk",
+        "libutils_binder_sdk",
+    ],
+}
+
+cc_library {
+    name: "libbinder_ndk",
+
+    defaults: ["libbinder_ndk_common_defaults"],
+    cmake_snapshot_supported: false,
+
+    llndk: {
+        symbol_file: "libbinder_ndk.map.txt",
+        export_llndk_headers: ["libvendorsupport_llndk_headers"],
+    },
+
+    cflags: [
+        "-DBINDER_WITH_KERNEL_IPC",
+    ],
+
+    srcs: [
+        "ibinder_jni.cpp",
         "parcel_jni.cpp",
         "persistable_bundle.cpp",
         "process.cpp",
-        "stability.cpp",
-        "status.cpp",
         "service_manager.cpp",
     ],
 
@@ -146,6 +175,46 @@ cc_library {
     lto_Instr100: true,
 }
 
+cc_library {
+    name: "libbinder_ndk_on_trusty_mock",
+    defaults: [
+        "trusty_mock_defaults",
+    ],
+
+    export_include_dirs: [
+        "include_cpp",
+        "include_ndk",
+        "include_platform",
+    ],
+
+    srcs: [
+        "ibinder.cpp",
+        "libbinder.cpp",
+        "parcel.cpp",
+        "stability.cpp",
+        "status.cpp",
+    ],
+
+    shared_libs: [
+        "libbinder_on_trusty_mock",
+    ],
+
+    header_libs: [
+        "libbinder_trusty_ndk_headers",
+    ],
+    export_header_lib_headers: [
+        "libbinder_trusty_ndk_headers",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+
+    visibility: ["//frameworks/native/libs/binder:__subpackages__"],
+}
+
 cc_library_headers {
     name: "libbinder_headers_platform_shared",
     export_include_dirs: ["include_cpp"],
@@ -154,6 +223,7 @@ cc_library_headers {
     host_supported: true,
     // TODO(b/153609531): remove when no longer needed.
     native_bridge_supported: true,
+    cmake_snapshot_supported: true,
     target: {
         darwin: {
             enabled: false,

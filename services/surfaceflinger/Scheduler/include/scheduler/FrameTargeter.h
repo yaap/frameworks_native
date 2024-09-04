@@ -33,6 +33,7 @@
 // TODO(b/185536303): Pull to FTL.
 #include "../../../TracedOrdinal.h"
 #include "../../../Utils/Dumper.h"
+#include "../../../Utils/RingBuffer.h"
 
 namespace android::scheduler {
 
@@ -61,7 +62,7 @@ public:
     // VSYNC of at least one previous frame has not yet passed. In other words, this is NOT the
     // `presentFenceForPreviousFrame` if running N VSYNCs ahead, but the one that should have been
     // signaled by now (unless that frame missed).
-    const FenceTimePtr& presentFenceForPastVsync(Period minFramePeriod) const;
+    FenceTimePtr presentFenceForPastVsync(Period minFramePeriod) const;
 
     // Equivalent to `presentFenceForPastVsync` unless running N VSYNCs ahead.
     const FenceTimePtr& presentFenceForPreviousFrame() const {
@@ -71,6 +72,7 @@ public:
     bool isFramePending() const { return mFramePending; }
     bool didMissFrame() const { return mFrameMissed; }
     bool didMissHwcFrame() const { return mHwcFrameMissed && !mGpuFrameMissed; }
+    TimePoint lastSignaledFrameTime() const { return mLastSignaledFrameTime; };
 
 protected:
     explicit FrameTarget(const std::string& displayLabel);
@@ -81,6 +83,12 @@ protected:
     // Equivalent to `pastVsyncTime` unless running N VSYNCs ahead.
     TimePoint previousFrameVsyncTime(Period minFramePeriod) const {
         return mExpectedPresentTime - minFramePeriod;
+    }
+
+    void addFence(sp<Fence> presentFence, FenceTimePtr presentFenceTime,
+                  TimePoint expectedPresentTime) {
+        mFenceWithFenceTimes.next() = {std::move(presentFence), presentFenceTime,
+                                       expectedPresentTime};
     }
 
     VsyncId mVsyncId;
@@ -96,8 +104,12 @@ protected:
     struct FenceWithFenceTime {
         sp<Fence> fence = Fence::NO_FENCE;
         FenceTimePtr fenceTime = FenceTime::NO_FENCE;
+        TimePoint expectedPresentTime = TimePoint();
     };
     std::array<FenceWithFenceTime, 2> mPresentFences;
+    utils::RingBuffer<FenceWithFenceTime, 5> mFenceWithFenceTimes;
+
+    TimePoint mLastSignaledFrameTime;
 
 private:
     friend class FrameTargeterTestBase;
@@ -106,6 +118,18 @@ private:
     inline bool targetsVsyncsAhead(Period minFramePeriod) const {
         static_assert(N > 1);
         return expectedFrameDuration() > (N - 1) * minFramePeriod;
+    }
+
+    const FenceTimePtr pastVsyncTimePtr() const {
+        auto pastFenceTimePtr = FenceTime::NO_FENCE;
+        for (size_t i = 0; i < mFenceWithFenceTimes.size(); i++) {
+            const auto& [_, fenceTimePtr, expectedPresentTime] = mFenceWithFenceTimes[i];
+            if (expectedPresentTime > mFrameBeginTime) {
+                return pastFenceTimePtr;
+            }
+            pastFenceTimePtr = fenceTimePtr;
+        }
+        return pastFenceTimePtr;
     }
 };
 

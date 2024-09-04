@@ -56,9 +56,13 @@ filegroup {
 
 cc_defaults {
     name: "libinputdispatcher_defaults",
-    srcs: [":libinputdispatcher_sources"],
+    srcs: [
+        ":libinputdispatcher_sources",
+    ],
     shared_libs: [
         "libbase",
+        "libbinder",
+        "libbinder_ndk",
         "libcrypto",
         "libcutils",
         "libinput",
@@ -69,12 +73,14 @@ cc_defaults {
         "libutils",
         "libstatspull",
         "libstatssocket",
+        "packagemanager_aidl-cpp",
         "server_configurable_flags",
     ],
     static_libs: [
         "libattestation",
         "libgui_window_info_static",
         "libperfetto_client_experimental",
+        "perfetto_winscope_extensions_zero",
     ],
     target: {
         android: {

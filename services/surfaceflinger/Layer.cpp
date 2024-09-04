@@ -15,6 +15,7 @@
  */
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
@@ -22,8 +23,6 @@
 #undef LOG_TAG
 #define LOG_TAG "Layer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-
-#include "Layer.h"
 
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
@@ -39,7 +38,6 @@
 #include <ftl/enum.h>
 #include <ftl/fake_guard.h>
 #include <gui/BufferItem.h>
-#include <gui/LayerDebugInfo.h>
 #include <gui/Surface.h>
 #include <gui/TraceUtils.h>
 #include <math.h>
@@ -73,10 +71,12 @@
 #include "FrameTracer/FrameTracer.h"
 #include "FrontEnd/LayerCreationArgs.h"
 #include "FrontEnd/LayerHandle.h"
+#include "Layer.h"
 #include "LayerProtoHelper.h"
 #include "MutexUtils.h"
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
+#include "TransactionCallbackInvoker.h"
 #include "TunnelModeEnabledReporter.h"
 #include "Utils/FenceUtils.h"
 
@@ -89,6 +89,10 @@ namespace {
 constexpr int kDumpTableRowLength = 159;
 
 const ui::Transform kIdentityTransform;
+
+ui::LogicalDisplayId toLogicalDisplayId(const ui::LayerStack& layerStack) {
+    return ui::LogicalDisplayId{static_cast<int32_t>(layerStack.id)};
+}
 
 bool assignTransform(ui::Transform* dst, ui::Transform& from) {
     if (*dst == from) {
@@ -150,8 +154,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
         mWindowType(static_cast<WindowInfo::Type>(
                 args.metadata.getInt32(gui::METADATA_WINDOW_TYPE, 0))),
         mLayerCreationFlags(args.flags),
-        mBorderEnabled(false),
-        mLegacyLayerFE(args.flinger->getFactory().createLayerFE(mName)) {
+        mLegacyLayerFE(args.flinger->getFactory().createLayerFE(mName, this)) {
     ALOGV("Creating Layer %s", getDebugName());
 
     uint32_t layerFlags = 0;
@@ -1235,28 +1238,6 @@ StretchEffect Layer::getStretchEffect() const {
     return StretchEffect{};
 }
 
-bool Layer::enableBorder(bool shouldEnable, float width, const half4& color) {
-    if (mBorderEnabled == shouldEnable && mBorderWidth == width && mBorderColor == color) {
-        return false;
-    }
-    mBorderEnabled = shouldEnable;
-    mBorderWidth = width;
-    mBorderColor = color;
-    return true;
-}
-
-bool Layer::isBorderEnabled() {
-    return mBorderEnabled;
-}
-
-float Layer::getBorderWidth() {
-    return mBorderWidth;
-}
-
-const half4& Layer::getBorderColor() {
-    return mBorderColor;
-}
-
 bool Layer::propagateFrameRateForLayerTree(FrameRate parentFrameRate, bool overrideChildren,
                                            bool* transactionNeeded) {
     // Gets the frame rate to propagate to children.
@@ -1572,10 +1553,6 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
     return usage;
 }
 
-void Layer::skipReportingTransformHint() {
-    mSkipReportingTransformHint = true;
-}
-
 void Layer::updateTransformHint(ui::Transform::RotationFlags transformHint) {
     if (mFlinger->mDebugDisableTransformHint || transformHint & ui::Transform::ROT_INVALID) {
         transformHint = ui::Transform::ROT_0;
@@ -1587,53 +1564,6 @@ void Layer::updateTransformHint(ui::Transform::RotationFlags transformHint) {
 // ----------------------------------------------------------------------------
 // debugging
 // ----------------------------------------------------------------------------
-
-// TODO(marissaw): add new layer state info to layer debugging
-gui::LayerDebugInfo Layer::getLayerDebugInfo(const DisplayDevice* display) const {
-    using namespace std::string_literals;
-
-    gui::LayerDebugInfo info;
-    const State& ds = getDrawingState();
-    info.mName = getName();
-    sp<Layer> parent = mDrawingParent.promote();
-    info.mParentName = parent ? parent->getName() : "none"s;
-    info.mType = getType();
-
-    info.mVisibleRegion = getVisibleRegion(display);
-    info.mSurfaceDamageRegion = surfaceDamageRegion;
-    info.mLayerStack = getLayerStack().id;
-    info.mX = ds.transform.tx();
-    info.mY = ds.transform.ty();
-    info.mZ = ds.z;
-    info.mCrop = ds.crop;
-    info.mColor = ds.color;
-    info.mFlags = ds.flags;
-    info.mPixelFormat = getPixelFormat();
-    info.mDataSpace = static_cast<android_dataspace>(getDataSpace());
-    info.mMatrix[0][0] = ds.transform[0][0];
-    info.mMatrix[0][1] = ds.transform[0][1];
-    info.mMatrix[1][0] = ds.transform[1][0];
-    info.mMatrix[1][1] = ds.transform[1][1];
-    {
-        sp<const GraphicBuffer> buffer = getBuffer();
-        if (buffer != 0) {
-            info.mActiveBufferWidth = buffer->getWidth();
-            info.mActiveBufferHeight = buffer->getHeight();
-            info.mActiveBufferStride = buffer->getStride();
-            info.mActiveBufferFormat = buffer->format;
-        } else {
-            info.mActiveBufferWidth = 0;
-            info.mActiveBufferHeight = 0;
-            info.mActiveBufferStride = 0;
-            info.mActiveBufferFormat = 0;
-        }
-    }
-    info.mNumQueuedFrames = getQueuedFrameCount();
-    info.mIsOpaque = isOpaque(ds);
-    info.mContentDirty = contentDirty;
-    info.mStretchEffect = getStretchEffect();
-    return info;
-}
 
 void Layer::miniDumpHeader(std::string& result) {
     result.append(kDumpTableRowLength, '-');
@@ -2539,7 +2469,7 @@ WindowInfo Layer::fillInputInfo(const InputDisplayArgs& displayArgs) {
         mDrawingState.inputInfo.ownerUid = gui::Uid{mOwnerUid};
         mDrawingState.inputInfo.ownerPid = gui::Pid{mOwnerPid};
         mDrawingState.inputInfo.inputConfig |= WindowInfo::InputConfig::NO_INPUT_CHANNEL;
-        mDrawingState.inputInfo.displayId = getLayerStack().id;
+        mDrawingState.inputInfo.displayId = toLogicalDisplayId(getLayerStack());
     }
 
     const ui::Transform& displayTransform =
@@ -2547,7 +2477,7 @@ WindowInfo Layer::fillInputInfo(const InputDisplayArgs& displayArgs) {
 
     WindowInfo info = mDrawingState.inputInfo;
     info.id = sequence;
-    info.displayId = getLayerStack().id;
+    info.displayId = toLogicalDisplayId(getLayerStack());
 
     fillInputFrameInfo(info, displayTransform);
 
@@ -2688,19 +2618,6 @@ Region Layer::getVisibleRegion(const DisplayDevice* display) const {
     return outputLayer ? outputLayer->getState().visibleRegion : Region();
 }
 
-void Layer::setInitialValuesForClone(const sp<Layer>& clonedFrom, uint32_t mirrorRootId) {
-    if (mFlinger->mLayerLifecycleManagerEnabled) return;
-    mSnapshot->path.id = clonedFrom->getSequence();
-    mSnapshot->path.mirrorRootIds.emplace_back(mirrorRootId);
-
-    cloneDrawingState(clonedFrom.get());
-    mClonedFrom = clonedFrom;
-    mPremultipliedAlpha = clonedFrom->mPremultipliedAlpha;
-    mPotentialCursor = clonedFrom->mPotentialCursor;
-    mProtectedByApp = clonedFrom->mProtectedByApp;
-    updateCloneBufferInfo();
-}
-
 void Layer::updateCloneBufferInfo() {
     if (!isClone() || !isClonedFromAlive()) {
         return;
@@ -2800,7 +2717,7 @@ void Layer::updateClonedChildren(const sp<Layer>& mirrorRoot,
         }
         sp<Layer> clonedChild = clonedLayersMap[child];
         if (clonedChild == nullptr) {
-            clonedChild = child->createClone(mirrorRoot->getSequence());
+            clonedChild = child->createClone();
             clonedLayersMap[child] = clonedChild;
         }
         addChildToDrawing(clonedChild);
@@ -2912,9 +2829,7 @@ void Layer::callReleaseBufferCallback(const sp<ITransactionCompletedListener>& l
                               currentMaxAcquiredBufferCount);
 }
 
-void Layer::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
-                             ui::LayerStack layerStack,
-                             std::function<FenceResult(FenceResult)>&& continuation) {
+sp<CallbackHandle> Layer::findCallbackHandle() {
     // If we are displayed on multiple displays in a single composition cycle then we would
     // need to do careful tracking to enable the use of the mLastClientCompositionFence.
     //  For example we can only use it if all the displays are client comp, and we need
@@ -2949,6 +2864,40 @@ void Layer::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
             break;
         }
     }
+    return ch;
+}
+
+void Layer::prepareReleaseCallbacks(ftl::Future<FenceResult> futureFenceResult,
+                                    ui::LayerStack layerStack) {
+    sp<CallbackHandle> ch = findCallbackHandle();
+
+    if (ch != nullptr) {
+        ch->previousReleaseCallbackId = mPreviousReleaseCallbackId;
+        ch->previousReleaseFences.emplace_back(std::move(futureFenceResult));
+        ch->name = mName;
+    } else {
+        // If we didn't get a release callback yet (e.g. some scenarios when capturing
+        // screenshots asynchronously) then make sure we don't drop the fence.
+        // Older fences for the same layer stack can be dropped when a new fence arrives.
+        // An assumption here is that RenderEngine performs work sequentially, so an
+        // incoming fence will not fire before an existing fence.
+        mAdditionalPreviousReleaseFences.emplace_or_replace(layerStack,
+                                                            std::move(futureFenceResult));
+    }
+
+    if (mBufferInfo.mBuffer) {
+        mPreviouslyPresentedLayerStacks.push_back(layerStack);
+    }
+
+    if (mDrawingState.frameNumber > 0) {
+        mDrawingState.previousFrameNumber = mDrawingState.frameNumber;
+    }
+}
+
+void Layer::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
+                             ui::LayerStack layerStack,
+                             std::function<FenceResult(FenceResult)>&& continuation) {
+    sp<CallbackHandle> ch = findCallbackHandle();
 
     if (!FlagManager::getInstance().screenshot_fence_preservation() && continuation) {
         futureFenceResult = ftl::Future(futureFenceResult).then(std::move(continuation)).share();
@@ -2956,32 +2905,32 @@ void Layer::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
 
     if (ch != nullptr) {
         ch->previousReleaseCallbackId = mPreviousReleaseCallbackId;
-        ch->previousReleaseFences.emplace_back(std::move(futureFenceResult));
+        ch->previousSharedReleaseFences.emplace_back(std::move(futureFenceResult));
         ch->name = mName;
     } else if (FlagManager::getInstance().screenshot_fence_preservation()) {
         // If we didn't get a release callback yet, e.g. some scenarios when capturing screenshots
         // asynchronously, then make sure we don't drop the fence.
-        mAdditionalPreviousReleaseFences.emplace_back(std::move(futureFenceResult),
-                                                      std::move(continuation));
+        mPreviousReleaseFenceAndContinuations.emplace_back(std::move(futureFenceResult),
+                                                           std::move(continuation));
         std::vector<FenceAndContinuation> mergedFences;
         sp<Fence> prevFence = nullptr;
         // For a layer that's frequently screenshotted, try to merge fences to make sure we don't
         // grow unbounded.
-        for (const auto& futureAndContinution : mAdditionalPreviousReleaseFences) {
-            auto result = futureAndContinution.future.wait_for(0s);
+        for (const auto& futureAndContinuation : mPreviousReleaseFenceAndContinuations) {
+            auto result = futureAndContinuation.future.wait_for(0s);
             if (result != std::future_status::ready) {
-                mergedFences.emplace_back(futureAndContinution);
+                mergedFences.emplace_back(futureAndContinuation);
                 continue;
             }
 
-            mergeFence(getDebugName(), futureAndContinution.chain().get().value_or(Fence::NO_FENCE),
-                       prevFence);
+            mergeFence(getDebugName(),
+                       futureAndContinuation.chain().get().value_or(Fence::NO_FENCE), prevFence);
         }
         if (prevFence != nullptr) {
             mergedFences.emplace_back(ftl::yield(FenceResult(std::move(prevFence))).share());
         }
 
-        mAdditionalPreviousReleaseFences.swap(mergedFences);
+        mPreviousReleaseFenceAndContinuations.swap(mergedFences);
     }
 
     if (mBufferInfo.mBuffer) {
@@ -3014,13 +2963,7 @@ void Layer::onSurfaceFrameCreated(
 
 void Layer::releasePendingBuffer(nsecs_t dequeueReadyTime) {
     for (const auto& handle : mDrawingState.callbackHandles) {
-        if (mFlinger->mLayerLifecycleManagerEnabled) {
-            handle->transformHint = mTransformHint;
-        } else {
-            handle->transformHint = mSkipReportingTransformHint
-                    ? std::nullopt
-                    : std::make_optional<uint32_t>(mTransformHintLegacy);
-        }
+        handle->transformHint = mTransformHint;
         handle->dequeueReadyTime = dequeueReadyTime;
         handle->currentMaxAcquiredBufferCount =
                 mFlinger->getMaxAcquiredBufferCountForCurrentRefreshRate(mOwnerUid);
@@ -3206,8 +3149,7 @@ void Layer::resetDrawingStateBufferInfo() {
 
 bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
                       const BufferData& bufferData, nsecs_t postTime, nsecs_t desiredPresentTime,
-                      bool isAutoTimestamp, std::optional<nsecs_t> dequeueTime,
-                      const FrameTimelineInfo& info) {
+                      bool isAutoTimestamp, const FrameTimelineInfo& info) {
     ATRACE_FORMAT("setBuffer %s - hasBuffer=%s", getDebugName(), (buffer ? "true" : "false"));
 
     const bool frameNumberChanged =
@@ -3279,16 +3221,13 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
     mFlinger->mTimeStats->setPostTime(layerId, mDrawingState.frameNumber, getName().c_str(),
                                       mOwnerUid, postTime, getGameMode());
 
-    if (mFlinger->mLegacyFrontEndEnabled) {
-        recordLayerHistoryBufferUpdate(getLayerProps(), systemTime());
-    }
-
     setFrameTimelineVsyncForBufferTransaction(info, postTime);
 
-    if (dequeueTime && *dequeueTime != 0) {
+    if (bufferData.dequeueTime > 0) {
         const uint64_t bufferId = mDrawingState.buffer->getId();
         mFlinger->mFrameTracer->traceNewLayer(layerId, getName().c_str());
-        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, frameNumber, *dequeueTime,
+        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, frameNumber,
+                                               bufferData.dequeueTime,
                                                FrameTracer::FrameEvent::DEQUEUE);
         mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, frameNumber, postTime,
                                                FrameTracer::FrameEvent::QUEUE);
@@ -3481,16 +3420,23 @@ bool Layer::setTransactionCompletedListeners(const std::vector<sp<CallbackHandle
             handle->acquireTimeOrFence = mCallbackHandleAcquireTimeOrFence;
             handle->frameNumber = mDrawingState.frameNumber;
             handle->previousFrameNumber = mDrawingState.previousFrameNumber;
-            if (FlagManager::getInstance().screenshot_fence_preservation() &&
+            if (FlagManager::getInstance().ce_fence_promise() &&
                 mPreviousReleaseBufferEndpoint == handle->listener) {
-                // Add fences from previous screenshots now so that they can be dispatched to the
+                // Add fence from previous screenshot now so that it can be dispatched to the
                 // client.
-                for (const auto& futureAndContinution : mAdditionalPreviousReleaseFences) {
-                    handle->previousReleaseFences.emplace_back(futureAndContinution.chain());
+                for (auto& [_, future] : mAdditionalPreviousReleaseFences) {
+                    handle->previousReleaseFences.emplace_back(std::move(future));
                 }
                 mAdditionalPreviousReleaseFences.clear();
+            } else if (FlagManager::getInstance().screenshot_fence_preservation() &&
+                       mPreviousReleaseBufferEndpoint == handle->listener) {
+                // Add fences from previous screenshots now so that they can be dispatched to the
+                // client.
+                for (const auto& futureAndContinution : mPreviousReleaseFenceAndContinuations) {
+                    handle->previousSharedReleaseFences.emplace_back(futureAndContinution.chain());
+                }
+                mPreviousReleaseFenceAndContinuations.clear();
             }
-
             // Store so latched time and release fence can be set
             mDrawingState.callbackHandles.push_back(handle);
 
@@ -3737,11 +3683,10 @@ Rect Layer::computeBufferCrop(const State& s) {
     }
 }
 
-sp<Layer> Layer::createClone(uint32_t mirrorRootId) {
+sp<Layer> Layer::createClone() {
     surfaceflinger::LayerCreationArgs args(mFlinger.get(), nullptr, mName + " (Mirror)", 0,
                                            LayerMetadata());
     sp<Layer> layer = mFlinger->getFactory().createBufferStateLayer(args);
-    layer->setInitialValuesForClone(sp<Layer>::fromExisting(this), mirrorRootId);
     return layer;
 }
 
@@ -3823,8 +3768,10 @@ bool Layer::isSimpleBufferUpdate(const layer_state_t& s) const {
     const uint64_t deniedFlags = layer_state_t::eProducerDisconnect | layer_state_t::eLayerChanged |
             layer_state_t::eRelativeLayerChanged | layer_state_t::eTransparentRegionChanged |
             layer_state_t::eFlagsChanged | layer_state_t::eBlurRegionsChanged |
-            layer_state_t::eLayerStackChanged | layer_state_t::eAutoRefreshChanged |
-            layer_state_t::eReparent;
+            layer_state_t::eLayerStackChanged | layer_state_t::eReparent |
+            (FlagManager::getInstance().latch_unsignaled_with_auto_refresh_changed()
+                     ? 0
+                     : layer_state_t::eAutoRefreshChanged);
 
     if ((s.what & requiredFlags) != requiredFlags) {
         ATRACE_FORMAT_INSTANT("%s: false [missing required flags 0x%" PRIx64 "]", __func__,
@@ -3955,7 +3902,7 @@ bool Layer::isSimpleBufferUpdate(const layer_state_t& s) const {
     }
 
     if (s.what & layer_state_t::eTrustedOverlayChanged) {
-        if (mDrawingState.isTrustedOverlay != s.isTrustedOverlay) {
+        if (mDrawingState.isTrustedOverlay != (s.trustedOverlay == gui::TrustedOverlay::ENABLED)) {
             ATRACE_FORMAT_INSTANT("%s: false [eTrustedOverlayChanged changed]", __func__);
             return false;
         }
@@ -4035,7 +3982,7 @@ const compositionengine::LayerFECompositionState* Layer::getCompositionState() c
 }
 
 sp<LayerFE> Layer::copyCompositionEngineLayerFE() const {
-    auto result = mFlinger->getFactory().createLayerFE(mName);
+    auto result = mFlinger->getFactory().createLayerFE(mName, this);
     result->mSnapshot = std::make_unique<LayerSnapshot>(*mSnapshot);
     return result;
 }
@@ -4047,7 +3994,7 @@ sp<LayerFE> Layer::getCompositionEngineLayerFE(
             return layerFE;
         }
     }
-    auto layerFE = mFlinger->getFactory().createLayerFE(mName);
+    auto layerFE = mFlinger->getFactory().createLayerFE(mName, this);
     mLayerFEs.emplace_back(path, layerFE);
     return layerFE;
 }
@@ -4355,7 +4302,6 @@ void Layer::setTransformHintLegacy(ui::Transform::RotationFlags displayTransform
     if (mTransformHintLegacy == ui::Transform::ROT_INVALID) {
         mTransformHintLegacy = displayTransformHint;
     }
-    mSkipReportingTransformHint = false;
 }
 
 const std::shared_ptr<renderengine::ExternalTexture>& Layer::getExternalTexture() const {

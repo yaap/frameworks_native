@@ -48,12 +48,13 @@ public:
     Period minFramePeriod() const final { return Period::fromNs(currentPeriod()); }
     void resetModel() final {}
     bool needsMoreSamples() const final { return false; }
-    bool isVSyncInPhase(nsecs_t, Fps) const final { return false; }
+    bool isVSyncInPhase(nsecs_t, Fps) final { return false; }
     void setDisplayModePtr(ftl::NonNull<DisplayModePtr>) final {}
-    void setRenderRate(Fps) final {}
+    void setRenderRate(Fps, bool) final {}
     void onFrameBegin(TimePoint, TimePoint) final {}
     void onFrameMissed(TimePoint) final {}
     void dump(std::string&) const final {}
+    bool isCurrentMode(const ftl::NonNull<DisplayModePtr>&) const final { return false; };
 
 protected:
     std::mutex mutable mMutex;
@@ -64,7 +65,7 @@ class FixedRateIdealStubTracker : public StubTracker {
 public:
     FixedRateIdealStubTracker() : StubTracker{toNs(3ms)} {}
 
-    nsecs_t nextAnticipatedVSyncTimeFrom(nsecs_t timePoint, std::optional<nsecs_t>) const final {
+    nsecs_t nextAnticipatedVSyncTimeFrom(nsecs_t timePoint, std::optional<nsecs_t>) final {
         auto const floor = timePoint % mPeriod;
         if (floor == 0) {
             return timePoint;
@@ -77,7 +78,7 @@ class VRRStubTracker : public StubTracker {
 public:
     VRRStubTracker(nsecs_t period) : StubTracker(period) {}
 
-    nsecs_t nextAnticipatedVSyncTimeFrom(nsecs_t time_point, std::optional<nsecs_t>) const final {
+    nsecs_t nextAnticipatedVSyncTimeFrom(nsecs_t time_point, std::optional<nsecs_t>) final {
         std::lock_guard lock(mMutex);
         auto const normalized_to_base = time_point - mBase;
         auto const floor = (normalized_to_base) % mPeriod;

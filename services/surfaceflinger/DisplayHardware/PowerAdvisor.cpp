@@ -46,9 +46,21 @@ PowerAdvisor::~PowerAdvisor() = default;
 namespace impl {
 
 using aidl::android::hardware::power::Boost;
+using aidl::android::hardware::power::ChannelConfig;
 using aidl::android::hardware::power::Mode;
 using aidl::android::hardware::power::SessionHint;
+using aidl::android::hardware::power::SessionTag;
 using aidl::android::hardware::power::WorkDuration;
+using aidl::android::hardware::power::WorkDurationFixedV1;
+
+using aidl::android::hardware::common::fmq::MQDescriptor;
+using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
+using aidl::android::hardware::power::ChannelMessage;
+using android::hardware::EventFlag;
+
+using ChannelMessageContents = ChannelMessage::ChannelMessageContents;
+using MsgQueue = android::AidlMessageQueue<ChannelMessage, SynchronizedReadWrite>;
+using FlagQueue = android::AidlMessageQueue<int8_t, SynchronizedReadWrite>;
 
 PowerAdvisor::~PowerAdvisor() = default;
 
@@ -139,15 +151,7 @@ void PowerAdvisor::notifyCpuLoadUp() {
     if (!mBootFinished.load()) {
         return;
     }
-    if (usePowerHintSession()) {
-        std::lock_guard lock(mHintSessionMutex);
-        if (ensurePowerHintSessionRunning()) {
-            auto ret = mHintSession->sendHint(SessionHint::CPU_LOAD_UP);
-            if (!ret.isOk()) {
-                mHintSession = nullptr;
-            }
-        }
-    }
+    sendHintSessionHint(SessionHint::CPU_LOAD_UP);
 }
 
 void PowerAdvisor::notifyDisplayUpdateImminentAndCpuReset() {
@@ -159,15 +163,7 @@ void PowerAdvisor::notifyDisplayUpdateImminentAndCpuReset() {
 
     if (mSendUpdateImminent.exchange(false)) {
         ALOGV("AIDL notifyDisplayUpdateImminentAndCpuReset");
-        if (usePowerHintSession()) {
-            std::lock_guard lock(mHintSessionMutex);
-            if (ensurePowerHintSessionRunning()) {
-                auto ret = mHintSession->sendHint(SessionHint::CPU_LOAD_RESET);
-                if (!ret.isOk()) {
-                    mHintSession = nullptr;
-                }
-            }
-        }
+        sendHintSessionHint(SessionHint::CPU_LOAD_RESET);
 
         if (!mHasDisplayUpdateImminent) {
             ALOGV("Skipped sending DISPLAY_UPDATE_IMMINENT because HAL doesn't support it");
@@ -204,21 +200,99 @@ bool PowerAdvisor::supportsPowerHintSession() {
     return *mSupportsHintSession;
 }
 
+bool PowerAdvisor::shouldCreateSessionWithConfig() {
+    return mSessionConfigSupported && mBootFinished &&
+            FlagManager::getInstance().adpf_use_fmq_channel();
+}
+
+void PowerAdvisor::sendHintSessionHint(SessionHint hint) {
+    if (!mBootFinished || !usePowerHintSession()) {
+        ALOGV("Power hint session is not enabled, skip sending session hint");
+        return;
+    }
+    ATRACE_CALL();
+    if (sTraceHintSessionData) ATRACE_INT("Session hint", static_cast<int>(hint));
+    {
+        std::scoped_lock lock(mHintSessionMutex);
+        if (!ensurePowerHintSessionRunning()) {
+            ALOGV("Hint session not running and could not be started, skip sending session hint");
+            return;
+        }
+        ALOGV("Sending session hint: %d", static_cast<int>(hint));
+        if (!writeHintSessionMessage<ChannelMessageContents::Tag::hint>(&hint, 1)) {
+            auto ret = mHintSession->sendHint(hint);
+            if (!ret.isOk()) {
+                ALOGW("Failed to send session hint with error: %s", ret.errorMessage());
+                mHintSession = nullptr;
+            }
+        }
+    }
+}
+
 bool PowerAdvisor::ensurePowerHintSessionRunning() {
     if (mHintSession == nullptr && !mHintSessionThreadIds.empty() && usePowerHintSession()) {
-        auto ret = getPowerHal().createHintSession(getpid(), static_cast<int32_t>(getuid()),
-                                                   mHintSessionThreadIds, mTargetDuration.ns());
-
-        if (ret.isOk()) {
-            mHintSession = ret.value();
+        if (shouldCreateSessionWithConfig()) {
+            auto ret = getPowerHal().createHintSessionWithConfig(getpid(),
+                                                                 static_cast<int32_t>(getuid()),
+                                                                 mHintSessionThreadIds,
+                                                                 mTargetDuration.ns(),
+                                                                 SessionTag::SURFACEFLINGER,
+                                                                 &mSessionConfig);
+            if (ret.isOk()) {
+                mHintSession = ret.value();
+                if (FlagManager::getInstance().adpf_use_fmq_channel_fixed()) {
+                    setUpFmq();
+                }
+            }
+            // If it fails the first time we try, or ever returns unsupported, assume unsupported
+            else if (mFirstConfigSupportCheck || ret.isUnsupported()) {
+                ALOGI("Hint session with config is unsupported, falling back to a legacy session");
+                mSessionConfigSupported = false;
+            }
+            mFirstConfigSupportCheck = false;
+        }
+        // Immediately try original method after, in case the first way returned unsupported
+        if (mHintSession == nullptr && !shouldCreateSessionWithConfig()) {
+            auto ret = getPowerHal().createHintSession(getpid(), static_cast<int32_t>(getuid()),
+                                                       mHintSessionThreadIds, mTargetDuration.ns());
+            if (ret.isOk()) {
+                mHintSession = ret.value();
+            }
         }
     }
     return mHintSession != nullptr;
 }
 
+void PowerAdvisor::setUpFmq() {
+    auto&& channelRet = getPowerHal().getSessionChannel(getpid(), static_cast<int32_t>(getuid()));
+    if (!channelRet.isOk()) {
+        ALOGE("Failed to get session channel with error: %s", channelRet.errorMessage());
+        return;
+    }
+    auto& channelConfig = channelRet.value();
+    mMsgQueue = std::make_unique<MsgQueue>(std::move(channelConfig.channelDescriptor), true);
+    LOG_ALWAYS_FATAL_IF(!mMsgQueue->isValid(), "Failed to set up hint session msg queue");
+    LOG_ALWAYS_FATAL_IF(channelConfig.writeFlagBitmask <= 0,
+                        "Invalid flag bit masks found in channel config: writeBitMask(%d)",
+                        channelConfig.writeFlagBitmask);
+    mFmqWriteMask = static_cast<uint32_t>(channelConfig.writeFlagBitmask);
+    if (!channelConfig.eventFlagDescriptor.has_value()) {
+        // For FMQ v1 in Android 15 we will force using shared event flag since the default
+        // no-op FMQ impl in Power HAL v5 will always return a valid channel config with
+        // non-zero masks but no shared flag.
+        mMsgQueue = nullptr;
+        ALOGE("No event flag descriptor found in channel config");
+        return;
+    }
+    mFlagQueue = std::make_unique<FlagQueue>(std::move(*channelConfig.eventFlagDescriptor), true);
+    LOG_ALWAYS_FATAL_IF(!mFlagQueue->isValid(), "Failed to set up hint session flag queue");
+    auto status = EventFlag::createEventFlag(mFlagQueue->getEventFlagWord(), &mEventFlag);
+    LOG_ALWAYS_FATAL_IF(status != OK, "Failed to set up hint session event flag");
+}
+
 void PowerAdvisor::updateTargetWorkDuration(Duration targetDuration) {
-    if (!usePowerHintSession()) {
-        ALOGV("Power hint session target duration cannot be set, skipping");
+    if (!mBootFinished || !usePowerHintSession()) {
+        ALOGV("Power hint session is not enabled, skipping target update");
         return;
     }
     ATRACE_CALL();
@@ -226,14 +300,19 @@ void PowerAdvisor::updateTargetWorkDuration(Duration targetDuration) {
         mTargetDuration = targetDuration;
         if (sTraceHintSessionData) ATRACE_INT64("Time target", targetDuration.ns());
         if (targetDuration == mLastTargetDurationSent) return;
-        std::lock_guard lock(mHintSessionMutex);
-        if (ensurePowerHintSessionRunning()) {
-            ALOGV("Sending target time: %" PRId64 "ns", targetDuration.ns());
-            mLastTargetDurationSent = targetDuration;
+        std::scoped_lock lock(mHintSessionMutex);
+        if (!ensurePowerHintSessionRunning()) {
+            ALOGV("Hint session not running and could not be started, skip updating target");
+            return;
+        }
+        ALOGV("Sending target time: %" PRId64 "ns", targetDuration.ns());
+        mLastTargetDurationSent = targetDuration;
+        auto target = targetDuration.ns();
+        if (!writeHintSessionMessage<ChannelMessageContents::Tag::targetDuration>(&target, 1)) {
             auto ret = mHintSession->updateTargetWorkDuration(targetDuration.ns());
             if (!ret.isOk()) {
                 ALOGW("Failed to set power hint target work duration with error: %s",
-                      ret.getDescription().c_str());
+                      ret.errorMessage());
                 mHintSession = nullptr;
             }
         }
@@ -246,27 +325,30 @@ void PowerAdvisor::reportActualWorkDuration() {
         return;
     }
     ATRACE_CALL();
-    std::optional<Duration> actualDuration = estimateWorkDuration();
-    if (!actualDuration.has_value() || actualDuration < 0ns) {
+    std::optional<WorkDuration> actualDuration = estimateWorkDuration();
+    if (!actualDuration.has_value() || actualDuration->durationNanos < 0) {
         ALOGV("Failed to send actual work duration, skipping");
         return;
     }
-    actualDuration = std::make_optional(*actualDuration + sTargetSafetyMargin);
-    mActualDuration = actualDuration;
-
+    actualDuration->durationNanos += sTargetSafetyMargin.ns();
     if (sTraceHintSessionData) {
-        ATRACE_INT64("Measured duration", actualDuration->ns());
-        ATRACE_INT64("Target error term", Duration{*actualDuration - mTargetDuration}.ns());
-        ATRACE_INT64("Reported duration", actualDuration->ns());
+        ATRACE_INT64("Measured duration", actualDuration->durationNanos);
+        ATRACE_INT64("Target error term", actualDuration->durationNanos - mTargetDuration.ns());
+        ATRACE_INT64("Reported duration", actualDuration->durationNanos);
+        if (supportsGpuReporting()) {
+            ATRACE_INT64("Reported cpu duration", actualDuration->cpuDurationNanos);
+            ATRACE_INT64("Reported gpu duration", actualDuration->gpuDurationNanos);
+        }
         ATRACE_INT64("Reported target", mLastTargetDurationSent.ns());
         ATRACE_INT64("Reported target error term",
-                     Duration{*actualDuration - mLastTargetDurationSent}.ns());
+                     actualDuration->durationNanos - mLastTargetDurationSent.ns());
     }
 
-    ALOGV("Sending actual work duration of: %" PRId64 " on reported target: %" PRId64
-          " with error: %" PRId64,
-          actualDuration->ns(), mLastTargetDurationSent.ns(),
-          Duration{*actualDuration - mLastTargetDurationSent}.ns());
+    ALOGV("Sending actual work duration of: %" PRId64 " with cpu: %" PRId64 " and gpu: %" PRId64
+          " on reported target: %" PRId64 " with error: %" PRId64,
+          actualDuration->durationNanos, actualDuration->cpuDurationNanos,
+          actualDuration->gpuDurationNanos, mLastTargetDurationSent.ns(),
+          actualDuration->durationNanos - mLastTargetDurationSent.ns());
 
     if (mTimingTestingMode) {
         mDelayReportActualMutexAcquisitonPromise.get_future().wait();
@@ -274,32 +356,71 @@ void PowerAdvisor::reportActualWorkDuration() {
     }
 
     {
-        std::lock_guard lock(mHintSessionMutex);
+        std::scoped_lock lock(mHintSessionMutex);
         if (!ensurePowerHintSessionRunning()) {
-            ALOGV("Hint session not running and could not be started, skipping");
+            ALOGV("Hint session not running and could not be started, skip reporting durations");
             return;
         }
-
-        WorkDuration duration{
-                .timeStampNanos = TimePoint::now().ns(),
-                // TODO(b/284324521): Correctly calculate total duration.
-                .durationNanos = actualDuration->ns(),
-                .workPeriodStartTimestampNanos = mCommitStartTimes[0].ns(),
-                .cpuDurationNanos = actualDuration->ns(),
-                // TODO(b/284324521): Calculate RenderEngine GPU time.
-                .gpuDurationNanos = 0,
-        };
-        mHintSessionQueue.push_back(duration);
-
-        auto ret = mHintSession->reportActualWorkDuration(mHintSessionQueue);
-        if (!ret.isOk()) {
-            ALOGW("Failed to report actual work durations with error: %s",
-                  ret.getDescription().c_str());
-            mHintSession = nullptr;
-            return;
+        mHintSessionQueue.push_back(*actualDuration);
+        if (!writeHintSessionMessage<
+                    ChannelMessageContents::Tag::workDuration>(mHintSessionQueue.data(),
+                                                               mHintSessionQueue.size())) {
+            auto ret = mHintSession->reportActualWorkDuration(mHintSessionQueue);
+            if (!ret.isOk()) {
+                ALOGW("Failed to report actual work durations with error: %s", ret.errorMessage());
+                mHintSession = nullptr;
+                return;
+            }
         }
     }
     mHintSessionQueue.clear();
+}
+
+template <ChannelMessage::ChannelMessageContents::Tag T, class In>
+bool PowerAdvisor::writeHintSessionMessage(In* contents, size_t count) {
+    if (!mMsgQueue) {
+        ALOGV("Skip using FMQ with message tag %hhd as it's not supported", T);
+        return false;
+    }
+    auto availableSize = mMsgQueue->availableToWrite();
+    if (availableSize < count) {
+        ALOGW("Skip using FMQ with message tag %hhd as there isn't enough space", T);
+        return false;
+    }
+    MsgQueue::MemTransaction tx;
+    if (!mMsgQueue->beginWrite(count, &tx)) {
+        ALOGW("Failed to begin writing message with tag %hhd", T);
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if constexpr (T == ChannelMessageContents::Tag::workDuration) {
+            const WorkDuration& duration = contents[i];
+            new (tx.getSlot(i)) ChannelMessage{
+                    .sessionID = static_cast<int32_t>(mSessionConfig.id),
+                    .timeStampNanos =
+                            (i == count - 1) ? ::android::uptimeNanos() : duration.timeStampNanos,
+                    .data = ChannelMessageContents::make<ChannelMessageContents::Tag::workDuration,
+                                                         WorkDurationFixedV1>({
+                            .durationNanos = duration.durationNanos,
+                            .workPeriodStartTimestampNanos = duration.workPeriodStartTimestampNanos,
+                            .cpuDurationNanos = duration.cpuDurationNanos,
+                            .gpuDurationNanos = duration.gpuDurationNanos,
+                    }),
+            };
+        } else {
+            new (tx.getSlot(i)) ChannelMessage{
+                    .sessionID = static_cast<int32_t>(mSessionConfig.id),
+                    .timeStampNanos = ::android::uptimeNanos(),
+                    .data = ChannelMessageContents::make<T, In>(std::move(contents[i])),
+            };
+        }
+    }
+    if (!mMsgQueue->commitWrite(count)) {
+        ALOGW("Failed to send message with tag %hhd, fall back to binder call", T);
+        return false;
+    }
+    mEventFlag->wake(mFmqWriteMask);
+    return true;
 }
 
 void PowerAdvisor::enablePowerHintSession(bool enabled) {
@@ -317,19 +438,50 @@ bool PowerAdvisor::startPowerHintSession(std::vector<int32_t>&& threadIds) {
     }
     LOG_ALWAYS_FATAL_IF(mHintSessionThreadIds.empty(),
                         "No thread IDs provided to power hint session!");
-    std::lock_guard lock(mHintSessionMutex);
-    if (mHintSession != nullptr) {
-        ALOGE("Cannot start power hint session: already running");
-        return false;
+    {
+        std::scoped_lock lock(mHintSessionMutex);
+        if (mHintSession != nullptr) {
+            ALOGE("Cannot start power hint session: already running");
+            return false;
+        }
+        return ensurePowerHintSessionRunning();
     }
-    return ensurePowerHintSessionRunning();
 }
 
-void PowerAdvisor::setGpuFenceTime(DisplayId displayId, std::unique_ptr<FenceTime>&& fenceTime) {
+bool PowerAdvisor::supportsGpuReporting() {
+    return mBootFinished && FlagManager::getInstance().adpf_gpu_sf();
+}
+
+void PowerAdvisor::setGpuStartTime(DisplayId displayId, TimePoint startTime) {
     DisplayTimingData& displayData = mDisplayTimingData[displayId];
     if (displayData.gpuEndFenceTime) {
         nsecs_t signalTime = displayData.gpuEndFenceTime->getSignalTime();
         if (signalTime != Fence::SIGNAL_TIME_INVALID && signalTime != Fence::SIGNAL_TIME_PENDING) {
+            displayData.lastValidGpuStartTime = displayData.gpuStartTime;
+            displayData.lastValidGpuEndTime = TimePoint::fromNs(signalTime);
+            for (auto&& [_, otherDisplayData] : mDisplayTimingData) {
+                if (!otherDisplayData.lastValidGpuStartTime.has_value() ||
+                    !otherDisplayData.lastValidGpuEndTime.has_value())
+                    continue;
+                if ((*otherDisplayData.lastValidGpuStartTime < *displayData.gpuStartTime) &&
+                    (*otherDisplayData.lastValidGpuEndTime > *displayData.gpuStartTime)) {
+                    displayData.lastValidGpuStartTime = *otherDisplayData.lastValidGpuEndTime;
+                    break;
+                }
+            }
+        }
+        displayData.gpuEndFenceTime = nullptr;
+    }
+    displayData.gpuStartTime = startTime;
+}
+
+void PowerAdvisor::setGpuFenceTime(DisplayId displayId, std::unique_ptr<FenceTime>&& fenceTime) {
+    DisplayTimingData& displayData = mDisplayTimingData[displayId];
+    if (displayData.gpuEndFenceTime && !supportsGpuReporting()) {
+        nsecs_t signalTime = displayData.gpuEndFenceTime->getSignalTime();
+        if (signalTime != Fence::SIGNAL_TIME_INVALID && signalTime != Fence::SIGNAL_TIME_PENDING) {
+            displayData.lastValidGpuStartTime = displayData.gpuStartTime;
+            displayData.lastValidGpuEndTime = TimePoint::fromNs(signalTime);
             for (auto&& [_, otherDisplayData] : mDisplayTimingData) {
                 // If the previous display started before us but ended after we should have
                 // started, then it likely delayed our start time and we must compensate for that.
@@ -342,12 +494,12 @@ void PowerAdvisor::setGpuFenceTime(DisplayId displayId, std::unique_ptr<FenceTim
                     break;
                 }
             }
-            displayData.lastValidGpuStartTime = displayData.gpuStartTime;
-            displayData.lastValidGpuEndTime = TimePoint::fromNs(signalTime);
         }
     }
     displayData.gpuEndFenceTime = std::move(fenceTime);
-    displayData.gpuStartTime = TimePoint::now();
+    if (!supportsGpuReporting()) {
+        displayData.gpuStartTime = TimePoint::now();
+    }
 }
 
 void PowerAdvisor::setHwcValidateTiming(DisplayId displayId, TimePoint validateStartTime,
@@ -368,9 +520,8 @@ void PowerAdvisor::setSkippedValidate(DisplayId displayId, bool skipped) {
     mDisplayTimingData[displayId].skippedValidate = skipped;
 }
 
-void PowerAdvisor::setRequiresClientComposition(DisplayId displayId,
-                                                bool requiresClientComposition) {
-    mDisplayTimingData[displayId].usedClientComposition = requiresClientComposition;
+void PowerAdvisor::setRequiresRenderEngine(DisplayId displayId, bool requiresRenderEngine) {
+    mDisplayTimingData[displayId].requiresRenderEngine = requiresRenderEngine;
 }
 
 void PowerAdvisor::setExpectedPresentTime(TimePoint expectedPresentTime) {
@@ -378,8 +529,8 @@ void PowerAdvisor::setExpectedPresentTime(TimePoint expectedPresentTime) {
 }
 
 void PowerAdvisor::setSfPresentTiming(TimePoint presentFenceTime, TimePoint presentEndTime) {
-    mLastSfPresentEndTime = presentEndTime;
     mLastPresentFenceTime = presentFenceTime;
+    mLastSfPresentEndTime = presentEndTime;
 }
 
 void PowerAdvisor::setFrameDelay(Duration frameDelayDuration) {
@@ -420,7 +571,7 @@ std::vector<DisplayId> PowerAdvisor::getOrderedDisplayIds(
     return sortedDisplays;
 }
 
-std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
+std::optional<WorkDuration> PowerAdvisor::estimateWorkDuration() {
     if (!mExpectedPresentTimes.isFull() || !mCommitStartTimes.isFull()) {
         return std::nullopt;
     }
@@ -439,11 +590,10 @@ std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
     // used to accumulate gpu time as we iterate over the active displays
     std::optional<TimePoint> estimatedGpuEndTime;
 
-    // The timing info for the previously calculated display, if there was one
-    std::optional<DisplayTimeline> previousDisplayTiming;
     std::vector<DisplayId>&& displayIds =
             getOrderedDisplayIds(&DisplayTimingData::hwcPresentStartTime);
     DisplayTimeline displayTiming;
+    std::optional<GpuTimeline> firstGpuTimeline;
 
     // Iterate over the displays that use hwc in the same order they are presented
     for (DisplayId displayId : displayIds) {
@@ -454,14 +604,6 @@ std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
         auto& displayData = mDisplayTimingData.at(displayId);
 
         displayTiming = displayData.calculateDisplayTimeline(mLastPresentFenceTime);
-
-        // If this is the first display, include the duration before hwc present starts
-        if (!previousDisplayTiming.has_value()) {
-            estimatedHwcEndTime += displayTiming.hwcPresentStartTime - mCommitStartTimes[0];
-        } else { // Otherwise add the time since last display's hwc present finished
-            estimatedHwcEndTime +=
-                    displayTiming.hwcPresentStartTime - previousDisplayTiming->hwcPresentEndTime;
-        }
 
         // Update predicted present finish time with this display's present time
         estimatedHwcEndTime = displayTiming.hwcPresentEndTime;
@@ -477,6 +619,9 @@ std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
         // Estimate the reference frame's gpu timing
         auto gpuTiming = displayData.estimateGpuTiming(previousValidGpuEndTime);
         if (gpuTiming.has_value()) {
+            if (!firstGpuTimeline.has_value()) {
+                firstGpuTimeline = gpuTiming;
+            }
             previousValidGpuEndTime = gpuTiming->startTime + gpuTiming->duration;
 
             // Estimate the prediction frame's gpu end time from the reference frame
@@ -484,9 +629,7 @@ std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
                                            estimatedGpuEndTime.value_or(TimePoint{0ns})) +
                     gpuTiming->duration;
         }
-        previousDisplayTiming = displayTiming;
     }
-    ATRACE_INT64("Idle duration", idleDuration.ns());
 
     TimePoint estimatedFlingerEndTime = mLastSfPresentEndTime;
 
@@ -499,15 +642,33 @@ std::optional<Duration> PowerAdvisor::estimateWorkDuration() {
     Duration totalDuration = mFrameDelayDuration +
             std::max(estimatedHwcEndTime, estimatedGpuEndTime.value_or(TimePoint{0ns})) -
             mCommitStartTimes[0];
+    Duration totalDurationWithoutGpu =
+            mFrameDelayDuration + estimatedHwcEndTime - mCommitStartTimes[0];
 
     // We finish SurfaceFlinger when post-composition finishes, so add that in here
     Duration flingerDuration =
             estimatedFlingerEndTime + mLastPostcompDuration - mCommitStartTimes[0];
+    Duration estimatedGpuDuration = firstGpuTimeline.has_value()
+            ? estimatedGpuEndTime.value_or(TimePoint{0ns}) - firstGpuTimeline->startTime
+            : Duration::fromNs(0);
 
     // Combine the two timings into a single normalized one
     Duration combinedDuration = combineTimingEstimates(totalDuration, flingerDuration);
+    Duration cpuDuration = combineTimingEstimates(totalDurationWithoutGpu, flingerDuration);
 
-    return std::make_optional(combinedDuration);
+    WorkDuration duration{
+            .timeStampNanos = TimePoint::now().ns(),
+            .durationNanos = combinedDuration.ns(),
+            .workPeriodStartTimestampNanos = mCommitStartTimes[0].ns(),
+            .cpuDurationNanos = supportsGpuReporting() ? cpuDuration.ns() : 0,
+            .gpuDurationNanos = supportsGpuReporting() ? estimatedGpuDuration.ns() : 0,
+    };
+    if (sTraceHintSessionData) {
+        ATRACE_INT64("Idle duration", idleDuration.ns());
+        ATRACE_INT64("Total duration", totalDuration.ns());
+        ATRACE_INT64("Flinger duration", flingerDuration.ns());
+    }
+    return std::make_optional(duration);
 }
 
 Duration PowerAdvisor::combineTimingEstimates(Duration totalDuration, Duration flingerDuration) {
@@ -558,7 +719,7 @@ PowerAdvisor::DisplayTimeline PowerAdvisor::DisplayTimingData::calculateDisplayT
 
 std::optional<PowerAdvisor::GpuTimeline> PowerAdvisor::DisplayTimingData::estimateGpuTiming(
         std::optional<TimePoint> previousEndTime) {
-    if (!(usedClientComposition && lastValidGpuStartTime.has_value() && gpuEndFenceTime)) {
+    if (!(requiresRenderEngine && lastValidGpuStartTime.has_value() && gpuEndFenceTime)) {
         return std::nullopt;
     }
     const TimePoint latestGpuStartTime =

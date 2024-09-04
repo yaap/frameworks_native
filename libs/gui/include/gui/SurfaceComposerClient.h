@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+
 #include <set>
 #include <thread>
 #include <unordered_map>
@@ -374,17 +375,15 @@ public:
 
     sp<SurfaceControl> mirrorDisplay(DisplayId displayId);
 
-    //! Create a virtual display
-    static sp<IBinder> createDisplay(const String8& displayName, bool secure,
-                                     float requestedRefereshRate = 0);
+    static const std::string kEmpty;
+    static sp<IBinder> createVirtualDisplay(const std::string& displayName, bool isSecure,
+                                            const std::string& uniqueId = kEmpty,
+                                            float requestedRefreshRate = 0);
 
-    //! Destroy a virtual display
-    static void destroyDisplay(const sp<IBinder>& display);
+    static status_t destroyVirtualDisplay(const sp<IBinder>& displayToken);
 
-    //! Get stable IDs for connected physical displays
     static std::vector<PhysicalDisplayId> getPhysicalDisplayIds();
 
-    //! Get token for a physical display given its stable ID
     static sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId);
 
     // Returns StalledTransactionInfo if a transaction from the provided pid has not been applied
@@ -431,6 +430,8 @@ public:
         static std::mutex sApplyTokenMutex;
         void releaseBufferIfOverwriting(const layer_state_t& state);
         static void mergeFrameTimelineInfo(FrameTimelineInfo& t, const FrameTimelineInfo& other);
+        // Tracks registered callbacks
+        sp<TransactionCompletedListener> mTransactionCompletedListener = nullptr;
 
     protected:
         std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> mComposerStates;
@@ -567,7 +568,8 @@ public:
         Transaction& setBuffer(const sp<SurfaceControl>& sc, const sp<GraphicBuffer>& buffer,
                                const std::optional<sp<Fence>>& fence = std::nullopt,
                                const std::optional<uint64_t>& frameNumber = std::nullopt,
-                               uint32_t producerId = 0, ReleaseBufferCallback callback = nullptr);
+                               uint32_t producerId = 0, ReleaseBufferCallback callback = nullptr,
+                               nsecs_t dequeueTime = -1);
         Transaction& unsetBuffer(const sp<SurfaceControl>& sc);
         std::shared_ptr<BufferData> getAndClearBuffer(const sp<SurfaceControl>& sc);
 
@@ -718,6 +720,8 @@ public:
 
         // Sets that this surface control and its children are trusted overlays for input
         Transaction& setTrustedOverlay(const sp<SurfaceControl>& sc, bool isTrustedOverlay);
+        Transaction& setTrustedOverlay(const sp<SurfaceControl>& sc,
+                                       gui::TrustedOverlay trustedOverlay);
 
         // Queues up transactions using this token in SurfaceFlinger.  By default, all transactions
         // from a client are placed on the same queue. This can be used to prevent multiple
@@ -743,9 +747,6 @@ public:
         Transaction& setDestinationFrame(const sp<SurfaceControl>& sc,
                                          const Rect& destinationFrame);
         Transaction& setDropInputMode(const sp<SurfaceControl>& sc, gui::DropInputMode mode);
-
-        Transaction& enableBorder(const sp<SurfaceControl>& sc, bool shouldEnable, float width,
-                                  const half4& color);
 
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
@@ -825,6 +826,8 @@ public:
             std::pair<std::vector<gui::WindowInfo>, std::vector<gui::DisplayInfo>>* outInitialInfo =
                     nullptr);
     status_t removeWindowInfosListener(const sp<gui::WindowInfosListener>& windowInfosListener);
+
+    static void notifyShutdown();
 
 protected:
     ReleaseCallbackThread mReleaseCallbackThread;

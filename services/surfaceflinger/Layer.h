@@ -18,6 +18,7 @@
 
 #include <android/gui/DropInputMode.h>
 #include <android/gui/ISurfaceComposerClient.h>
+#include <ftl/small_map.h>
 #include <gui/BufferQueue.h>
 #include <gui/LayerState.h>
 #include <gui/WindowInfo.h>
@@ -25,9 +26,11 @@
 #include <math/vec4.h>
 #include <sys/types.h>
 #include <ui/BlurRegion.h>
+#include <ui/DisplayMap.h>
 #include <ui/FloatRect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
+#include <ui/LayerStack.h>
 #include <ui/PixelFormat.h>
 #include <ui/Region.h>
 #include <ui/StretchEffect.h>
@@ -69,10 +72,6 @@ class SurfaceFlinger;
 namespace compositionengine {
 class OutputLayer;
 struct LayerFECompositionState;
-}
-
-namespace gui {
-class LayerDebugInfo;
 }
 
 namespace frametimeline {
@@ -251,7 +250,7 @@ public:
     // true if this layer is visible, false otherwise
     virtual bool isVisible() const;
 
-    virtual sp<Layer> createClone(uint32_t mirrorRoot);
+    virtual sp<Layer> createClone();
 
     // Set a 2x2 transformation matrix on the layer. This transform
     // will be applied after parent transforms, but before any final
@@ -313,7 +312,7 @@ public:
     bool setBuffer(std::shared_ptr<renderengine::ExternalTexture>& /* buffer */,
                    const BufferData& /* bufferData */, nsecs_t /* postTime */,
                    nsecs_t /*desiredPresentTime*/, bool /*isAutoTimestamp*/,
-                   std::optional<nsecs_t> /* dequeueTime */, const FrameTimelineInfo& /*info*/);
+                   const FrameTimelineInfo& /*info*/);
     void setDesiredPresentTime(nsecs_t /*desiredPresentTime*/, bool /*isAutoTimestamp*/);
     bool setDataspace(ui::Dataspace /*dataspace*/);
     bool setExtendedRangeBrightness(float currentBufferRatio, float desiredRatio);
@@ -559,6 +558,14 @@ public:
     void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack layerStack,
                           std::function<FenceResult(FenceResult)>&& continuation = nullptr);
 
+    // Tracks mLastClientCompositionFence and gets the callback handle for this layer.
+    sp<CallbackHandle> findCallbackHandle();
+
+    // Adds the future release fence to a list of fences that are used to release the
+    // last presented buffer. Also keeps track of the layerstack in a list of previous
+    // layerstacks that have been presented.
+    void prepareReleaseCallbacks(ftl::Future<FenceResult>, ui::LayerStack layerStack);
+
     void setWasClientComposed(const sp<Fence>& fence) {
         mLastClientCompositionFence = fence;
         mClearClientCompositionFenceOnLayerDisplayed = false;
@@ -691,11 +698,8 @@ public:
      * Sets display transform hint on BufferLayerConsumer.
      */
     void updateTransformHint(ui::Transform::RotationFlags);
-    void skipReportingTransformHint();
     inline const State& getDrawingState() const { return mDrawingState; }
     inline State& getDrawingState() { return mDrawingState; }
-
-    gui::LayerDebugInfo getLayerDebugInfo(const DisplayDevice*) const;
 
     void miniDumpLegacy(std::string& result, const DisplayDevice&) const;
     void miniDump(std::string& result, const frontend::LayerSnapshot&, const DisplayDevice&) const;
@@ -874,10 +878,6 @@ public:
 
     bool setStretchEffect(const StretchEffect& effect);
     StretchEffect getStretchEffect() const;
-    bool enableBorder(bool shouldEnable, float width, const half4& color);
-    bool isBorderEnabled();
-    float getBorderWidth();
-    const half4& getBorderColor();
 
     bool setBufferCrop(const Rect& /* bufferCrop */);
     bool setDestinationFrame(const Rect& /* destinationFrame */);
@@ -934,6 +934,7 @@ public:
     // the release fences from the correct displays when we release the last buffer
     // from the layer.
     std::vector<ui::LayerStack> mPreviouslyPresentedLayerStacks;
+
     struct FenceAndContinuation {
         ftl::SharedFuture<FenceResult> future;
         std::function<FenceResult(FenceResult)> continuation;
@@ -946,7 +947,19 @@ public:
             }
         }
     };
-    std::vector<FenceAndContinuation> mAdditionalPreviousReleaseFences;
+    std::vector<FenceAndContinuation> mPreviousReleaseFenceAndContinuations;
+
+    // Release fences for buffers that have not yet received a release
+    // callback. A release callback may not be given when capturing
+    // screenshots asynchronously. There may be no buffer update for the
+    // layer, but the layer will still be composited on the screen in every
+    // frame. Kepping track of these fences ensures that they are not dropped
+    // and can be dispatched to the client at a later time. Older fences are
+    // dropped when a layer stack receives a new fence.
+    // TODO(b/300533018): Track fence per multi-instance RenderEngine
+    ftl::SmallMap<ui::LayerStack, ftl::Future<FenceResult>, ui::kDisplayCapacity>
+            mAdditionalPreviousReleaseFences;
+
     // Exposed so SurfaceFlinger can assert that it's held
     const sp<SurfaceFlinger> mFlinger;
 
@@ -963,7 +976,6 @@ protected:
     friend class TransactionFrameTracerTest;
     friend class TransactionSurfaceFrameTest;
 
-    virtual void setInitialValuesForClone(const sp<Layer>& clonedFrom, uint32_t mirrorRootId);
     void preparePerFrameCompositionState();
     void preparePerFrameBufferCompositionState();
     void preparePerFrameEffectsCompositionState();
@@ -1238,10 +1250,6 @@ private:
 
     bool findInHierarchy(const sp<Layer>&);
 
-    bool mBorderEnabled = false;
-    float mBorderWidth;
-    half4 mBorderColor;
-
     void setTransformHintLegacy(ui::Transform::RotationFlags);
     void releasePreviousBuffer();
     void resetDrawingStateBufferInfo();
@@ -1249,7 +1257,6 @@ private:
     // Transform hint provided to the producer. This must be accessed holding
     // the mStateLock.
     ui::Transform::RotationFlags mTransformHintLegacy = ui::Transform::ROT_0;
-    bool mSkipReportingTransformHint = true;
     std::optional<ui::Transform::RotationFlags> mTransformHint = std::nullopt;
 
     ReleaseCallbackId mPreviousReleaseCallbackId = ReleaseCallbackId::INVALID_ID;

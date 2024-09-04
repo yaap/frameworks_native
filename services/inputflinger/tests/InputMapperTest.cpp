@@ -29,13 +29,7 @@ using testing::_;
 using testing::Return;
 
 void InputMapperUnitTest::SetUpWithBus(int bus) {
-    mFakePointerController = std::make_shared<FakePointerController>();
-    mFakePointerController->setBounds(0, 0, 800 - 1, 480 - 1);
-    mFakePointerController->setPosition(INITIAL_CURSOR_X, INITIAL_CURSOR_Y);
     mFakePolicy = sp<FakeInputReaderPolicy>::make();
-
-    EXPECT_CALL(mMockInputReaderContext, getPointerController(DEVICE_ID))
-            .WillRepeatedly(Return(mFakePointerController));
 
     EXPECT_CALL(mMockInputReaderContext, getPolicy()).WillRepeatedly(Return(mFakePolicy.get()));
 
@@ -110,7 +104,7 @@ std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, int32_t type, i
     event.type = type;
     event.code = code;
     event.value = value;
-    return mMapper->process(&event);
+    return mMapper->process(event);
 }
 
 const char* InputMapperTest::DEVICE_NAME = "device";
@@ -178,8 +172,8 @@ std::shared_ptr<InputDevice> InputMapperTest::newDevice(int32_t deviceId, const 
     return device;
 }
 
-void InputMapperTest::setDisplayInfoAndReconfigure(int32_t displayId, int32_t width, int32_t height,
-                                                   ui::Rotation orientation,
+void InputMapperTest::setDisplayInfoAndReconfigure(ui::LogicalDisplayId displayId, int32_t width,
+                                                   int32_t height, ui::Rotation orientation,
                                                    const std::string& uniqueId,
                                                    std::optional<uint8_t> physicalPort,
                                                    ViewportType viewportType) {
@@ -201,7 +195,7 @@ std::list<NotifyArgs> InputMapperTest::process(InputMapper& mapper, nsecs_t when
     event.type = type;
     event.code = code;
     event.value = value;
-    std::list<NotifyArgs> processArgList = mapper.process(&event);
+    std::list<NotifyArgs> processArgList = mapper.process(event);
     for (const NotifyArgs& args : processArgList) {
         mFakeListener->notify(args);
     }

@@ -155,6 +155,17 @@ protected:
         mLifecycleManager.applyTransactions(transactions);
     }
 
+    void setPosition(uint32_t id, float x, float y) {
+        std::vector<TransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+        transactions.back().states.front().state.what = layer_state_t::ePositionChanged;
+        transactions.back().states.front().state.x = x;
+        transactions.back().states.front().state.y = y;
+        transactions.back().states.front().layerId = id;
+        mLifecycleManager.applyTransactions(transactions);
+    }
+
     virtual void mirrorLayer(uint32_t id, uint32_t parentId, uint32_t layerIdToMirror) {
         std::vector<std::unique_ptr<RequestedLayerState>> layers;
         layers.emplace_back(std::make_unique<RequestedLayerState>(
@@ -278,6 +289,24 @@ protected:
         auto inputInfo = transactions.back().states.front().state.windowInfoHandle->editInfo();
         inputInfo->touchableRegion = region;
         inputInfo->token = sp<BBinder>::make();
+        mLifecycleManager.applyTransactions(transactions);
+    }
+
+    void setInputInfo(uint32_t id, std::function<void(gui::WindowInfo&)> configureInput) {
+        std::vector<TransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+
+        transactions.back().states.front().state.what = layer_state_t::eInputInfoChanged;
+        transactions.back().states.front().layerId = id;
+        transactions.back().states.front().state.windowInfoHandle =
+                sp<gui::WindowInfoHandle>::make();
+        auto inputInfo = transactions.back().states.front().state.windowInfoHandle->editInfo();
+        if (!inputInfo->token) {
+            inputInfo->token = sp<BBinder>::make();
+        }
+        configureInput(*inputInfo);
+
         mLifecycleManager.applyTransactions(transactions);
     }
 
@@ -465,14 +494,14 @@ protected:
         mLifecycleManager.applyTransactions(transactions);
     }
 
-    void setTrustedOverlay(uint32_t id, bool isTrustedOverlay) {
+    void setTrustedOverlay(uint32_t id, gui::TrustedOverlay trustedOverlay) {
         std::vector<TransactionState> transactions;
         transactions.emplace_back();
         transactions.back().states.push_back({});
 
         transactions.back().states.front().state.what = layer_state_t::eTrustedOverlayChanged;
         transactions.back().states.front().layerId = id;
-        transactions.back().states.front().state.isTrustedOverlay = isTrustedOverlay;
+        transactions.back().states.front().state.trustedOverlay = trustedOverlay;
         mLifecycleManager.applyTransactions(transactions);
     }
 

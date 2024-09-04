@@ -27,15 +27,12 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <cutils/compiler.h>
-#include <gui/constants.h>
 #include <input/DisplayViewport.h>
 #include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/InputEventLabels.h>
 
-#ifdef __linux__
 #include <binder/Parcel.h>
-#endif
 #if defined(__ANDROID__)
 #include <sys/random.h>
 #endif
@@ -58,6 +55,58 @@ bool shouldDisregardOffset(uint32_t source) {
     // so we should apply the entire window transform. For other types of events, we should make
     // sure to not apply the window translation/offset.
     return !isFromSource(source, AINPUT_SOURCE_CLASS_POINTER);
+}
+
+int32_t resolveActionForSplitMotionEvent(
+        int32_t action, int32_t flags, const std::vector<PointerProperties>& pointerProperties,
+        const std::vector<PointerProperties>& splitPointerProperties) {
+    LOG_ALWAYS_FATAL_IF(splitPointerProperties.empty());
+    const auto maskedAction = MotionEvent::getActionMasked(action);
+    if (maskedAction != AMOTION_EVENT_ACTION_POINTER_DOWN &&
+        maskedAction != AMOTION_EVENT_ACTION_POINTER_UP) {
+        // The action is unaffected by splitting this motion event.
+        return action;
+    }
+    const auto actionIndex = MotionEvent::getActionIndex(action);
+    if (CC_UNLIKELY(actionIndex >= pointerProperties.size())) {
+        LOG(FATAL) << "Action index is out of bounds, index: " << actionIndex;
+    }
+
+    const auto affectedPointerId = pointerProperties[actionIndex].id;
+    std::optional<uint32_t> splitActionIndex;
+    for (uint32_t i = 0; i < splitPointerProperties.size(); i++) {
+        if (affectedPointerId == splitPointerProperties[i].id) {
+            splitActionIndex = i;
+            break;
+        }
+    }
+    if (!splitActionIndex.has_value()) {
+        // The affected pointer is not part of the split motion event.
+        return AMOTION_EVENT_ACTION_MOVE;
+    }
+
+    if (splitPointerProperties.size() > 1) {
+        return maskedAction | (*splitActionIndex << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+    }
+
+    if (maskedAction == AMOTION_EVENT_ACTION_POINTER_UP) {
+        return ((flags & AMOTION_EVENT_FLAG_CANCELED) != 0) ? AMOTION_EVENT_ACTION_CANCEL
+                                                            : AMOTION_EVENT_ACTION_UP;
+    }
+    return AMOTION_EVENT_ACTION_DOWN;
+}
+
+float transformOrientation(const ui::Transform& transform, const PointerCoords& coords,
+                           int32_t motionEventFlags) {
+    if ((motionEventFlags & AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION) == 0) {
+        return 0;
+    }
+
+    const bool isDirectionalAngle =
+            (motionEventFlags & AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION) != 0;
+
+    return transformAngle(transform, coords.getAxisValue(AMOTION_EVENT_AXIS_ORIENTATION),
+                          isDirectionalAngle);
 }
 
 } // namespace
@@ -151,7 +200,7 @@ vec2 transformWithoutTranslation(const ui::Transform& transform, const vec2& xy)
     return roundTransformedCoords(transformedXy - transformedOrigin);
 }
 
-float transformAngle(const ui::Transform& transform, float angleRadians) {
+float transformAngle(const ui::Transform& transform, float angleRadians, bool isDirectional) {
     // Construct and transform a vector oriented at the specified clockwise angle from vertical.
     // Coordinate system: down is increasing Y, right is increasing X.
     float x = sinf(angleRadians);
@@ -164,6 +213,11 @@ float transformAngle(const ui::Transform& transform, float angleRadians) {
 
     transformedPoint.x -= origin.x;
     transformedPoint.y -= origin.y;
+
+    if (!isDirectional && transformedPoint.y > 0) {
+        // Limit the range of atan2f to [-pi/2, pi/2] by reversing the direction of the vector.
+        transformedPoint *= -1;
+    }
 
     // Derive the transformed vector's clockwise angle from vertical.
     // The return value of atan2f is in range [-pi, pi] which conforms to the orientation API.
@@ -254,8 +308,8 @@ VerifiedMotionEvent verifiedMotionEventFromMotionEvent(const MotionEvent& event)
             event.getButtonState()};
 }
 
-void InputEvent::initialize(int32_t id, int32_t deviceId, uint32_t source, int32_t displayId,
-                            std::array<uint8_t, 32> hmac) {
+void InputEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+                            ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac) {
     mId = id;
     mDeviceId = deviceId;
     mSource = source;
@@ -317,10 +371,11 @@ std::optional<int> KeyEvent::getKeyCodeFromLabel(const char* label) {
     return InputEventLookup::getKeyCodeByLabel(label);
 }
 
-void KeyEvent::initialize(int32_t id, int32_t deviceId, uint32_t source, int32_t displayId,
-                          std::array<uint8_t, 32> hmac, int32_t action, int32_t flags,
-                          int32_t keyCode, int32_t scanCode, int32_t metaState, int32_t repeatCount,
-                          nsecs_t downTime, nsecs_t eventTime) {
+void KeyEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+                          ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
+                          int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
+                          int32_t metaState, int32_t repeatCount, nsecs_t downTime,
+                          nsecs_t eventTime) {
     InputEvent::initialize(id, deviceId, source, displayId, hmac);
     mAction = action;
     mFlags = flags;
@@ -444,7 +499,6 @@ void PointerCoords::scale(float globalScaleFactor, float windowXScale, float win
     scaleAxisValue(*this, AMOTION_EVENT_AXIS_RELATIVE_Y, windowYScale);
 }
 
-#ifdef __linux__
 status_t PointerCoords::readFromParcel(Parcel* parcel) {
     bits = parcel->readInt64();
 
@@ -472,7 +526,6 @@ status_t PointerCoords::writeToParcel(Parcel* parcel) const {
     parcel->writeBool(isResampled);
     return OK;
 }
-#endif
 
 void PointerCoords::tooManyAxes(int axis) {
     ALOGW("Could not set value for axis %d because the PointerCoords structure is full and "
@@ -495,26 +548,6 @@ bool PointerCoords::operator==(const PointerCoords& other) const {
     return true;
 }
 
-void PointerCoords::transform(const ui::Transform& transform) {
-    const vec2 xy = transform.transform(getXYValue());
-    setAxisValue(AMOTION_EVENT_AXIS_X, xy.x);
-    setAxisValue(AMOTION_EVENT_AXIS_Y, xy.y);
-
-    if (BitSet64::hasBit(bits, AMOTION_EVENT_AXIS_RELATIVE_X) ||
-        BitSet64::hasBit(bits, AMOTION_EVENT_AXIS_RELATIVE_Y)) {
-        const ui::Transform rotation(transform.getOrientation());
-        const vec2 relativeXy = rotation.transform(getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
-                                                   getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y));
-        setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, relativeXy.x);
-        setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, relativeXy.y);
-    }
-
-    if (BitSet64::hasBit(bits, AMOTION_EVENT_AXIS_ORIENTATION)) {
-        const float val = getAxisValue(AMOTION_EVENT_AXIS_ORIENTATION);
-        setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION, transformAngle(transform, val));
-    }
-}
-
 // --- PointerProperties ---
 
 void PointerProperties::copyFrom(const PointerProperties& other) {
@@ -524,14 +557,15 @@ void PointerProperties::copyFrom(const PointerProperties& other) {
 
 // --- MotionEvent ---
 
-void MotionEvent::initialize(int32_t id, int32_t deviceId, uint32_t source, int32_t displayId,
-                             std::array<uint8_t, 32> hmac, int32_t action, int32_t actionButton,
-                             int32_t flags, int32_t edgeFlags, int32_t metaState,
-                             int32_t buttonState, MotionClassification classification,
-                             const ui::Transform& transform, float xPrecision, float yPrecision,
-                             float rawXCursorPosition, float rawYCursorPosition,
-                             const ui::Transform& rawTransform, nsecs_t downTime, nsecs_t eventTime,
-                             size_t pointerCount, const PointerProperties* pointerProperties,
+void MotionEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+                             ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
+                             int32_t action, int32_t actionButton, int32_t flags, int32_t edgeFlags,
+                             int32_t metaState, int32_t buttonState,
+                             MotionClassification classification, const ui::Transform& transform,
+                             float xPrecision, float yPrecision, float rawXCursorPosition,
+                             float rawYCursorPosition, const ui::Transform& rawTransform,
+                             nsecs_t downTime, nsecs_t eventTime, size_t pointerCount,
+                             const PointerProperties* pointerProperties,
                              const PointerCoords* pointerCoords) {
     InputEvent::initialize(id, deviceId, source, displayId, hmac);
     mAction = action;
@@ -589,6 +623,28 @@ void MotionEvent::copyFrom(const MotionEvent* other, bool keepHistory) {
                         &other->mSamplePointerCoords[historySize * pointerCount],
                         &other->mSamplePointerCoords[historySize * pointerCount + pointerCount]);
     }
+}
+
+void MotionEvent::splitFrom(const android::MotionEvent& other,
+                            std::bitset<MAX_POINTER_ID + 1> splitPointerIds, int32_t newEventId) {
+    // TODO(b/327503168): The down time should be a parameter to the split function, because only
+    //   the caller can know when the first event went down on the target.
+    const nsecs_t splitDownTime = other.mDownTime;
+
+    auto [action, pointerProperties, pointerCoords] =
+            split(other.getAction(), other.getFlags(), other.getHistorySize(),
+                  other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+
+    // Initialize the event with zero pointers, and manually set the split pointers.
+    initialize(newEventId, other.mDeviceId, other.mSource, other.mDisplayId, /*hmac=*/{}, action,
+               other.mActionButton, other.mFlags, other.mEdgeFlags, other.mMetaState,
+               other.mButtonState, other.mClassification, other.mTransform, other.mXPrecision,
+               other.mYPrecision, other.mRawXCursorPosition, other.mRawYCursorPosition,
+               other.mRawTransform, splitDownTime, other.getEventTime(), /*pointerCount=*/0,
+               pointerProperties.data(), pointerCoords.data());
+    mPointerProperties = std::move(pointerProperties);
+    mSamplePointerCoords = std::move(pointerCoords);
+    mSampleEventTimes = other.mSampleEventTimes;
 }
 
 void MotionEvent::addSample(
@@ -672,13 +728,13 @@ const PointerCoords* MotionEvent::getHistoricalRawPointerCoords(
 float MotionEvent::getHistoricalRawAxisValue(int32_t axis, size_t pointerIndex,
                                              size_t historicalIndex) const {
     const PointerCoords& coords = *getHistoricalRawPointerCoords(pointerIndex, historicalIndex);
-    return calculateTransformedAxisValue(axis, mSource, mRawTransform, coords);
+    return calculateTransformedAxisValue(axis, mSource, mFlags, mRawTransform, coords);
 }
 
 float MotionEvent::getHistoricalAxisValue(int32_t axis, size_t pointerIndex,
                                           size_t historicalIndex) const {
     const PointerCoords& coords = *getHistoricalRawPointerCoords(pointerIndex, historicalIndex);
-    return calculateTransformedAxisValue(axis, mSource, mTransform, coords);
+    return calculateTransformedAxisValue(axis, mSource, mFlags, mTransform, coords);
 }
 
 ssize_t MotionEvent::findPointerIndex(int32_t pointerId) const {
@@ -695,6 +751,18 @@ void MotionEvent::offsetLocation(float xOffset, float yOffset) {
     float currXOffset = mTransform.tx();
     float currYOffset = mTransform.ty();
     mTransform.set(currXOffset + xOffset, currYOffset + yOffset);
+}
+
+float MotionEvent::getRawXOffset() const {
+    // This is equivalent to the x-coordinate of the point that the origin of the raw coordinate
+    // space maps to.
+    return (mTransform * mRawTransform.inverse()).tx();
+}
+
+float MotionEvent::getRawYOffset() const {
+    // This is equivalent to the y-coordinate of the point that the origin of the raw coordinate
+    // space maps to.
+    return (mTransform * mRawTransform.inverse()).ty();
 }
 
 void MotionEvent::scale(float globalScaleFactor) {
@@ -723,8 +791,9 @@ void MotionEvent::applyTransform(const std::array<float, 9>& matrix) {
     transform.set(matrix);
 
     // Apply the transformation to all samples.
-    std::for_each(mSamplePointerCoords.begin(), mSamplePointerCoords.end(),
-                  [&transform](PointerCoords& c) { c.transform(transform); });
+    std::for_each(mSamplePointerCoords.begin(), mSamplePointerCoords.end(), [&](PointerCoords& c) {
+        calculateTransformedCoordsInPlace(c, mSource, mFlags, transform);
+    });
 
     if (mRawXCursorPosition != AMOTION_EVENT_INVALID_CURSOR_POSITION &&
         mRawYCursorPosition != AMOTION_EVENT_INVALID_CURSOR_POSITION) {
@@ -734,7 +803,6 @@ void MotionEvent::applyTransform(const std::array<float, 9>& matrix) {
     }
 }
 
-#ifdef __linux__
 static status_t readFromParcel(ui::Transform& transform, const Parcel& parcel) {
     float dsdx, dtdx, tx, dtdy, dsdy, ty;
     status_t status = parcel.readFloat(&dsdx);
@@ -769,7 +837,7 @@ status_t MotionEvent::readFromParcel(Parcel* parcel) {
     mId = parcel->readInt32();
     mDeviceId = parcel->readInt32();
     mSource = parcel->readUint32();
-    mDisplayId = parcel->readInt32();
+    mDisplayId = ui::LogicalDisplayId{parcel->readInt32()};
     std::vector<uint8_t> hmac;
     status_t result = parcel->readByteVector(&hmac);
     if (result != OK || hmac.size() != 32) {
@@ -837,7 +905,7 @@ status_t MotionEvent::writeToParcel(Parcel* parcel) const {
     parcel->writeInt32(mId);
     parcel->writeInt32(mDeviceId);
     parcel->writeUint32(mSource);
-    parcel->writeInt32(mDisplayId);
+    parcel->writeInt32(mDisplayId.val());
     std::vector<uint8_t> hmac(mHmac.begin(), mHmac.end());
     parcel->writeByteVector(hmac);
     parcel->writeInt32(mAction);
@@ -881,7 +949,6 @@ status_t MotionEvent::writeToParcel(Parcel* parcel) const {
     }
     return OK;
 }
-#endif
 
 bool MotionEvent::isTouchEvent(uint32_t source, int32_t action) {
     if (isFromSource(source, AINPUT_SOURCE_CLASS_POINTER)) {
@@ -941,6 +1008,46 @@ std::string MotionEvent::actionToString(int32_t action) {
     return android::base::StringPrintf("%" PRId32, action);
 }
 
+std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>> MotionEvent::split(
+        int32_t action, int32_t flags, int32_t historySize,
+        const std::vector<PointerProperties>& pointerProperties,
+        const std::vector<PointerCoords>& pointerCoords,
+        std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
+    LOG_ALWAYS_FATAL_IF(!splitPointerIds.any());
+    const auto pointerCount = pointerProperties.size();
+    LOG_ALWAYS_FATAL_IF(pointerCoords.size() != (pointerCount * (historySize + 1)));
+    const auto splitCount = splitPointerIds.count();
+
+    std::vector<PointerProperties> splitPointerProperties;
+    std::vector<PointerCoords> splitPointerCoords;
+
+    for (uint32_t i = 0; i < pointerCount; i++) {
+        if (splitPointerIds.test(pointerProperties[i].id)) {
+            splitPointerProperties.emplace_back(pointerProperties[i]);
+        }
+    }
+    for (uint32_t i = 0; i < pointerCoords.size(); i++) {
+        if (splitPointerIds.test(pointerProperties[i % pointerCount].id)) {
+            splitPointerCoords.emplace_back(pointerCoords[i]);
+        }
+    }
+    LOG_ALWAYS_FATAL_IF(splitPointerCoords.size() !=
+                        (splitPointerProperties.size() * (historySize + 1)));
+
+    if (CC_UNLIKELY(splitPointerProperties.size() != splitCount)) {
+        // TODO(b/329107108): Promote this to a fatal check once bugs in the caller are resolved.
+        LOG(ERROR) << "Cannot split MotionEvent: Requested splitting " << splitCount
+                   << " pointers from the original event, but the original event only contained "
+                   << splitPointerProperties.size() << " of those pointers.";
+    }
+
+    // TODO(b/327503168): Verify the splitDownTime here once it is used correctly.
+
+    const auto splitAction = resolveActionForSplitMotionEvent(action, flags, pointerProperties,
+                                                              splitPointerProperties);
+    return {splitAction, splitPointerProperties, splitPointerCoords};
+}
+
 // Apply the given transformation to the point without checking whether the entire transform
 // should be disregarded altogether for the provided source.
 static inline vec2 calculateTransformedXYUnchecked(uint32_t source, const ui::Transform& transform,
@@ -958,7 +1065,7 @@ vec2 MotionEvent::calculateTransformedXY(uint32_t source, const ui::Transform& t
 }
 
 // Keep in sync with calculateTransformedCoords.
-float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source,
+float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source, int32_t flags,
                                                  const ui::Transform& transform,
                                                  const PointerCoords& coords) {
     if (shouldDisregardTransformation(source)) {
@@ -980,7 +1087,7 @@ float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source,
     }
 
     if (axis == AMOTION_EVENT_AXIS_ORIENTATION) {
-        return transformAngle(transform, coords.getAxisValue(AMOTION_EVENT_AXIS_ORIENTATION));
+        return transformOrientation(transform, coords, flags);
     }
 
     return coords.getAxisValue(axis);
@@ -988,29 +1095,32 @@ float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source,
 
 // Keep in sync with calculateTransformedAxisValue. This is an optimization of
 // calculateTransformedAxisValue for all PointerCoords axes.
-PointerCoords MotionEvent::calculateTransformedCoords(uint32_t source,
-                                                      const ui::Transform& transform,
-                                                      const PointerCoords& coords) {
+void MotionEvent::calculateTransformedCoordsInPlace(PointerCoords& coords, uint32_t source,
+                                                    int32_t flags, const ui::Transform& transform) {
     if (shouldDisregardTransformation(source)) {
-        return coords;
+        return;
     }
-    PointerCoords out = coords;
 
     const vec2 xy = calculateTransformedXYUnchecked(source, transform, coords.getXYValue());
-    out.setAxisValue(AMOTION_EVENT_AXIS_X, xy.x);
-    out.setAxisValue(AMOTION_EVENT_AXIS_Y, xy.y);
+    coords.setAxisValue(AMOTION_EVENT_AXIS_X, xy.x);
+    coords.setAxisValue(AMOTION_EVENT_AXIS_Y, xy.y);
 
     const vec2 relativeXy =
             transformWithoutTranslation(transform,
                                         {coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
                                          coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y)});
-    out.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, relativeXy.x);
-    out.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, relativeXy.y);
+    coords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, relativeXy.x);
+    coords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, relativeXy.y);
 
-    out.setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION,
-                     transformAngle(transform,
-                                    coords.getAxisValue(AMOTION_EVENT_AXIS_ORIENTATION)));
+    coords.setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION,
+                        transformOrientation(transform, coords, flags));
+}
 
+PointerCoords MotionEvent::calculateTransformedCoords(uint32_t source, int32_t flags,
+                                                      const ui::Transform& transform,
+                                                      const PointerCoords& coords) {
+    PointerCoords out = coords;
+    calculateTransformedCoordsInPlace(out, source, flags, transform);
     return out;
 }
 
@@ -1097,7 +1207,7 @@ std::ostream& operator<<(std::ostream& out, const MotionEvent& event) {
 
 void FocusEvent::initialize(int32_t id, bool hasFocus) {
     InputEvent::initialize(id, ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID, AINPUT_SOURCE_UNKNOWN,
-                           ADISPLAY_ID_NONE, INVALID_HMAC);
+                           ui::LogicalDisplayId::INVALID, INVALID_HMAC);
     mHasFocus = hasFocus;
 }
 
@@ -1110,7 +1220,7 @@ void FocusEvent::initialize(const FocusEvent& from) {
 
 void CaptureEvent::initialize(int32_t id, bool pointerCaptureEnabled) {
     InputEvent::initialize(id, ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID, AINPUT_SOURCE_UNKNOWN,
-                           ADISPLAY_ID_NONE, INVALID_HMAC);
+                           ui::LogicalDisplayId::INVALID, INVALID_HMAC);
     mPointerCaptureEnabled = pointerCaptureEnabled;
 }
 
@@ -1123,7 +1233,7 @@ void CaptureEvent::initialize(const CaptureEvent& from) {
 
 void DragEvent::initialize(int32_t id, float x, float y, bool isExiting) {
     InputEvent::initialize(id, ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID, AINPUT_SOURCE_UNKNOWN,
-                           ADISPLAY_ID_NONE, INVALID_HMAC);
+                           ui::LogicalDisplayId::INVALID, INVALID_HMAC);
     mIsExiting = isExiting;
     mX = x;
     mY = y;
@@ -1140,7 +1250,7 @@ void DragEvent::initialize(const DragEvent& from) {
 
 void TouchModeEvent::initialize(int32_t id, bool isInTouchMode) {
     InputEvent::initialize(id, ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID, AINPUT_SOURCE_UNKNOWN,
-                           ADISPLAY_ID_NONE, INVALID_HMAC);
+                           ui::LogicalDisplayId::INVALID, INVALID_HMAC);
     mIsInTouchMode = isInTouchMode;
 }
 

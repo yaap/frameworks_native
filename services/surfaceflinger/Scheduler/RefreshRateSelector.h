@@ -67,32 +67,45 @@ public:
         FpsRanges primaryRanges;
         // The app request refresh rate ranges. @see DisplayModeSpecs.aidl for details.
         FpsRanges appRequestRanges;
+        // The idle timer configuration, if provided.
+        std::optional<gui::DisplayModeSpecs::IdleScreenRefreshRateConfig> idleScreenConfigOpt;
 
         Policy() = default;
 
         Policy(DisplayModeId defaultMode, FpsRange range,
-               bool allowGroupSwitching = kAllowGroupSwitchingDefault)
+               bool allowGroupSwitching = kAllowGroupSwitchingDefault,
+               const std::optional<gui::DisplayModeSpecs::IdleScreenRefreshRateConfig>&
+                       idleScreenConfigOpt = std::nullopt)
               : Policy(defaultMode, FpsRanges{range, range}, FpsRanges{range, range},
-                       allowGroupSwitching) {}
+                       allowGroupSwitching, idleScreenConfigOpt) {}
 
         Policy(DisplayModeId defaultMode, FpsRanges primaryRanges, FpsRanges appRequestRanges,
-               bool allowGroupSwitching = kAllowGroupSwitchingDefault)
+               bool allowGroupSwitching = kAllowGroupSwitchingDefault,
+               const std::optional<gui::DisplayModeSpecs::IdleScreenRefreshRateConfig>&
+                       idleScreenConfigOpt = std::nullopt)
               : defaultMode(defaultMode),
                 allowGroupSwitching(allowGroupSwitching),
                 primaryRanges(primaryRanges),
-                appRequestRanges(appRequestRanges) {}
+                appRequestRanges(appRequestRanges),
+                idleScreenConfigOpt(idleScreenConfigOpt) {}
 
         bool operator==(const Policy& other) const {
             using namespace fps_approx_ops;
-            return defaultMode == other.defaultMode && primaryRanges == other.primaryRanges &&
-                    appRequestRanges == other.appRequestRanges &&
-                    allowGroupSwitching == other.allowGroupSwitching;
+            return similarExceptIdleConfig(other) &&
+                    idleScreenConfigOpt == other.idleScreenConfigOpt;
         }
 
         bool operator!=(const Policy& other) const { return !(*this == other); }
 
         bool primaryRangeIsSingleRate() const {
             return isApproxEqual(primaryRanges.physical.min, primaryRanges.physical.max);
+        }
+
+        bool similarExceptIdleConfig(const Policy& updated) const {
+            using namespace fps_approx_ops;
+            return defaultMode == updated.defaultMode && primaryRanges == updated.primaryRanges &&
+                    appRequestRanges == updated.appRequestRanges &&
+                    allowGroupSwitching == updated.allowGroupSwitching;
         }
 
         std::string toString() const;
@@ -233,14 +246,18 @@ public:
     struct RankedFrameRates {
         FrameRateRanking ranking; // Ordered by descending score.
         GlobalSignals consideredSignals;
+        Fps pacesetterFps;
 
         bool operator==(const RankedFrameRates& other) const {
-            return ranking == other.ranking && consideredSignals == other.consideredSignals;
+            return ranking == other.ranking && consideredSignals == other.consideredSignals &&
+                    isApproxEqual(pacesetterFps, other.pacesetterFps);
         }
     };
 
-    RankedFrameRates getRankedFrameRates(const std::vector<LayerRequirement>&, GlobalSignals) const
-            EXCLUDES(mLock);
+    // If valid, `pacesetterFps` (used by follower displays) filters the ranking to modes matching
+    // that refresh rate.
+    RankedFrameRates getRankedFrameRates(const std::vector<LayerRequirement>&, GlobalSignals,
+                                         Fps pacesetterFps = {}) const EXCLUDES(mLock);
 
     FpsRange getSupportedRefreshRateRange() const EXCLUDES(mLock) {
         std::lock_guard lock(mLock);
@@ -287,7 +304,7 @@ public:
         int frameRateMultipleThreshold = 0;
 
         // The Idle Timer timeout. 0 timeout means no idle timer.
-        std::chrono::milliseconds idleTimerTimeout = 0ms;
+        std::chrono::milliseconds legacyIdleTimerTimeout = 0ms;
 
         // The controller representing how the kernel idle timer will be configured
         // either on the HWC api or sysprop.
@@ -298,7 +315,7 @@ public:
             DisplayModes, DisplayModeId activeModeId,
             Config config = {.enableFrameRateOverride = Config::FrameRateOverride::Disabled,
                              .frameRateMultipleThreshold = 0,
-                             .idleTimerTimeout = 0ms,
+                             .legacyIdleTimerTimeout = 0ms,
                              .kernelIdleTimerController = {}});
 
     RefreshRateSelector(const RefreshRateSelector&) = delete;
@@ -366,6 +383,7 @@ public:
 
         Callbacks platform;
         Callbacks kernel;
+        Callbacks vrr;
     };
 
     void setIdleTimerCallbacks(IdleTimerCallbacks callbacks) EXCLUDES(mIdleTimerCallbacksMutex) {
@@ -379,12 +397,14 @@ public:
     }
 
     void startIdleTimer() {
+        mIdleTimerStarted = true;
         if (mIdleTimer) {
             mIdleTimer->start();
         }
     }
 
     void stopIdleTimer() {
+        mIdleTimerStarted = false;
         if (mIdleTimer) {
             mIdleTimer->stop();
         }
@@ -406,6 +426,8 @@ public:
 
     std::chrono::milliseconds getIdleTimerTimeout();
 
+    bool isVrrDevice() const;
+
 private:
     friend struct TestableRefreshRateSelector;
 
@@ -415,7 +437,8 @@ private:
     const FrameRateMode& getActiveModeLocked() const REQUIRES(mLock);
 
     RankedFrameRates getRankedFrameRatesLocked(const std::vector<LayerRequirement>& layers,
-                                               GlobalSignals signals) const REQUIRES(mLock);
+                                               GlobalSignals signals, Fps pacesetterFps) const
+            REQUIRES(mLock);
 
     // Returns number of display frames and remainder when dividing the layer refresh period by
     // display refresh period.
@@ -474,11 +497,14 @@ private:
     void updateDisplayModes(DisplayModes, DisplayModeId activeModeId) EXCLUDES(mLock)
             REQUIRES(kMainThreadContext);
 
-    void initializeIdleTimer();
+    void initializeIdleTimer(std::chrono::milliseconds timeout);
 
     std::optional<IdleTimerCallbacks::Callbacks> getIdleTimerCallbacks() const
             REQUIRES(mIdleTimerCallbacksMutex) {
         if (!mIdleTimerCallbacks) return {};
+
+        if (mIsVrrDevice) return mIdleTimerCallbacks->vrr;
+
         return mConfig.kernelIdleTimerController.has_value() ? mIdleTimerCallbacks->kernel
                                                              : mIdleTimerCallbacks->platform;
     }
@@ -513,6 +539,9 @@ private:
     std::vector<FrameRateMode> mPrimaryFrameRates GUARDED_BY(mLock);
     std::vector<FrameRateMode> mAppRequestFrameRates GUARDED_BY(mLock);
 
+    // Caches whether the device is VRR-compatible based on the active display mode.
+    std::atomic_bool mIsVrrDevice = false;
+
     Policy mDisplayManagerPolicy GUARDED_BY(mLock);
     std::optional<Policy> mOverridePolicy GUARDED_BY(mLock);
 
@@ -534,8 +563,16 @@ private:
     Config::FrameRateOverride mFrameRateOverrideConfig;
 
     struct GetRankedFrameRatesCache {
-        std::pair<std::vector<LayerRequirement>, GlobalSignals> arguments;
+        std::vector<LayerRequirement> layers;
+        GlobalSignals signals;
+        Fps pacesetterFps;
+
         RankedFrameRates result;
+
+        bool matches(const GetRankedFrameRatesCache& other) const {
+            return layers == other.layers && signals == other.signals &&
+                    isApproxEqual(pacesetterFps, other.pacesetterFps);
+        }
     };
     mutable std::optional<GetRankedFrameRatesCache> mGetRankedFrameRatesCache GUARDED_BY(mLock);
 
@@ -544,6 +581,7 @@ private:
     std::optional<IdleTimerCallbacks> mIdleTimerCallbacks GUARDED_BY(mIdleTimerCallbacksMutex);
     // Used to detect (lack of) frame activity.
     ftl::Optional<scheduler::OneShotTimer> mIdleTimer;
+    std::atomic<bool> mIdleTimerStarted = false;
 };
 
 } // namespace android::scheduler

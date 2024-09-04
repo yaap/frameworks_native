@@ -22,6 +22,7 @@
 #include <numeric>
 #include <optional>
 
+#include <common/FlagManager.h>
 #include <ftl/small_map.h>
 #include <gui/TraceUtils.h>
 #include <ui/DisplayMap.h>
@@ -255,6 +256,9 @@ auto getBlendMode(const LayerSnapshot& snapshot, const RequestedLayerState& requ
 }
 
 void updateVisibility(LayerSnapshot& snapshot, bool visible) {
+    if (snapshot.isVisible != visible) {
+        snapshot.changes |= RequestedLayerState::Changes::Visibility;
+    }
     snapshot.isVisible = visible;
 
     // TODO(b/238781169) we are ignoring this compat for now, since we will have
@@ -358,10 +362,11 @@ LayerSnapshot LayerSnapshotBuilder::getRootSnapshot() {
     snapshot.relativeLayerMetadata.mMap.clear();
     snapshot.inputInfo.touchOcclusionMode = gui::TouchOcclusionMode::BLOCK_UNTRUSTED;
     snapshot.dropInputMode = gui::DropInputMode::NONE;
-    snapshot.isTrustedOverlay = false;
+    snapshot.trustedOverlay = gui::TrustedOverlay::UNSET;
     snapshot.gameMode = gui::GameMode::Unsupported;
     snapshot.frameRate = {};
     snapshot.fixedTransformHint = ui::Transform::ROT_INVALID;
+    snapshot.ignoreLocalTransform = false;
     return snapshot;
 }
 
@@ -575,9 +580,11 @@ LayerSnapshot* LayerSnapshotBuilder::createSnapshot(const LayerHierarchy::Traver
     mSnapshots.emplace_back(std::make_unique<LayerSnapshot>(layer, path));
     LayerSnapshot* snapshot = mSnapshots.back().get();
     snapshot->globalZ = static_cast<size_t>(mSnapshots.size()) - 1;
-    if (path.isClone() && path.variant != LayerHierarchy::Variant::Mirror) {
+    if (path.isClone() && !LayerHierarchy::isMirror(path.variant)) {
         snapshot->mirrorRootPath = parentSnapshot.mirrorRootPath;
     }
+    snapshot->ignoreLocalTransform =
+            path.isClone() && path.variant == LayerHierarchy::Variant::Detached_Mirror;
     mPathToSnapshot[path] = snapshot;
 
     mIdToSnapshots.emplace(path.id, snapshot);
@@ -732,7 +739,19 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     }
 
     if (forceUpdate || snapshot.clientChanges & layer_state_t::eTrustedOverlayChanged) {
-        snapshot.isTrustedOverlay = parentSnapshot.isTrustedOverlay || requested.isTrustedOverlay;
+        switch (requested.trustedOverlay) {
+            case gui::TrustedOverlay::UNSET:
+                snapshot.trustedOverlay = parentSnapshot.trustedOverlay;
+                break;
+            case gui::TrustedOverlay::DISABLED:
+                snapshot.trustedOverlay = FlagManager::getInstance().override_trusted_overlay()
+                        ? requested.trustedOverlay
+                        : parentSnapshot.trustedOverlay;
+                break;
+            case gui::TrustedOverlay::ENABLED:
+                snapshot.trustedOverlay = requested.trustedOverlay;
+                break;
+        }
     }
 
     if (snapshot.isHiddenByPolicyFromParent &&
@@ -1028,6 +1047,8 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
                                        const LayerSnapshot& parentSnapshot,
                                        const LayerHierarchy::TraversalPath& path,
                                        const Args& args) {
+    using InputConfig = gui::WindowInfo::InputConfig;
+
     if (requested.windowInfoHandle) {
         snapshot.inputInfo = *requested.windowInfoHandle->getInfo();
     } else {
@@ -1040,7 +1061,8 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
     snapshot.touchCropId = requested.touchCropId;
 
     snapshot.inputInfo.id = static_cast<int32_t>(snapshot.uniqueSequence);
-    snapshot.inputInfo.displayId = static_cast<int32_t>(snapshot.outputFilter.layerStack.id);
+    snapshot.inputInfo.displayId =
+            ui::LogicalDisplayId{static_cast<int32_t>(snapshot.outputFilter.layerStack.id)};
     snapshot.inputInfo.touchOcclusionMode = requested.hasInputInfo()
             ? requested.windowInfoHandle->getInfo()->touchOcclusionMode
             : parentSnapshot.inputInfo.touchOcclusionMode;
@@ -1056,6 +1078,11 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
         snapshot.dropInputMode = gui::DropInputMode::NONE;
     }
 
+    if (snapshot.isSecure ||
+        parentSnapshot.inputInfo.inputConfig.test(InputConfig::SENSITIVE_FOR_PRIVACY)) {
+        snapshot.inputInfo.inputConfig |= InputConfig::SENSITIVE_FOR_PRIVACY;
+    }
+
     updateVisibility(snapshot, snapshot.isVisible);
     if (!needsInputInfo(snapshot, requested)) {
         return;
@@ -1068,14 +1095,14 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
     auto displayInfo = displayInfoOpt.value_or(sDefaultInfo);
 
     if (!requested.windowInfoHandle) {
-        snapshot.inputInfo.inputConfig = gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL;
+        snapshot.inputInfo.inputConfig = InputConfig::NO_INPUT_CHANNEL;
     }
     fillInputFrameInfo(snapshot.inputInfo, displayInfo.transform, snapshot);
 
     if (noValidDisplay) {
         // Do not let the window receive touches if it is not associated with a valid display
         // transform. We still allow the window to receive keys and prevent ANRs.
-        snapshot.inputInfo.inputConfig |= gui::WindowInfo::InputConfig::NOT_TOUCHABLE;
+        snapshot.inputInfo.inputConfig |= InputConfig::NOT_TOUCHABLE;
     }
 
     snapshot.inputInfo.alpha = snapshot.color.a;
@@ -1085,7 +1112,7 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
     // If the window will be blacked out on a display because the display does not have the secure
     // flag and the layer has the secure flag set, then drop input.
     if (!displayInfo.isSecure && snapshot.isSecure) {
-        snapshot.inputInfo.inputConfig |= gui::WindowInfo::InputConfig::DROP_INPUT;
+        snapshot.inputInfo.inputConfig |= InputConfig::DROP_INPUT;
     }
 
     if (requested.touchCropId != UNASSIGNED_LAYER_ID || path.isClone()) {
@@ -1101,8 +1128,8 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
 
     // Inherit the trusted state from the parent hierarchy, but don't clobber the trusted state
     // if it was set by WM for a known system overlay
-    if (snapshot.isTrustedOverlay) {
-        snapshot.inputInfo.inputConfig |= gui::WindowInfo::InputConfig::TRUSTED_OVERLAY;
+    if (snapshot.trustedOverlay == gui::TrustedOverlay::ENABLED) {
+        snapshot.inputInfo.inputConfig |= InputConfig::TRUSTED_OVERLAY;
     }
 
     snapshot.inputInfo.contentSize = snapshot.croppedBufferSize.getSize();
@@ -1110,10 +1137,10 @@ void LayerSnapshotBuilder::updateInput(LayerSnapshot& snapshot,
     // If the layer is a clone, we need to crop the input region to cloned root to prevent
     // touches from going outside the cloned area.
     if (path.isClone()) {
-        snapshot.inputInfo.inputConfig |= gui::WindowInfo::InputConfig::CLONE;
+        snapshot.inputInfo.inputConfig |= InputConfig::CLONE;
         // Cloned layers shouldn't handle watch outside since their z order is not determined by
         // WM or the client.
-        snapshot.inputInfo.inputConfig.clear(gui::WindowInfo::InputConfig::WATCH_OUTSIDE_TOUCH);
+        snapshot.inputInfo.inputConfig.clear(InputConfig::WATCH_OUTSIDE_TOUCH);
     }
 }
 

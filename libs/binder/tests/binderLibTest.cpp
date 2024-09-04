@@ -38,6 +38,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/RpcServer.h>
 #include <binder/RpcSession.h>
+#include <binder/Status.h>
 #include <binder/unique_fd.h>
 #include <utils/Flattenable.h>
 
@@ -57,6 +58,7 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using android::base::testing::HasValue;
 using android::base::testing::Ok;
+using android::binder::Status;
 using android::binder::unique_fd;
 using testing::ExplainMatchResult;
 using testing::Matcher;
@@ -115,6 +117,7 @@ enum BinderLibTestTranscationCode {
     BINDER_LIB_TEST_GET_SCHEDULING_POLICY,
     BINDER_LIB_TEST_NOP_TRANSACTION_WAIT,
     BINDER_LIB_TEST_GETPID,
+    BINDER_LIB_TEST_GETUID,
     BINDER_LIB_TEST_ECHO_VECTOR,
     BINDER_LIB_TEST_GET_NON_BLOCKING_FD,
     BINDER_LIB_TEST_REJECT_OBJECTS,
@@ -252,7 +255,7 @@ class BinderLibTest : public ::testing::Test {
     public:
         virtual void SetUp() {
             m_server = static_cast<BinderLibTestEnv *>(binder_env)->getServer();
-            IPCThreadState::self()->restoreCallingWorkSource(0); 
+            IPCThreadState::self()->restoreCallingWorkSource(0);
         }
         virtual void TearDown() {
         }
@@ -460,6 +463,35 @@ TEST_F(BinderLibTest, AddManagerToManager) {
     EXPECT_EQ(NO_ERROR, sm->addService(String16("binderLibTest-manager"), binder));
 }
 
+TEST_F(BinderLibTest, RegisterForNotificationsFailure) {
+    auto sm = defaultServiceManager();
+    using LocalRegistrationCallback = IServiceManager::LocalRegistrationCallback;
+    class LocalRegistrationCallbackImpl : public virtual LocalRegistrationCallback {
+        void onServiceRegistration(const String16&, const sp<IBinder>&) override {}
+        virtual ~LocalRegistrationCallbackImpl() {}
+    };
+    sp<LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
+
+    EXPECT_EQ(BAD_VALUE, sm->registerForNotifications(String16("ValidName"), nullptr));
+    EXPECT_EQ(UNKNOWN_ERROR, sm->registerForNotifications(String16("InvalidName!$"), cb));
+}
+
+TEST_F(BinderLibTest, UnregisterForNotificationsFailure) {
+    auto sm = defaultServiceManager();
+    using LocalRegistrationCallback = IServiceManager::LocalRegistrationCallback;
+    class LocalRegistrationCallbackImpl : public virtual LocalRegistrationCallback {
+        void onServiceRegistration(const String16&, const sp<IBinder>&) override {}
+        virtual ~LocalRegistrationCallbackImpl() {}
+    };
+    sp<LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
+
+    EXPECT_EQ(OK, sm->registerForNotifications(String16("ValidName"), cb));
+
+    EXPECT_EQ(BAD_VALUE, sm->unregisterForNotifications(String16("ValidName"), nullptr));
+    EXPECT_EQ(BAD_VALUE, sm->unregisterForNotifications(String16("AnotherValidName"), cb));
+    EXPECT_EQ(BAD_VALUE, sm->unregisterForNotifications(String16("InvalidName!!!"), cb));
+}
+
 TEST_F(BinderLibTest, WasParceled) {
     auto binder = sp<BBinder>::make();
     EXPECT_FALSE(binder->wasParceled());
@@ -505,10 +537,11 @@ TEST_F(BinderLibTest, Freeze) {
 
     // Pass test on devices where BINDER_FREEZE ioctl is not supported
     int ret = IPCThreadState::self()->freeze(pid, false, 0);
-    if (ret != 0) {
+    if (ret == -EINVAL) {
         GTEST_SKIP();
         return;
     }
+    EXPECT_EQ(NO_ERROR, ret);
 
     EXPECT_EQ(-EAGAIN, IPCThreadState::self()->freeze(pid, true, 0));
 
@@ -526,8 +559,8 @@ TEST_F(BinderLibTest, Freeze) {
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->getProcessFreezeInfo(pid, &sync_received,
                 &async_received));
 
-    EXPECT_EQ(sync_received, 1);
-    EXPECT_EQ(async_received, 0);
+    EXPECT_EQ(sync_received, 1u);
+    EXPECT_EQ(async_received, 0u);
 
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, false, 0));
     EXPECT_EQ(NO_ERROR, m_server->transact(BINDER_LIB_TEST_NOP_TRANSACTION, data, &reply));
@@ -1236,13 +1269,13 @@ TEST_F(BinderLibTest, BufRejected) {
     data.setDataCapacity(1024);
     // Write a bogus object at offset 0 to get an entry in the offset table
     data.writeFileDescriptor(0);
-    EXPECT_EQ(data.objectsCount(), 1);
+    EXPECT_EQ(data.objectsCount(), 1u);
     uint8_t *parcelData = const_cast<uint8_t*>(data.data());
     // And now, overwrite it with the buffer object
     memcpy(parcelData, &obj, sizeof(obj));
     data.setDataSize(sizeof(obj));
 
-    EXPECT_EQ(data.objectsCount(), 1);
+    EXPECT_EQ(data.objectsCount(), 1u);
 
     // Either the kernel should reject this transaction (if it's correct), but
     // if it's not, the server implementation should return an error if it
@@ -1267,7 +1300,7 @@ TEST_F(BinderLibTest, WeakRejected) {
     data.setDataCapacity(1024);
     // Write a bogus object at offset 0 to get an entry in the offset table
     data.writeFileDescriptor(0);
-    EXPECT_EQ(data.objectsCount(), 1);
+    EXPECT_EQ(data.objectsCount(), 1u);
     uint8_t *parcelData = const_cast<uint8_t *>(data.data());
     // And now, overwrite it with the weak binder
     memcpy(parcelData, &obj, sizeof(obj));
@@ -1277,7 +1310,7 @@ TEST_F(BinderLibTest, WeakRejected) {
     // test with an object that libbinder will actually try to release
     EXPECT_EQ(OK, data.writeStrongBinder(sp<BBinder>::make()));
 
-    EXPECT_EQ(data.objectsCount(), 2);
+    EXPECT_EQ(data.objectsCount(), 2u);
 
     // send it many times, since previous error was memory corruption, make it
     // more likely that the server crashes
@@ -1477,6 +1510,86 @@ TEST_F(BinderLibTest, BinderProxyCount) {
     EXPECT_EQ(BpBinder::getBinderProxyCount(), initialCount);
 }
 
+static constexpr int kBpCountHighWatermark = 20;
+static constexpr int kBpCountLowWatermark = 10;
+static constexpr int kBpCountWarningWatermark = 15;
+static constexpr int kInvalidUid = -1;
+
+TEST_F(BinderLibTest, BinderProxyCountCallback) {
+    Parcel data, reply;
+    sp<IBinder> server = addServer();
+    ASSERT_NE(server, nullptr);
+
+    BpBinder::enableCountByUid();
+    EXPECT_THAT(m_server->transact(BINDER_LIB_TEST_GETUID, data, &reply), StatusEq(NO_ERROR));
+    int32_t uid = reply.readInt32();
+    ASSERT_NE(uid, kInvalidUid);
+
+    uint32_t initialCount = BpBinder::getBinderProxyCount();
+    {
+        uint32_t count = initialCount;
+        BpBinder::setBinderProxyCountWatermarks(kBpCountHighWatermark,
+                                                kBpCountLowWatermark,
+                                                kBpCountWarningWatermark);
+        int limitCallbackUid = kInvalidUid;
+        int warningCallbackUid = kInvalidUid;
+        BpBinder::setBinderProxyCountEventCallback([&](int uid) { limitCallbackUid = uid; },
+                                                   [&](int uid) { warningCallbackUid = uid; });
+
+        std::vector<sp<IBinder> > proxies;
+        auto createProxyOnce = [&](int expectedWarningCallbackUid, int expectedLimitCallbackUid) {
+            warningCallbackUid = limitCallbackUid = kInvalidUid;
+            ASSERT_THAT(server->transact(BINDER_LIB_TEST_CREATE_BINDER_TRANSACTION, data, &reply),
+                        StatusEq(NO_ERROR));
+            proxies.push_back(reply.readStrongBinder());
+            EXPECT_EQ(BpBinder::getBinderProxyCount(), ++count);
+            EXPECT_EQ(warningCallbackUid, expectedWarningCallbackUid);
+            EXPECT_EQ(limitCallbackUid, expectedLimitCallbackUid);
+        };
+        auto removeProxyOnce = [&](int expectedWarningCallbackUid, int expectedLimitCallbackUid) {
+            warningCallbackUid = limitCallbackUid = kInvalidUid;
+            proxies.pop_back();
+            EXPECT_EQ(BpBinder::getBinderProxyCount(), --count);
+            EXPECT_EQ(warningCallbackUid, expectedWarningCallbackUid);
+            EXPECT_EQ(limitCallbackUid, expectedLimitCallbackUid);
+        };
+
+        // Test the increment/decrement of the binder proxies.
+        for (int i = 1; i <= kBpCountWarningWatermark; i++) {
+            createProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(uid, kInvalidUid); // Warning callback should have been triggered.
+        for (int i = kBpCountWarningWatermark + 2; i <= kBpCountHighWatermark; i++) {
+            createProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(kInvalidUid, uid); // Limit callback should have been triggered.
+        createProxyOnce(kInvalidUid, kInvalidUid);
+        for (int i = kBpCountHighWatermark + 2; i >= kBpCountHighWatermark; i--) {
+            removeProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(kInvalidUid, kInvalidUid);
+
+        // Go down below the low watermark.
+        for (int i = kBpCountHighWatermark; i >= kBpCountLowWatermark; i--) {
+            removeProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        for (int i = kBpCountLowWatermark; i <= kBpCountWarningWatermark; i++) {
+            createProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(uid, kInvalidUid); // Warning callback should have been triggered.
+        for (int i = kBpCountWarningWatermark + 2; i <= kBpCountHighWatermark; i++) {
+            createProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(kInvalidUid, uid); // Limit callback should have been triggered.
+        createProxyOnce(kInvalidUid, kInvalidUid);
+        for (int i = kBpCountHighWatermark + 2; i >= kBpCountHighWatermark; i--) {
+            removeProxyOnce(kInvalidUid, kInvalidUid);
+        }
+        createProxyOnce(kInvalidUid, kInvalidUid);
+    }
+    EXPECT_EQ(BpBinder::getBinderProxyCount(), initialCount);
+}
+
 class BinderLibRpcTestBase : public BinderLibTest {
 public:
     void SetUp() override {
@@ -1566,8 +1679,8 @@ TEST_P(BinderLibRpcTestP, SetRpcClientDebugNoKeepAliveBinder) {
     EXPECT_THAT(binder->setRpcClientDebug(std::move(socket), nullptr),
                 Debuggable(StatusEq(UNEXPECTED_NULL)));
 }
-INSTANTIATE_TEST_CASE_P(BinderLibTest, BinderLibRpcTestP, testing::Bool(),
-                        BinderLibRpcTestP::ParamToString);
+INSTANTIATE_TEST_SUITE_P(BinderLibTest, BinderLibRpcTestP, testing::Bool(),
+                         BinderLibRpcTestP::ParamToString);
 
 class BinderLibTestService : public BBinder {
 public:
@@ -1679,6 +1792,9 @@ public:
 
             case BINDER_LIB_TEST_GETPID:
                 reply->writeInt32(getpid());
+                return NO_ERROR;
+            case BINDER_LIB_TEST_GETUID:
+                reply->writeInt32(getuid());
                 return NO_ERROR;
             case BINDER_LIB_TEST_NOP_TRANSACTION_WAIT:
                 usleep(5000);

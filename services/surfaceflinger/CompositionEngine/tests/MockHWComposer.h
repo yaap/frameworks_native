@@ -63,6 +63,7 @@ public:
                 (override));
     MOCK_METHOD2(presentAndGetReleaseFences,
                  status_t(HalDisplayId, std::optional<std::chrono::steady_clock::time_point>));
+    MOCK_METHOD(status_t, executeCommands, (HalDisplayId));
     MOCK_METHOD2(setPowerMode, status_t(PhysicalDisplayId, hal::PowerMode));
     MOCK_METHOD2(setActiveConfig, status_t(HalDisplayId, size_t));
     MOCK_METHOD2(setColorTransform, status_t(HalDisplayId, const mat4&));
@@ -126,6 +127,7 @@ public:
                        const std::unordered_map<std::string, bool>&());
 
     MOCK_CONST_METHOD1(dump, void(std::string&));
+    MOCK_CONST_METHOD1(dumpOverlayProperties, void(std::string&));
     MOCK_CONST_METHOD0(getComposer, android::Hwc2::Composer*());
 
     MOCK_METHOD(hal::HWDisplayId, getPrimaryHwcDisplayId, (), (const, override));

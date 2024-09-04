@@ -18,8 +18,13 @@
 
 #include "InputTracingBackendInterface.h"
 
+#include "InputTracingPerfettoBackendConfig.h"
+
+#include <android/content/pm/IPackageManagerNative.h>
+#include <ftl/flags.h>
 #include <perfetto/tracing.h>
 #include <mutex>
+#include <set>
 
 namespace android::inputdispatcher::trace::impl {
 
@@ -45,22 +50,44 @@ namespace android::inputdispatcher::trace::impl {
  */
 class PerfettoBackend : public InputTracingBackendInterface {
 public:
-    PerfettoBackend();
+    static bool sUseInProcessBackendForTest;
+    static std::function<sp<content::pm::IPackageManagerNative>()> sPackageManagerProvider;
+
+    explicit PerfettoBackend();
     ~PerfettoBackend() override = default;
 
-    void traceKeyEvent(const TracedKeyEvent&) override;
-    void traceMotionEvent(const TracedMotionEvent&) override;
-    void traceWindowDispatch(const WindowDispatchArgs&) override;
-
-    class InputEventDataSource : public perfetto::DataSource<InputEventDataSource> {
-    public:
-        void OnSetup(const SetupArgs&) override {}
-        void OnStart(const StartArgs&) override;
-        void OnStop(const StopArgs&) override;
-    };
+    void traceKeyEvent(const TracedKeyEvent&, const TracedEventMetadata&) override;
+    void traceMotionEvent(const TracedMotionEvent&, const TracedEventMetadata&) override;
+    void traceWindowDispatch(const WindowDispatchArgs&, const TracedEventMetadata&) override;
 
 private:
+    // Implementation of the perfetto data source.
+    // Each instance of the InputEventDataSource represents a different tracing session.
+    // Its lifecycle is controlled by perfetto.
+    class InputEventDataSource : public perfetto::DataSource<InputEventDataSource> {
+    public:
+        explicit InputEventDataSource();
+
+        void OnSetup(const SetupArgs&) override;
+        void OnStart(const StartArgs&) override;
+        void OnStop(const StopArgs&) override;
+
+        void initializeUidMap();
+        bool shouldIgnoreTracedInputEvent(const EventType&) const;
+        inline ftl::Flags<TraceFlag> getFlags() const { return mConfig.flags; }
+        TraceLevel resolveTraceLevel(const TracedEventMetadata&) const;
+
+    private:
+        const int32_t mInstanceId;
+        TraceConfig mConfig;
+
+        bool ruleMatches(const TraceRule&, const TracedEventMetadata&) const;
+
+        std::optional<std::map<std::string, gui::Uid>> mUidMap;
+    };
+
     static std::once_flag sDataSourceRegistrationFlag;
+    static std::atomic<int32_t> sNextInstanceId;
 };
 
 } // namespace android::inputdispatcher::trace::impl

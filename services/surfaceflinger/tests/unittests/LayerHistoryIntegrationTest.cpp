@@ -274,6 +274,8 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitExactVote) {
 }
 
 TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitCategory) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
+
     createLegacyAndFrontedEndLayer(1);
     setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_HIGH);
 
@@ -1000,8 +1002,6 @@ protected:
         mappings.reserve(2);
         mappings.push_back(std::make_pair(kAppId1, kThreshold1));
         mappings.push_back(std::make_pair(kAppId2, kThreshold2));
-
-        mFlinger.enableNewFrontEnd();
 
         mScheduler->onActiveDisplayAreaChanged(DISPLAY_WIDTH * DISPLAY_HEIGHT);
         mScheduler->updateSmallAreaDetection(mappings);

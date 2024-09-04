@@ -49,9 +49,13 @@ public:
 
     /// Trunk stable server flags ///
     bool refresh_rate_overlay_on_external_display() const;
+    bool adpf_gpu_sf() const;
+    bool adpf_use_fmq_channel() const;
+    bool adpf_use_fmq_channel_fixed() const;
 
     /// Trunk stable readonly flags ///
     bool connected_display() const;
+    bool frame_rate_category_mrr() const;
     bool enable_small_area_detection() const;
     bool misc1() const;
     bool vrr_config() const;
@@ -68,10 +72,25 @@ public:
     bool enable_layer_command_batching() const;
     bool screenshot_fence_preservation() const;
     bool vulkan_renderengine() const;
+    bool vrr_bugfix_24q4() const;
     bool renderable_buffer_usage() const;
     bool restore_blur_step() const;
     bool dont_skip_on_early_ro() const;
     bool protected_if_client() const;
+    bool ce_fence_promise() const;
+    bool idle_screen_refresh_rate_timeout() const;
+    bool graphite_renderengine() const;
+    bool latch_unsignaled_with_auto_refresh_changed() const;
+    bool deprecate_vsync_sf() const;
+    bool allow_n_vsyncs_in_targeter() const;
+    bool detached_mirror() const;
+    bool commit_not_composited() const;
+    bool local_tonemap_screenshots() const;
+    bool override_trusted_overlay() const;
+    bool flush_buffer_slots_to_uncache() const;
+    bool force_compile_graphite_renderengine() const;
+    bool single_hop_screenshot() const;
+    bool trace_frame_rate_override() const;
 
 protected:
     // overridden for unit tests

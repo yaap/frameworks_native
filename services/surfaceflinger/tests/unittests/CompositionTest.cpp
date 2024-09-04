@@ -70,6 +70,7 @@ using testing::SetArgPointee;
 
 using FakeHwcDisplayInjector = TestableSurfaceFlinger::FakeHwcDisplayInjector;
 using FakeDisplayDeviceInjector = TestableSurfaceFlinger::FakeDisplayDeviceInjector;
+using namespace ftl::flag_operators;
 
 constexpr hal::HWDisplayId HWC_DISPLAY = FakeHwcDisplayInjector::DEFAULT_HWC_DISPLAY_ID;
 constexpr hal::HWLayerId HWC_LAYER = 5000;
@@ -197,15 +198,19 @@ void CompositionTest::captureScreenComposition() {
     const Rect sourceCrop(0, 0, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     constexpr bool regionSampling = false;
 
-    auto renderArea = DisplayRenderArea::create(mDisplay, sourceCrop, sourceCrop.getSize(),
-                                                ui::Dataspace::V0_SRGB, true, true);
+    auto renderArea =
+            DisplayRenderArea::create(mDisplay, sourceCrop, sourceCrop.getSize(),
+                                      ui::Dataspace::V0_SRGB,
+                                      RenderArea::Options::CAPTURE_SECURE_LAYERS |
+                                              RenderArea::Options::HINT_FOR_SEAMLESS_TRANSITION);
 
     auto traverseLayers = [this](const LayerVector::Visitor& visitor) {
         return mFlinger.traverseLayersInLayerStack(mDisplay->getLayerStack(),
                                                    CaptureArgs::UNSET_UID, {}, visitor);
     };
 
-    auto getLayerSnapshots = RenderArea::fromTraverseLayersLambda(traverseLayers);
+    // TODO: Use SurfaceFlinger::getLayerSnapshotsForScreenshots instead of this legacy function
+    auto getLayerSnapshotsFn = RenderArea::fromTraverseLayersLambda(traverseLayers);
 
     const uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN |
             GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE;
@@ -215,7 +220,7 @@ void CompositionTest::captureScreenComposition() {
                                                                       HAL_PIXEL_FORMAT_RGBA_8888, 1,
                                                                       usage);
 
-    auto future = mFlinger.renderScreenImpl(std::move(renderArea), getLayerSnapshots,
+    auto future = mFlinger.renderScreenImpl(mDisplay, std::move(renderArea), getLayerSnapshotsFn,
                                             mCaptureScreenBuffer, regionSampling);
     ASSERT_TRUE(future.valid());
     const auto fenceResult = future.get();
@@ -282,7 +287,7 @@ struct BaseDisplayVariant {
                         .setSecure(Derived::IS_SECURE)
                         .setPowerMode(Derived::INIT_POWER_MODE)
                         .setRefreshRateSelector(test->mFlinger.scheduler()->refreshRateSelector())
-                        .skipRegisterDisplay()
+                        .skipSchedulerRegistration()
                         .inject();
         Mock::VerifyAndClear(test->mNativeWindow.get());
 

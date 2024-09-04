@@ -160,6 +160,8 @@ public:
             HalDisplayId,
             std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) = 0;
 
+    virtual status_t executeCommands(HalDisplayId) = 0;
+
     // set power mode
     virtual status_t setPowerMode(PhysicalDisplayId, hal::PowerMode) = 0;
 
@@ -269,6 +271,8 @@ public:
 
     virtual void dump(std::string& out) const = 0;
 
+    virtual void dumpOverlayProperties(std::string& out) const = 0;
+
     virtual Hwc2::Composer* getComposer() const = 0;
 
     // Returns the first display connected at boot. Its connection via HWComposer::onHotplug,
@@ -358,6 +362,8 @@ public:
     status_t presentAndGetReleaseFences(
             HalDisplayId,
             std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) override;
+
+    status_t executeCommands(HalDisplayId) override;
 
     // set power mode
     status_t setPowerMode(PhysicalDisplayId, hal::PowerMode mode) override;
@@ -468,6 +474,7 @@ public:
 
     // for debugging ----------------------------------------------------------
     void dump(std::string& out) const override;
+    void dumpOverlayProperties(std::string& out) const override;
 
     Hwc2::Composer* getComposer() const override { return mComposer.get(); }
 

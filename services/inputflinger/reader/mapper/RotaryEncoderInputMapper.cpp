@@ -101,12 +101,12 @@ std::list<NotifyArgs> RotaryEncoderInputMapper::reset(nsecs_t when) {
     return InputMapper::reset(when);
 }
 
-std::list<NotifyArgs> RotaryEncoderInputMapper::process(const RawEvent* rawEvent) {
+std::list<NotifyArgs> RotaryEncoderInputMapper::process(const RawEvent& rawEvent) {
     std::list<NotifyArgs> out;
     mRotaryEncoderScrollAccumulator.process(rawEvent);
 
-    if (rawEvent->type == EV_SYN && rawEvent->code == SYN_REPORT) {
-        out += sync(rawEvent->when, rawEvent->readTime);
+    if (rawEvent.type == EV_SYN && rawEvent.code == SYN_REPORT) {
+        out += sync(rawEvent.when, rawEvent.readTime);
     }
     return out;
 }
@@ -125,7 +125,7 @@ std::list<NotifyArgs> RotaryEncoderInputMapper::sync(nsecs_t when, nsecs_t readT
     if (scrolled) {
         int32_t metaState = getContext()->getGlobalMetaState();
         // This is not a pointer, so it's not associated with a display.
-        int32_t displayId = ADISPLAY_ID_NONE;
+        ui::LogicalDisplayId displayId = ui::LogicalDisplayId::INVALID;
 
         if (mOrientation == ui::ROTATION_180) {
             scroll = -scroll;

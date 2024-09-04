@@ -28,7 +28,8 @@ InputState::InputState(const IdGenerator& idGenerator) : mIdGenerator(idGenerato
 
 InputState::~InputState() {}
 
-bool InputState::isHovering(DeviceId deviceId, uint32_t source, int32_t displayId) const {
+bool InputState::isHovering(DeviceId deviceId, uint32_t source,
+                            ui::LogicalDisplayId displayId) const {
     for (const MotionMemento& memento : mMotionMementos) {
         if (memento.deviceId == deviceId && memento.source == source &&
             memento.displayId == displayId && memento.hovering) {
@@ -95,12 +96,14 @@ bool InputState::trackMotion(const MotionEntry& entry, int32_t flags) {
         return true;
     }
 
-    if (!mMotionMementos.empty()) {
-        const MotionMemento& lastMemento = mMotionMementos.back();
-        if (isStylusEvent(lastMemento.source, lastMemento.pointerProperties) &&
-            !isStylusEvent(entry.source, entry.pointerProperties)) {
-            // We already have a stylus stream, and the new event is not from stylus.
-            return false;
+    if (!input_flags::enable_multi_device_same_window_stream()) {
+        if (!mMotionMementos.empty()) {
+            const MotionMemento& lastMemento = mMotionMementos.back();
+            if (isStylusEvent(lastMemento.source, lastMemento.pointerProperties) &&
+                !isStylusEvent(entry.source, entry.pointerProperties)) {
+                // We already have a stylus stream, and the new event is not from stylus.
+                return false;
+            }
         }
     }
 
@@ -336,33 +339,34 @@ bool InputState::shouldCancelPreviousStream(const MotionEntry& motionEntry) cons
         // it's unlikely that those two streams would be consistent with each other. Therefore,
         // cancel the previous gesture if the display id changes.
         if (motionEntry.displayId != lastMemento.displayId) {
-            LOG(INFO) << "Canceling stream: last displayId was "
-                      << inputEventSourceToString(lastMemento.displayId) << " and new event is "
-                      << motionEntry;
+            LOG(INFO) << "Canceling stream: last displayId was " << lastMemento.displayId
+                      << " and new event is " << motionEntry;
             return true;
         }
 
         return false;
     }
 
-    if (isStylusEvent(lastMemento.source, lastMemento.pointerProperties)) {
-        // A stylus is already active.
-        if (isStylusEvent(motionEntry.source, motionEntry.pointerProperties) &&
-            actionMasked == AMOTION_EVENT_ACTION_DOWN) {
-            // If this new event is from a different device, then cancel the old
-            // stylus and allow the new stylus to take over, but only if it's going down.
-            // Otherwise, they will start to race each other.
-            return true;
+    if (!input_flags::enable_multi_device_same_window_stream()) {
+        if (isStylusEvent(lastMemento.source, lastMemento.pointerProperties)) {
+            // A stylus is already active.
+            if (isStylusEvent(motionEntry.source, motionEntry.pointerProperties) &&
+                actionMasked == AMOTION_EVENT_ACTION_DOWN) {
+                // If this new event is from a different device, then cancel the old
+                // stylus and allow the new stylus to take over, but only if it's going down.
+                // Otherwise, they will start to race each other.
+                return true;
+            }
+
+            // Keep the current stylus gesture.
+            return false;
         }
 
-        // Keep the current stylus gesture.
-        return false;
-    }
-
-    // Cancel the current gesture if this is a start of a new gesture from a new device.
-    if (actionMasked == AMOTION_EVENT_ACTION_DOWN ||
-        actionMasked == AMOTION_EVENT_ACTION_HOVER_ENTER) {
-        return true;
+        // Cancel the current gesture if this is a start of a new gesture from a new device.
+        if (actionMasked == AMOTION_EVENT_ACTION_DOWN ||
+            actionMasked == AMOTION_EVENT_ACTION_HOVER_ENTER) {
+            return true;
+        }
     }
     // By default, don't cancel any events.
     return false;
@@ -495,67 +499,53 @@ std::vector<std::unique_ptr<MotionEntry>> InputState::synthesizeCancelationEvent
         nsecs_t currentTime) {
     std::vector<std::unique_ptr<MotionEntry>> events;
     std::vector<uint32_t> canceledPointerIndices;
-    std::vector<PointerProperties> pointerProperties(MAX_POINTERS);
-    std::vector<PointerCoords> pointerCoords(MAX_POINTERS);
+
     for (uint32_t pointerIdx = 0; pointerIdx < memento.getPointerCount(); pointerIdx++) {
         uint32_t pointerId = uint32_t(memento.pointerProperties[pointerIdx].id);
-        pointerProperties[pointerIdx] = memento.pointerProperties[pointerIdx];
-        pointerCoords[pointerIdx] = memento.pointerCoords[pointerIdx];
         if (pointerIds.test(pointerId)) {
             canceledPointerIndices.push_back(pointerIdx);
         }
     }
 
     if (canceledPointerIndices.size() == memento.getPointerCount()) {
-        const int32_t action =
-                memento.hovering ? AMOTION_EVENT_ACTION_HOVER_EXIT : AMOTION_EVENT_ACTION_CANCEL;
-        int32_t flags = memento.flags;
-        if (action == AMOTION_EVENT_ACTION_CANCEL) {
-            flags |= AMOTION_EVENT_FLAG_CANCELED;
+        // We are cancelling all pointers.
+        events.emplace_back(createCancelEntryForMemento(memento, currentTime));
+        return events;
+    }
+
+    // If we aren't canceling all pointers, we need to generate ACTION_POINTER_UP with
+    // FLAG_CANCELED for each of the canceled pointers. For each event, we must remove the
+    // previously canceled pointers from PointerProperties and PointerCoords, and update
+    // pointerCount appropriately. For convenience, sort the canceled pointer indices in
+    // descending order so that we can just slide the remaining pointers to the beginning of
+    // the array when a pointer is canceled.
+    std::sort(canceledPointerIndices.begin(), canceledPointerIndices.end(),
+              std::greater<uint32_t>());
+
+    std::vector<PointerProperties> pointerProperties = memento.pointerProperties;
+    std::vector<PointerCoords> pointerCoords = memento.pointerCoords;
+    for (const uint32_t pointerIdx : canceledPointerIndices) {
+        if (pointerProperties.size() <= 1) {
+            LOG(FATAL) << "Unexpected code path for canceling all pointers!";
         }
+        const int32_t action = AMOTION_EVENT_ACTION_POINTER_UP |
+                (pointerIdx << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
         events.push_back(
                 std::make_unique<MotionEntry>(mIdGenerator.nextId(), /*injectionState=*/nullptr,
                                               currentTime, memento.deviceId, memento.source,
                                               memento.displayId, memento.policyFlags, action,
-                                              /*actionButton=*/0, flags, AMETA_NONE,
-                                              /*buttonState=*/0, MotionClassification::NONE,
+                                              /*actionButton=*/0,
+                                              memento.flags | AMOTION_EVENT_FLAG_CANCELED,
+                                              AMETA_NONE, /*buttonState=*/0,
+                                              MotionClassification::NONE,
                                               AMOTION_EVENT_EDGE_FLAG_NONE, memento.xPrecision,
                                               memento.yPrecision, memento.xCursorPosition,
                                               memento.yCursorPosition, memento.downTime,
-                                              memento.pointerProperties, memento.pointerCoords));
-    } else {
-        // If we aren't canceling all pointers, we need to generate ACTION_POINTER_UP with
-        // FLAG_CANCELED for each of the canceled pointers. For each event, we must remove the
-        // previously canceled pointers from PointerProperties and PointerCoords, and update
-        // pointerCount appropriately. For convenience, sort the canceled pointer indices so that we
-        // can just slide the remaining pointers to the beginning of the array when a pointer is
-        // canceled.
-        std::sort(canceledPointerIndices.begin(), canceledPointerIndices.end(),
-                  std::greater<uint32_t>());
+                                              pointerProperties, pointerCoords));
 
-        uint32_t pointerCount = memento.getPointerCount();
-        for (const uint32_t pointerIdx : canceledPointerIndices) {
-            const int32_t action = pointerCount == 1 ? AMOTION_EVENT_ACTION_CANCEL
-                                                     : AMOTION_EVENT_ACTION_POINTER_UP |
-                            (pointerIdx << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
-            events.push_back(
-                    std::make_unique<MotionEntry>(mIdGenerator.nextId(), /*injectionState=*/nullptr,
-                                                  currentTime, memento.deviceId, memento.source,
-                                                  memento.displayId, memento.policyFlags, action,
-                                                  /*actionButton=*/0,
-                                                  memento.flags | AMOTION_EVENT_FLAG_CANCELED,
-                                                  AMETA_NONE, /*buttonState=*/0,
-                                                  MotionClassification::NONE,
-                                                  AMOTION_EVENT_EDGE_FLAG_NONE, memento.xPrecision,
-                                                  memento.yPrecision, memento.xCursorPosition,
-                                                  memento.yCursorPosition, memento.downTime,
-                                                  pointerProperties, pointerCoords));
-
-            // Cleanup pointer information
-            pointerProperties.erase(pointerProperties.begin() + pointerIdx);
-            pointerCoords.erase(pointerCoords.begin() + pointerIdx);
-            pointerCount--;
-        }
+        // Cleanup pointer information
+        pointerProperties.erase(pointerProperties.begin() + pointerIdx);
+        pointerCoords.erase(pointerCoords.begin() + pointerIdx);
     }
     return events;
 }

@@ -21,15 +21,43 @@
 #include <attestation/HmacKeyManager.h>
 #include <binder/Parcel.h>
 #include <gtest/gtest.h>
-#include <gui/constants.h>
 #include <input/Input.h>
+#include <input/InputEventBuilders.h>
 
 namespace android {
 
-// Default display id.
-static constexpr int32_t DISPLAY_ID = ADISPLAY_ID_DEFAULT;
+namespace {
 
-static constexpr float EPSILON = MotionEvent::ROUNDING_PRECISION;
+// Default display id.
+constexpr ui::LogicalDisplayId DISPLAY_ID = ui::LogicalDisplayId::DEFAULT;
+
+constexpr float EPSILON = MotionEvent::ROUNDING_PRECISION;
+
+constexpr auto POINTER_0_DOWN =
+        AMOTION_EVENT_ACTION_POINTER_DOWN | (0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+
+constexpr auto POINTER_1_DOWN =
+        AMOTION_EVENT_ACTION_POINTER_DOWN | (1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+
+constexpr auto POINTER_0_UP =
+        AMOTION_EVENT_ACTION_POINTER_UP | (0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+
+constexpr auto POINTER_1_UP =
+        AMOTION_EVENT_ACTION_POINTER_UP | (1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+
+std::array<float, 9> asFloat9(const ui::Transform& t) {
+    std::array<float, 9> mat{};
+    mat[0] = t[0][0];
+    mat[1] = t[1][0];
+    mat[2] = t[2][0];
+    mat[3] = t[0][1];
+    mat[4] = t[1][1];
+    mat[5] = t[2][1];
+    mat[6] = t[0][2];
+    mat[7] = t[1][2];
+    mat[8] = t[2][2];
+    return mat;
+}
 
 class BaseTest : public testing::Test {
 protected:
@@ -37,6 +65,8 @@ protected:
                                                      11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
                                                      22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 };
+
+} // namespace
 
 // --- PointerCoordsTest ---
 
@@ -216,7 +246,7 @@ TEST_F(KeyEventTest, Properties) {
     ASSERT_EQ(AINPUT_SOURCE_JOYSTICK, event.getSource());
 
     // Set display id.
-    constexpr int32_t newDisplayId = 2;
+    constexpr ui::LogicalDisplayId newDisplayId = ui::LogicalDisplayId{2};
     event.setDisplayId(newDisplayId);
     ASSERT_EQ(newDisplayId, event.getDisplayId());
 }
@@ -332,13 +362,15 @@ void MotionEventTest::SetUp() {
 }
 
 void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
+    const int32_t flags = AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
+            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
+            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION;
     event->initialize(mId, 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, HMAC,
-                      AMOTION_EVENT_ACTION_MOVE, 0, AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED,
-                      AMOTION_EVENT_EDGE_FLAG_TOP, AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY,
-                      MotionClassification::NONE, mTransform, 2.0f, 2.1f,
-                      AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION,
-                      mRawTransform, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 2,
-                      mPointerProperties, mSamples[0].pointerCoords);
+                      AMOTION_EVENT_ACTION_MOVE, 0, flags, AMOTION_EVENT_EDGE_FLAG_TOP,
+                      AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY, MotionClassification::NONE,
+                      mTransform, 2.0f, 2.1f, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                      AMOTION_EVENT_INVALID_CURSOR_POSITION, mRawTransform, ARBITRARY_DOWN_TIME,
+                      ARBITRARY_EVENT_TIME, 2, mPointerProperties, mSamples[0].pointerCoords);
     event->addSample(ARBITRARY_EVENT_TIME + 1, mSamples[1].pointerCoords);
     event->addSample(ARBITRARY_EVENT_TIME + 2, mSamples[2].pointerCoords);
 }
@@ -352,14 +384,19 @@ void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
     ASSERT_EQ(DISPLAY_ID, event->getDisplayId());
     EXPECT_EQ(HMAC, event->getHmac());
     ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, event->getAction());
-    ASSERT_EQ(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED, event->getFlags());
+    ASSERT_EQ(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
+                      AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
+                      AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION,
+              event->getFlags());
     ASSERT_EQ(AMOTION_EVENT_EDGE_FLAG_TOP, event->getEdgeFlags());
     ASSERT_EQ(AMETA_ALT_ON, event->getMetaState());
     ASSERT_EQ(AMOTION_EVENT_BUTTON_PRIMARY, event->getButtonState());
     ASSERT_EQ(MotionClassification::NONE, event->getClassification());
     EXPECT_EQ(mTransform, event->getTransform());
-    ASSERT_EQ(X_OFFSET, event->getXOffset());
-    ASSERT_EQ(Y_OFFSET, event->getYOffset());
+    ASSERT_NEAR((-RAW_X_OFFSET / RAW_X_SCALE) * X_SCALE + X_OFFSET, event->getRawXOffset(),
+                EPSILON);
+    ASSERT_NEAR((-RAW_Y_OFFSET / RAW_Y_SCALE) * Y_SCALE + Y_OFFSET, event->getRawYOffset(),
+                EPSILON);
     ASSERT_EQ(2.0f, event->getXPrecision());
     ASSERT_EQ(2.1f, event->getYPrecision());
     ASSERT_EQ(ARBITRARY_DOWN_TIME, event->getDownTime());
@@ -513,7 +550,7 @@ TEST_F(MotionEventTest, Properties) {
     ASSERT_EQ(AINPUT_SOURCE_JOYSTICK, event.getSource());
 
     // Set displayId.
-    constexpr int32_t newDisplayId = 2;
+    constexpr ui::LogicalDisplayId newDisplayId = ui::LogicalDisplayId{2};
     event.setDisplayId(newDisplayId);
     ASSERT_EQ(newDisplayId, event.getDisplayId());
 
@@ -554,25 +591,168 @@ TEST_F(MotionEventTest, CopyFrom_DoNotKeepHistory) {
     ASSERT_EQ(event.getX(0), copy.getX(0));
 }
 
+TEST_F(MotionEventTest, SplitPointerDown) {
+    MotionEvent event = MotionEventBuilder(POINTER_1_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
+                                .downTime(ARBITRARY_DOWN_TIME)
+                                .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                                .pointer(PointerBuilder(/*id=*/6, ToolType::FINGER).x(6).y(6))
+                                .pointer(PointerBuilder(/*id=*/8, ToolType::FINGER).x(8).y(8))
+                                .build();
+
+    MotionEvent splitDown;
+    std::bitset<MAX_POINTER_ID + 1> splitDownIds{};
+    splitDownIds.set(6, true);
+    splitDown.splitFrom(event, splitDownIds, /*eventId=*/42);
+    ASSERT_EQ(splitDown.getAction(), AMOTION_EVENT_ACTION_DOWN);
+    ASSERT_EQ(splitDown.getPointerCount(), 1u);
+    ASSERT_EQ(splitDown.getPointerId(0), 6);
+    ASSERT_EQ(splitDown.getX(0), 6);
+    ASSERT_EQ(splitDown.getY(0), 6);
+
+    MotionEvent splitPointerDown;
+    std::bitset<MAX_POINTER_ID + 1> splitPointerDownIds{};
+    splitPointerDownIds.set(6, true);
+    splitPointerDownIds.set(8, true);
+    splitPointerDown.splitFrom(event, splitPointerDownIds, /*eventId=*/42);
+    ASSERT_EQ(splitPointerDown.getAction(), POINTER_0_DOWN);
+    ASSERT_EQ(splitPointerDown.getPointerCount(), 2u);
+    ASSERT_EQ(splitPointerDown.getPointerId(0), 6);
+    ASSERT_EQ(splitPointerDown.getX(0), 6);
+    ASSERT_EQ(splitPointerDown.getY(0), 6);
+    ASSERT_EQ(splitPointerDown.getPointerId(1), 8);
+    ASSERT_EQ(splitPointerDown.getX(1), 8);
+    ASSERT_EQ(splitPointerDown.getY(1), 8);
+
+    MotionEvent splitMove;
+    std::bitset<MAX_POINTER_ID + 1> splitMoveIds{};
+    splitMoveIds.set(4, true);
+    splitMove.splitFrom(event, splitMoveIds, /*eventId=*/43);
+    ASSERT_EQ(splitMove.getAction(), AMOTION_EVENT_ACTION_MOVE);
+    ASSERT_EQ(splitMove.getPointerCount(), 1u);
+    ASSERT_EQ(splitMove.getPointerId(0), 4);
+    ASSERT_EQ(splitMove.getX(0), 4);
+    ASSERT_EQ(splitMove.getY(0), 4);
+}
+
+TEST_F(MotionEventTest, SplitPointerUp) {
+    MotionEvent event = MotionEventBuilder(POINTER_0_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                .downTime(ARBITRARY_DOWN_TIME)
+                                .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                                .pointer(PointerBuilder(/*id=*/6, ToolType::FINGER).x(6).y(6))
+                                .pointer(PointerBuilder(/*id=*/8, ToolType::FINGER).x(8).y(8))
+                                .build();
+
+    MotionEvent splitUp;
+    std::bitset<MAX_POINTER_ID + 1> splitUpIds{};
+    splitUpIds.set(4, true);
+    splitUp.splitFrom(event, splitUpIds, /*eventId=*/42);
+    ASSERT_EQ(splitUp.getAction(), AMOTION_EVENT_ACTION_UP);
+    ASSERT_EQ(splitUp.getPointerCount(), 1u);
+    ASSERT_EQ(splitUp.getPointerId(0), 4);
+    ASSERT_EQ(splitUp.getX(0), 4);
+    ASSERT_EQ(splitUp.getY(0), 4);
+
+    MotionEvent splitPointerUp;
+    std::bitset<MAX_POINTER_ID + 1> splitPointerUpIds{};
+    splitPointerUpIds.set(4, true);
+    splitPointerUpIds.set(8, true);
+    splitPointerUp.splitFrom(event, splitPointerUpIds, /*eventId=*/42);
+    ASSERT_EQ(splitPointerUp.getAction(), POINTER_0_UP);
+    ASSERT_EQ(splitPointerUp.getPointerCount(), 2u);
+    ASSERT_EQ(splitPointerUp.getPointerId(0), 4);
+    ASSERT_EQ(splitPointerUp.getX(0), 4);
+    ASSERT_EQ(splitPointerUp.getY(0), 4);
+    ASSERT_EQ(splitPointerUp.getPointerId(1), 8);
+    ASSERT_EQ(splitPointerUp.getX(1), 8);
+    ASSERT_EQ(splitPointerUp.getY(1), 8);
+
+    MotionEvent splitMove;
+    std::bitset<MAX_POINTER_ID + 1> splitMoveIds{};
+    splitMoveIds.set(6, true);
+    splitMoveIds.set(8, true);
+    splitMove.splitFrom(event, splitMoveIds, /*eventId=*/43);
+    ASSERT_EQ(splitMove.getAction(), AMOTION_EVENT_ACTION_MOVE);
+    ASSERT_EQ(splitMove.getPointerCount(), 2u);
+    ASSERT_EQ(splitMove.getPointerId(0), 6);
+    ASSERT_EQ(splitMove.getX(0), 6);
+    ASSERT_EQ(splitMove.getY(0), 6);
+    ASSERT_EQ(splitMove.getPointerId(1), 8);
+    ASSERT_EQ(splitMove.getX(1), 8);
+    ASSERT_EQ(splitMove.getY(1), 8);
+}
+
+TEST_F(MotionEventTest, SplitPointerUpCancel) {
+    MotionEvent event = MotionEventBuilder(POINTER_1_UP, AINPUT_SOURCE_TOUCHSCREEN)
+                                .downTime(ARBITRARY_DOWN_TIME)
+                                .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                                .pointer(PointerBuilder(/*id=*/6, ToolType::FINGER).x(6).y(6))
+                                .pointer(PointerBuilder(/*id=*/8, ToolType::FINGER).x(8).y(8))
+                                .addFlag(AMOTION_EVENT_FLAG_CANCELED)
+                                .build();
+
+    MotionEvent splitUp;
+    std::bitset<MAX_POINTER_ID + 1> splitUpIds{};
+    splitUpIds.set(6, true);
+    splitUp.splitFrom(event, splitUpIds, /*eventId=*/42);
+    ASSERT_EQ(splitUp.getAction(), AMOTION_EVENT_ACTION_CANCEL);
+    ASSERT_EQ(splitUp.getPointerCount(), 1u);
+    ASSERT_EQ(splitUp.getPointerId(0), 6);
+    ASSERT_EQ(splitUp.getX(0), 6);
+    ASSERT_EQ(splitUp.getY(0), 6);
+}
+
+TEST_F(MotionEventTest, SplitPointerMove) {
+    MotionEvent event = MotionEventBuilder(AMOTION_EVENT_ACTION_MOVE, AINPUT_SOURCE_TOUCHSCREEN)
+                                .downTime(ARBITRARY_DOWN_TIME)
+                                .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                                .pointer(PointerBuilder(/*id=*/6, ToolType::FINGER).x(6).y(6))
+                                .pointer(PointerBuilder(/*id=*/8, ToolType::FINGER).x(8).y(8))
+                                .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
+                                .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
+                                .build();
+
+    MotionEvent splitMove;
+    std::bitset<MAX_POINTER_ID + 1> splitMoveIds{};
+    splitMoveIds.set(4, true);
+    splitMoveIds.set(8, true);
+    splitMove.splitFrom(event, splitMoveIds, /*eventId=*/42);
+    ASSERT_EQ(splitMove.getAction(), AMOTION_EVENT_ACTION_MOVE);
+    ASSERT_EQ(splitMove.getPointerCount(), 2u);
+    ASSERT_EQ(splitMove.getPointerId(0), 4);
+    ASSERT_EQ(splitMove.getX(0), event.getX(0));
+    ASSERT_EQ(splitMove.getY(0), event.getY(0));
+    ASSERT_EQ(splitMove.getRawX(0), event.getRawX(0));
+    ASSERT_EQ(splitMove.getRawY(0), event.getRawY(0));
+    ASSERT_EQ(splitMove.getPointerId(1), 8);
+    ASSERT_EQ(splitMove.getX(1), event.getX(2));
+    ASSERT_EQ(splitMove.getY(1), event.getY(2));
+    ASSERT_EQ(splitMove.getRawX(1), event.getRawX(2));
+    ASSERT_EQ(splitMove.getRawY(1), event.getRawY(2));
+}
+
 TEST_F(MotionEventTest, OffsetLocation) {
     MotionEvent event;
     initializeEventWithHistory(&event);
+    const float xOffset = event.getRawXOffset();
+    const float yOffset = event.getRawYOffset();
 
     event.offsetLocation(5.0f, -2.0f);
 
-    ASSERT_EQ(X_OFFSET + 5.0f, event.getXOffset());
-    ASSERT_EQ(Y_OFFSET - 2.0f, event.getYOffset());
+    ASSERT_EQ(xOffset + 5.0f, event.getRawXOffset());
+    ASSERT_EQ(yOffset - 2.0f, event.getRawYOffset());
 }
 
 TEST_F(MotionEventTest, Scale) {
     MotionEvent event;
     initializeEventWithHistory(&event);
     const float unscaledOrientation = event.getOrientation(0);
+    const float unscaledXOffset = event.getRawXOffset();
+    const float unscaledYOffset = event.getRawYOffset();
 
     event.scale(2.0f);
 
-    ASSERT_EQ(X_OFFSET * 2, event.getXOffset());
-    ASSERT_EQ(Y_OFFSET * 2, event.getYOffset());
+    ASSERT_EQ(unscaledXOffset * 2, event.getRawXOffset());
+    ASSERT_EQ(unscaledYOffset * 2, event.getRawYOffset());
 
     ASSERT_NEAR((RAW_X_OFFSET + 210 * RAW_X_SCALE) * 2, event.getRawX(0), EPSILON);
     ASSERT_NEAR((RAW_Y_OFFSET + 211 * RAW_Y_SCALE) * 2, event.getRawY(0), EPSILON);
@@ -642,8 +822,10 @@ TEST_F(MotionEventTest, Transform) {
     }
     MotionEvent event;
     ui::Transform identityTransform;
+    const int32_t flags = AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
+            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION;
     event.initialize(InputEvent::nextId(), /*deviceId=*/0, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID,
-                     INVALID_HMAC, AMOTION_EVENT_ACTION_MOVE, /*actionButton=*/0, /*flags=*/0,
+                     INVALID_HMAC, AMOTION_EVENT_ACTION_MOVE, /*actionButton=*/0, flags,
                      AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, /*buttonState=*/0,
                      MotionClassification::NONE, identityTransform, /*xPrecision=*/0,
                      /*yPrecision=*/0, /*xCursorPosition=*/3 + RADIUS, /*yCursorPosition=*/2,
@@ -701,11 +883,10 @@ MotionEvent createMotionEvent(int32_t source, uint32_t action, float x, float y,
     pointerCoords.back().setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, dy);
     nsecs_t eventTime = systemTime(SYSTEM_TIME_MONOTONIC);
     MotionEvent event;
-    event.initialize(InputEvent::nextId(), /* deviceId */ 1, source,
-                     /* displayId */ 0, INVALID_HMAC, action,
-                     /* actionButton */ 0, /* flags */ 0, /* edgeFlags */ 0, AMETA_NONE,
-                     /* buttonState */ 0, MotionClassification::NONE, transform,
-                     /* xPrecision */ 0, /* yPrecision */ 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+    event.initialize(InputEvent::nextId(), /*deviceId=*/1, source, ui::LogicalDisplayId::DEFAULT,
+                     INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/0, /*edgeFlags=*/0,
+                     AMETA_NONE, /*buttonState=*/0, MotionClassification::NONE, transform,
+                     /*xPrecision=*/0, /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                      AMOTION_EVENT_INVALID_CURSOR_POSITION, rawTransform, eventTime, eventTime,
                      pointerCoords.size(), pointerProperties.data(), pointerCoords.data());
     return event;
@@ -929,6 +1110,92 @@ TEST_F(MotionEventTest, CoordinatesAreRoundedAppropriately) {
     ASSERT_EQ(EXPECTED.y, event.getRawY(0));
     ASSERT_EQ(EXPECTED.x, event.getXCursorPosition());
     ASSERT_EQ(EXPECTED.y, event.getYCursorPosition());
+}
+
+TEST_F(MotionEventTest, InvalidOrientationNotRotated) {
+    // This touch event does not have a value for AXIS_ORIENTATION, and the flags are implicitly
+    // set to 0. The transform is set to a 90-degree rotation.
+    MotionEvent event = MotionEventBuilder(AMOTION_EVENT_ACTION_MOVE, AINPUT_SOURCE_TOUCHSCREEN)
+                                .downTime(ARBITRARY_DOWN_TIME)
+                                .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                                .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
+                                .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
+                                .build();
+    ASSERT_EQ(event.getOrientation(/*pointerIndex=*/0), 0.f);
+    event.transform(asFloat9(ui::Transform(ui::Transform::ROT_90, 100, 100)));
+    ASSERT_EQ(event.getOrientation(/*pointerIndex=*/0), 0.f);
+    event.transform(asFloat9(ui::Transform(ui::Transform::ROT_180, 100, 100)));
+    ASSERT_EQ(event.getOrientation(/*pointerIndex=*/0), 0.f);
+    event.applyTransform(asFloat9(ui::Transform(ui::Transform::ROT_270, 100, 100)));
+    ASSERT_EQ(event.getOrientation(/*pointerIndex=*/0), 0.f);
+}
+
+TEST_F(MotionEventTest, ValidZeroOrientationRotated) {
+    // This touch events will implicitly have a value of 0 for its AXIS_ORIENTATION.
+    auto builder = MotionEventBuilder(AMOTION_EVENT_ACTION_MOVE, AINPUT_SOURCE_TOUCHSCREEN)
+                           .downTime(ARBITRARY_DOWN_TIME)
+                           .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
+                           .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
+                           .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
+                           .addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION);
+    MotionEvent nonDirectionalEvent = builder.build();
+    MotionEvent directionalEvent =
+            builder.addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION).build();
+
+    // The angle is rotated by the initial transform, a 90-degree rotation.
+    ASSERT_NEAR(fabs(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0)), M_PI_2, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), M_PI_2, EPSILON);
+
+    nonDirectionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_90, 100, 100)));
+    directionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_90, 100, 100)));
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), 0.f, EPSILON);
+    ASSERT_NEAR(fabs(directionalEvent.getOrientation(/*pointerIndex=*/0)), M_PI, EPSILON);
+
+    nonDirectionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_180, 100, 100)));
+    directionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_180, 100, 100)));
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), 0.f, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), 0.f, EPSILON);
+
+    nonDirectionalEvent.applyTransform(asFloat9(ui::Transform(ui::Transform::ROT_270, 100, 100)));
+    directionalEvent.applyTransform(asFloat9(ui::Transform(ui::Transform::ROT_270, 100, 100)));
+    ASSERT_NEAR(fabs(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0)), M_PI_2, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), -M_PI_2, EPSILON);
+}
+
+TEST_F(MotionEventTest, ValidNonZeroOrientationRotated) {
+    const float initial = 1.f;
+    auto builder = MotionEventBuilder(AMOTION_EVENT_ACTION_MOVE, AINPUT_SOURCE_TOUCHSCREEN)
+                           .downTime(ARBITRARY_DOWN_TIME)
+                           .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER)
+                                            .x(4)
+                                            .y(4)
+                                            .axis(AMOTION_EVENT_AXIS_ORIENTATION, initial))
+                           .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
+                           .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
+                           .addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION);
+
+    MotionEvent nonDirectionalEvent = builder.build();
+    MotionEvent directionalEvent =
+            builder.addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION).build();
+
+    // The angle is rotated by the initial transform, a 90-degree rotation.
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), initial - M_PI_2, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), initial + M_PI_2, EPSILON);
+
+    nonDirectionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_90, 100, 100)));
+    directionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_90, 100, 100)));
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), initial, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), initial - M_PI, EPSILON);
+
+    nonDirectionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_180, 100, 100)));
+    directionalEvent.transform(asFloat9(ui::Transform(ui::Transform::ROT_180, 100, 100)));
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), initial, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), initial, EPSILON);
+
+    nonDirectionalEvent.applyTransform(asFloat9(ui::Transform(ui::Transform::ROT_270, 100, 100)));
+    directionalEvent.applyTransform(asFloat9(ui::Transform(ui::Transform::ROT_270, 100, 100)));
+    ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), initial - M_PI_2, EPSILON);
+    ASSERT_NEAR(directionalEvent.getOrientation(/*pointerIndex=*/0), initial - M_PI_2, EPSILON);
 }
 
 } // namespace android

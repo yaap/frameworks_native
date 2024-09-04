@@ -306,7 +306,7 @@ protected:
     virtual void finishFrame(GpuCompositionResult&&) = 0;
     virtual std::optional<base::unique_fd> composeSurfaces(
             const Region&, std::shared_ptr<renderengine::ExternalTexture>, base::unique_fd&) = 0;
-    virtual void presentFrameAndReleaseLayers() = 0;
+    virtual void presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) = 0;
     virtual void renderCachedSets(const CompositionRefreshArgs&) = 0;
     virtual bool chooseCompositionStrategy(
             std::optional<android::HWComposer::DeviceRequestedChanges>*) = 0;
@@ -314,6 +314,7 @@ protected:
             const std::optional<android::HWComposer::DeviceRequestedChanges>& changes) = 0;
     virtual bool getSkipColorTransform() const = 0;
     virtual FrameFences presentFrame() = 0;
+    virtual void executeCommands() = 0;
     virtual std::vector<LayerFE::LayerSettings> generateClientCompositionRequests(
             bool supportsProtectedContent, ui::Dataspace outputDataspace,
             std::vector<LayerFE*> &outLayerRef) = 0;
@@ -321,8 +322,11 @@ protected:
             const Region& flashRegion,
             std::vector<LayerFE::LayerSettings>& clientCompositionLayers) = 0;
     virtual void setExpensiveRenderingExpected(bool enabled) = 0;
+    virtual void setHintSessionGpuStart(TimePoint startTime) = 0;
     virtual void setHintSessionGpuFence(std::unique_ptr<FenceTime>&& gpuFence) = 0;
+    virtual void setHintSessionRequiresRenderEngine(bool requiresRenderEngine) = 0;
     virtual bool isPowerHintSessionEnabled() = 0;
+    virtual bool isPowerHintSessionGpuReportingEnabled() = 0;
     virtual void cacheClientCompositionRequests(uint32_t cacheSize) = 0;
     virtual bool canPredictCompositionStrategy(const CompositionRefreshArgs&) = 0;
 };

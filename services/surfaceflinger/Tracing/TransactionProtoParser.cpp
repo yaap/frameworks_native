@@ -247,7 +247,8 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_auto_refresh(layer.autoRefresh);
     }
     if (layer.what & layer_state_t::eTrustedOverlayChanged) {
-        proto.set_is_trusted_overlay(layer.isTrustedOverlay);
+        proto.set_is_trusted_overlay(layer.trustedOverlay == gui::TrustedOverlay::ENABLED);
+        // TODO(b/339701674) update protos
     }
     if (layer.what & layer_state_t::eBufferCropChanged) {
         LayerProtoHelper::writeToProto(layer.bufferCrop, proto.mutable_buffer_crop());
@@ -435,6 +436,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.bufferData->flags = ftl::Flags<BufferData::BufferDataChange>(bufferProto.flags());
         layer.bufferData->cachedBuffer.id = bufferProto.cached_buffer_id();
         layer.bufferData->acquireFence = Fence::NO_FENCE;
+        layer.bufferData->dequeueTime = -1;
     }
 
     if (proto.what() & layer_state_t::eApiChanged) {
@@ -515,7 +517,8 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.autoRefresh = proto.auto_refresh();
     }
     if (proto.what() & layer_state_t::eTrustedOverlayChanged) {
-        layer.isTrustedOverlay = proto.is_trusted_overlay();
+        layer.trustedOverlay = proto.is_trusted_overlay() ? gui::TrustedOverlay::ENABLED
+                                                          : gui::TrustedOverlay::UNSET;
     }
     if (proto.what() & layer_state_t::eBufferCropChanged) {
         LayerProtoHelper::readFromProto(proto.buffer_crop(), layer.bufferCrop);
@@ -566,7 +569,7 @@ perfetto::protos::DisplayInfo TransactionProtoParser::toProto(
         const frontend::DisplayInfo& displayInfo, uint32_t layerStack) {
     perfetto::protos::DisplayInfo proto;
     proto.set_layer_stack(layerStack);
-    proto.set_display_id(displayInfo.info.displayId);
+    proto.set_display_id(displayInfo.info.displayId.val());
     proto.set_logical_width(displayInfo.info.logicalWidth);
     proto.set_logical_height(displayInfo.info.logicalHeight);
     asProto(proto.mutable_transform_inverse(), displayInfo.info.transform);
@@ -588,7 +591,7 @@ void fromProto2(ui::Transform& outTransform, const perfetto::protos::Transform& 
 frontend::DisplayInfo TransactionProtoParser::fromProto(
         const perfetto::protos::DisplayInfo& proto) {
     frontend::DisplayInfo displayInfo;
-    displayInfo.info.displayId = proto.display_id();
+    displayInfo.info.displayId = ui::LogicalDisplayId{proto.display_id()};
     displayInfo.info.logicalWidth = proto.logical_width();
     displayInfo.info.logicalHeight = proto.logical_height();
     fromProto2(displayInfo.info.transform, proto.transform_inverse());

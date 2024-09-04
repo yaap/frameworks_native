@@ -38,10 +38,10 @@ struct Visitor : V... {
 
 template <typename Backend>
 ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend)
-      : mTracerThread(
+      : mBackend(std::move(innerBackend)),
+        mTracerThread(
                 "InputTracer", [this]() { threadLoop(); },
-                [this]() { mThreadWakeCondition.notify_all(); }),
-        mBackend(std::move(innerBackend)) {}
+                [this]() { mThreadWakeCondition.notify_all(); }) {}
 
 template <typename Backend>
 ThreadedBackend<Backend>::~ThreadedBackend() {
@@ -53,23 +53,29 @@ ThreadedBackend<Backend>::~ThreadedBackend() {
 }
 
 template <typename Backend>
-void ThreadedBackend<Backend>::traceMotionEvent(const TracedMotionEvent& event) {
+void ThreadedBackend<Backend>::traceMotionEvent(const TracedMotionEvent& event,
+                                                const TracedEventMetadata& metadata) {
     std::scoped_lock lock(mLock);
-    mQueue.emplace_back(event);
+    mQueue.emplace_back(event, metadata);
+    setIdleStatus(false);
     mThreadWakeCondition.notify_all();
 }
 
 template <typename Backend>
-void ThreadedBackend<Backend>::traceKeyEvent(const TracedKeyEvent& event) {
+void ThreadedBackend<Backend>::traceKeyEvent(const TracedKeyEvent& event,
+                                             const TracedEventMetadata& metadata) {
     std::scoped_lock lock(mLock);
-    mQueue.emplace_back(event);
+    mQueue.emplace_back(event, metadata);
+    setIdleStatus(false);
     mThreadWakeCondition.notify_all();
 }
 
 template <typename Backend>
-void ThreadedBackend<Backend>::traceWindowDispatch(const WindowDispatchArgs& dispatchArgs) {
+void ThreadedBackend<Backend>::traceWindowDispatch(const WindowDispatchArgs& dispatchArgs,
+                                                   const TracedEventMetadata& metadata) {
     std::scoped_lock lock(mLock);
-    mQueue.emplace_back(dispatchArgs);
+    mQueue.emplace_back(dispatchArgs, metadata);
+    setIdleStatus(false);
     mThreadWakeCondition.notify_all();
 }
 
@@ -81,10 +87,15 @@ void ThreadedBackend<Backend>::threadLoop() {
         std::unique_lock lock(mLock);
         base::ScopedLockAssertion assumeLocked(mLock);
 
+        if (mQueue.empty()) {
+            setIdleStatus(true);
+        }
+
         // Wait until we need to process more events or exit.
         mThreadWakeCondition.wait(lock,
                                   [&]() REQUIRES(mLock) { return mThreadExit || !mQueue.empty(); });
         if (mThreadExit) {
+            setIdleStatus(true);
             return;
         }
 
@@ -93,15 +104,47 @@ void ThreadedBackend<Backend>::threadLoop() {
 
     // Trace the events into the backend without holding the lock to reduce the amount of
     // work performed in the critical section.
-    for (const auto& entry : entries) {
-        std::visit(Visitor{[&](const TracedMotionEvent& e) { mBackend.traceMotionEvent(e); },
-                           [&](const TracedKeyEvent& e) { mBackend.traceKeyEvent(e); },
+    for (const auto& [entry, traceArgs] : entries) {
+        std::visit(Visitor{[&](const TracedMotionEvent& e) {
+                               mBackend.traceMotionEvent(e, traceArgs);
+                           },
+                           [&](const TracedKeyEvent& e) { mBackend.traceKeyEvent(e, traceArgs); },
                            [&](const WindowDispatchArgs& args) {
-                               mBackend.traceWindowDispatch(args);
+                               mBackend.traceWindowDispatch(args, traceArgs);
                            }},
                    entry);
     }
     entries.clear();
+}
+
+template <typename Backend>
+std::function<void()> ThreadedBackend<Backend>::getIdleWaiterForTesting() {
+    std::scoped_lock lock(mLock);
+    if (!mIdleWaiter) {
+        mIdleWaiter = std::make_shared<IdleWaiter>();
+    }
+
+    // Return a lambda that holds a strong reference to the idle waiter, whose lifetime can extend
+    // beyond this threaded backend object.
+    return [idleWaiter = mIdleWaiter]() {
+        std::unique_lock idleLock(idleWaiter->idleLock);
+        base::ScopedLockAssertion assumeLocked(idleWaiter->idleLock);
+        idleWaiter->threadIdleCondition.wait(idleLock, [&]() REQUIRES(idleWaiter->idleLock) {
+            return idleWaiter->isIdle;
+        });
+    };
+}
+
+template <typename Backend>
+void ThreadedBackend<Backend>::setIdleStatus(bool isIdle) {
+    if (!mIdleWaiter) {
+        return;
+    }
+    std::scoped_lock idleLock(mIdleWaiter->idleLock);
+    mIdleWaiter->isIdle = isIdle;
+    if (isIdle) {
+        mIdleWaiter->threadIdleCondition.notify_all();
+    }
 }
 
 // Explicit template instantiation for the PerfettoBackend.

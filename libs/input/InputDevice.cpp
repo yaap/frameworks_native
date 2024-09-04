@@ -23,7 +23,6 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <ftl/enum.h>
-#include <gui/constants.h>
 #include <input/InputDevice.h>
 #include <input/InputEventLabels.h>
 
@@ -170,7 +169,7 @@ std::string InputDeviceIdentifier::getCanonicalName() const {
 // --- InputDeviceInfo ---
 
 InputDeviceInfo::InputDeviceInfo() {
-    initialize(-1, 0, -1, InputDeviceIdentifier(), "", false, false, ADISPLAY_ID_NONE);
+    initialize(-1, 0, -1, InputDeviceIdentifier(), "", false, false, ui::LogicalDisplayId::INVALID);
 }
 
 InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
@@ -187,6 +186,7 @@ InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
         mKeyCharacterMap(other.mKeyCharacterMap),
         mUsiVersion(other.mUsiVersion),
         mAssociatedDisplayId(other.mAssociatedDisplayId),
+        mEnabled(other.mEnabled),
         mHasVibrator(other.mHasVibrator),
         mHasBattery(other.mHasBattery),
         mHasButtonUnderPad(other.mHasButtonUnderPad),
@@ -201,8 +201,9 @@ InputDeviceInfo::~InputDeviceInfo() {
 
 void InputDeviceInfo::initialize(int32_t id, int32_t generation, int32_t controllerNumber,
                                  const InputDeviceIdentifier& identifier, const std::string& alias,
-                                 bool isExternal, bool hasMic, int32_t associatedDisplayId,
-                                 InputDeviceViewBehavior viewBehavior) {
+                                 bool isExternal, bool hasMic,
+                                 ui::LogicalDisplayId associatedDisplayId,
+                                 InputDeviceViewBehavior viewBehavior, bool enabled) {
     mId = id;
     mGeneration = generation;
     mControllerNumber = controllerNumber;
@@ -213,6 +214,7 @@ void InputDeviceInfo::initialize(int32_t id, int32_t generation, int32_t control
     mSources = 0;
     mKeyboardType = AINPUT_KEYBOARD_TYPE_NONE;
     mAssociatedDisplayId = associatedDisplayId;
+    mEnabled = enabled;
     mHasVibrator = false;
     mHasBattery = false;
     mHasButtonUnderPad = false;
@@ -271,10 +273,7 @@ void InputDeviceInfo::addLightInfo(const InputDeviceLightInfo& info) {
 }
 
 void InputDeviceInfo::setKeyboardType(int32_t keyboardType) {
-    static_assert(AINPUT_KEYBOARD_TYPE_NONE < AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
-    static_assert(AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC < AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // There can be multiple subdevices with different keyboard types, set it to the highest type
-    mKeyboardType = std::max(mKeyboardType, keyboardType);
+    mKeyboardType = keyboardType;
 }
 
 void InputDeviceInfo::setKeyboardLayoutInfo(KeyboardLayoutInfo layoutInfo) {

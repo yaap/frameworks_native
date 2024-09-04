@@ -23,7 +23,7 @@
 #include <ftl/flags.h>
 #include <ftl/mixins.h>
 #include <gui/PidUid.h>
-#include <gui/constants.h>
+#include <ui/LogicalDisplayId.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Size.h>
@@ -178,6 +178,8 @@ struct WindowInfo : public Parcelable {
                 static_cast<uint32_t>(os::InputConfig::CLONE),
         GLOBAL_STYLUS_BLOCKS_TOUCH =
                 static_cast<uint32_t>(os::InputConfig::GLOBAL_STYLUS_BLOCKS_TOUCH),
+        SENSITIVE_FOR_PRIVACY =
+                static_cast<uint32_t>(os::InputConfig::SENSITIVE_FOR_PRIVACY),
         // clang-format on
     };
 
@@ -232,7 +234,7 @@ struct WindowInfo : public Parcelable {
     Uid ownerUid = Uid::INVALID;
     std::string packageName;
     ftl::Flags<InputConfig> inputConfig;
-    int32_t displayId = ADISPLAY_ID_NONE;
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId::INVALID;
     InputApplicationInfo applicationInfo;
     bool replaceTouchableRegionWithCrop = false;
     wp<IBinder> touchableRegionCropHandle;
@@ -253,10 +255,6 @@ struct WindowInfo : public Parcelable {
     void setInputConfig(ftl::Flags<InputConfig> config, bool value);
 
     void addTouchableRegion(const Rect& region);
-
-    bool touchableRegionContainsPoint(int32_t x, int32_t y) const;
-
-    bool frameContainsPoint(int32_t x, int32_t y) const;
 
     bool supportsSplitTouch() const;
 

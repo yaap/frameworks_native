@@ -173,7 +173,7 @@ protected:
         // Acquire and free 1+extraDiscardedBuffers buffer, check onBufferReleased is called.
         std::vector<BufferItem> releasedItems;
         releasedItems.resize(1+extraDiscardedBuffers);
-        for (int i = 0; i < releasedItems.size(); i++) {
+        for (size_t i = 0; i < releasedItems.size(); i++) {
             ASSERT_EQ(NO_ERROR, consumer->acquireBuffer(&releasedItems[i], 0));
             ASSERT_EQ(NO_ERROR, consumer->releaseBuffer(releasedItems[i].mSlot,
                     releasedItems[i].mFrameNumber, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR,
@@ -197,7 +197,7 @@ protected:
             // Check onBufferDiscarded is called with correct buffer
             auto discardedBuffers = listener->getDiscardedBuffers();
             ASSERT_EQ(discardedBuffers.size(), releasedItems.size());
-            for (int i = 0; i < releasedItems.size(); i++) {
+            for (size_t i = 0; i < releasedItems.size(); i++) {
                 ASSERT_EQ(discardedBuffers[i], releasedItems[i].mGraphicBuffer);
             }
 
@@ -673,13 +673,14 @@ public:
         return binder::Status::ok();
     }
 
-    binder::Status createDisplay(const std::string& /*displayName*/, bool /*secure*/,
-                                 float /*requestedRefreshRate*/,
-                                 sp<IBinder>* /*outDisplay*/) override {
+    binder::Status createVirtualDisplay(const std::string& /*displayName*/, bool /*isSecure*/,
+                                        const std::string& /*uniqueId*/,
+                                        float /*requestedRefreshRate*/,
+                                        sp<IBinder>* /*outDisplay*/) override {
         return binder::Status::ok();
     }
 
-    binder::Status destroyDisplay(const sp<IBinder>& /*display*/) override {
+    binder::Status destroyVirtualDisplay(const sp<IBinder>& /*displayToken*/) override {
         return binder::Status::ok();
     }
 
@@ -812,10 +813,6 @@ public:
     }
 
     binder::Status onPullAtom(int32_t /*atomId*/, gui::PullAtomData* /*outPullData*/) override {
-        return binder::Status::ok();
-    }
-
-    binder::Status getLayerDebugInfo(std::vector<gui::LayerDebugInfo>* /*outLayers*/) override {
         return binder::Status::ok();
     }
 
@@ -987,6 +984,8 @@ public:
     binder::Status getSchedulingPolicy(gui::SchedulingPolicy*) override {
         return binder::Status::ok();
     }
+
+    binder::Status notifyShutdown() override { return binder::Status::ok(); }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }

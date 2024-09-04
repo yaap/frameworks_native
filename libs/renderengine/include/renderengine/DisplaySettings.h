@@ -22,7 +22,6 @@
 
 #include <math/mat4.h>
 #include <renderengine/PrintMatrix.h>
-#include <renderengine/BorderRenderInfo.h>
 #include <ui/DisplayId.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Rect.h>
@@ -88,7 +87,21 @@ struct DisplaySettings {
     aidl::android::hardware::graphics::composer3::RenderIntent renderIntent =
             aidl::android::hardware::graphics::composer3::RenderIntent::TONE_MAP_COLORIMETRIC;
 
-    std::vector<renderengine::BorderRenderInfo> borderInfoList;
+    // Tonemapping strategy to use for each layer. This is only used for tonemapping HDR source
+    // content
+    enum class TonemapStrategy {
+        // Use a tonemapper defined by libtonemap. This may be OEM-defined as of Android 13, aka
+        // undefined.
+        // This is typically a global tonemapper, designed to match what is on screen.
+        Libtonemap,
+        // Use a local tonemapper. Because local tonemapping uses large intermediate allocations,
+        // this
+        // method is primarily recommended for infrequent rendering that does not need to exactly
+        // match
+        // pixels that are on-screen.
+        Local,
+    };
+    TonemapStrategy tonemapStrategy = TonemapStrategy::Libtonemap;
 };
 
 static inline bool operator==(const DisplaySettings& lhs, const DisplaySettings& rhs) {
@@ -100,8 +113,7 @@ static inline bool operator==(const DisplaySettings& lhs, const DisplaySettings&
             lhs.deviceHandlesColorTransform == rhs.deviceHandlesColorTransform &&
             lhs.orientation == rhs.orientation &&
             lhs.targetLuminanceNits == rhs.targetLuminanceNits &&
-            lhs.dimmingStage == rhs.dimmingStage && lhs.renderIntent == rhs.renderIntent &&
-            lhs.borderInfoList == rhs.borderInfoList;
+            lhs.dimmingStage == rhs.dimmingStage && lhs.renderIntent == rhs.renderIntent;
 }
 
 static const char* orientation_to_string(uint32_t orientation) {

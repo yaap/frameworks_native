@@ -41,6 +41,11 @@ cc_aconfig_library {
     aconfig_declarations: "libgui_flags",
 }
 
+cc_aconfig_library {
+    name: "libguiflags_no_apex",
+    aconfig_declarations: "libgui_flags",
+}
+
 cc_library_headers {
     name: "libgui_headers",
     vendor_available: true,
@@ -87,6 +92,7 @@ filegroup {
         "android/gui/DropInputMode.aidl",
         "android/gui/StalledTransactionInfo.aidl",
         "android/**/TouchOcclusionMode.aidl",
+        "android/gui/TrustedOverlay.aidl",
     ],
 }
 
@@ -155,9 +161,9 @@ cc_library_static {
     },
 }
 
-aidl_library {
-    name: "libgui_aidl_hdrs",
-    hdrs: [
+filegroup {
+    name: "libgui_extra_aidl_files",
+    srcs: [
         "android/gui/DisplayInfo.aidl",
         "android/gui/FocusRequest.aidl",
         "android/gui/InputApplicationInfo.aidl",
@@ -170,11 +176,34 @@ aidl_library {
     ],
 }
 
+filegroup {
+    name: "libgui_extra_unstructured_aidl_files",
+    srcs: [
+        "android/gui/DisplayInfo.aidl",
+        "android/gui/InputApplicationInfo.aidl",
+        "android/gui/WindowInfo.aidl",
+        "android/gui/WindowInfosUpdate.aidl",
+    ],
+}
+
+aidl_library {
+    name: "libgui_aidl_hdrs",
+    hdrs: [":libgui_extra_aidl_files"],
+}
+
+aidl_library {
+    name: "libgui_extra_unstructured_aidl_hdrs",
+    hdrs: [":libgui_extra_unstructured_aidl_files"],
+}
+
 aidl_library {
     name: "libgui_aidl",
     srcs: ["aidl/**/*.aidl"],
     strip_import_prefix: "aidl",
-    deps: ["libgui_aidl_hdrs"],
+    deps: [
+        "libgui_aidl_hdrs",
+        "libgui_extra_unstructured_aidl_hdrs",
+    ],
 }
 
 filegroup {
@@ -241,7 +270,6 @@ filegroup {
         "IProducerListener.cpp",
         "ISurfaceComposer.cpp",
         "ITransactionCompletedListener.cpp",
-        "LayerDebugInfo.cpp",
         "LayerMetadata.cpp",
         "LayerStatePermissions.cpp",
         "LayerState.cpp",
@@ -283,10 +311,6 @@ cc_defaults {
 cc_library_shared {
     name: "libgui",
     vendor_available: true,
-    vndk: {
-        enabled: true,
-        private: true,
-    },
     double_loadable: true,
 
     defaults: [
@@ -328,6 +352,12 @@ cc_library_shared {
     cflags: [
         "-Wthread-safety",
     ],
+}
+
+cc_library_shared {
+    name: "libgui_vendor",
+    shared_libs: ["libgui"],
+    vendor: true,
 }
 
 // Used by media codec services exclusively as a static lib for

@@ -23,6 +23,7 @@
 #include <binder/IResultReceiver.h>
 #include <binder/RpcSession.h>
 #include <binder/Stability.h>
+#include <binder/Trace.h>
 
 #include <stdio.h>
 
@@ -44,6 +45,7 @@ std::unordered_map<int32_t, uint32_t> BpBinder::sLastLimitCallbackMap;
 int BpBinder::sNumTrackedUids = 0;
 std::atomic_bool BpBinder::sCountByUidEnabled(false);
 binder_proxy_limit_callback BpBinder::sLimitCallback;
+binder_proxy_warning_callback BpBinder::sWarningCallback;
 bool BpBinder::sBinderProxyThrottleCreate = false;
 
 static StaticString16 kDescriptorUninit(u"");
@@ -52,6 +54,9 @@ static StaticString16 kDescriptorUninit(u"");
 uint32_t BpBinder::sBinderProxyCountHighWatermark = 2500;
 // Another arbitrary value a binder count needs to drop below before another callback will be called
 uint32_t BpBinder::sBinderProxyCountLowWatermark = 2000;
+// Arbitrary value between low and high watermark on a bad behaving app to
+// trigger a warning callback.
+uint32_t BpBinder::sBinderProxyCountWarningWatermark = 2250;
 
 std::atomic<uint32_t> BpBinder::sBinderProxyCount(0);
 std::atomic<uint32_t> BpBinder::sBinderProxyCountWarned(0);
@@ -63,7 +68,8 @@ static constexpr uint32_t kBinderProxyCountWarnInterval = 5000;
 
 enum {
     LIMIT_REACHED_MASK = 0x80000000,        // A flag denoting that the limit has been reached
-    COUNTING_VALUE_MASK = 0x7FFFFFFF,       // A mask of the remaining bits for the count value
+    WARNING_REACHED_MASK = 0x40000000,      // A flag denoting that the warning has been reached
+    COUNTING_VALUE_MASK = 0x3FFFFFFF,       // A mask of the remaining bits for the count value
 };
 
 BpBinder::ObjectManager::ObjectManager()
@@ -186,7 +192,13 @@ sp<BpBinder> BpBinder::create(int32_t handle, std::function<void()>* postTask) {
                 sLastLimitCallbackMap[trackedUid] = trackedValue;
             }
         } else {
-            if ((trackedValue & COUNTING_VALUE_MASK) >= sBinderProxyCountHighWatermark) {
+            uint32_t currentValue = trackedValue & COUNTING_VALUE_MASK;
+            if (currentValue >= sBinderProxyCountWarningWatermark
+                    && currentValue < sBinderProxyCountHighWatermark
+                    && ((trackedValue & WARNING_REACHED_MASK) == 0)) [[unlikely]] {
+                sTrackingMap[trackedUid] |= WARNING_REACHED_MASK;
+                if (sWarningCallback) sWarningCallback(trackedUid);
+            } else if (currentValue >= sBinderProxyCountHighWatermark) {
                 ALOGE("Too many binder proxy objects sent to uid %d from uid %d (%d proxies held)",
                       getuid(), trackedUid, trackedValue);
                 sTrackingMap[trackedUid] |= LIMIT_REACHED_MASK;
@@ -207,6 +219,7 @@ sp<BpBinder> BpBinder::create(int32_t handle, std::function<void()>* postTask) {
         sTrackingMap[trackedUid]++;
     }
     uint32_t numProxies = sBinderProxyCount.fetch_add(1, std::memory_order_relaxed);
+    binder::os::trace_int(ATRACE_TAG_AIDL, "binder_proxies", numProxies);
     uint32_t numLastWarned = sBinderProxyCountWarned.load(std::memory_order_relaxed);
     uint32_t numNextWarn = numLastWarned + kBinderProxyCountWarnInterval;
     if (numProxies >= numNextWarn) {
@@ -618,11 +631,11 @@ BpBinder::~BpBinder() {
                   binderHandle());
         } else {
             auto countingValue = trackedValue & COUNTING_VALUE_MASK;
-            if ((trackedValue & LIMIT_REACHED_MASK) &&
+            if ((trackedValue & (LIMIT_REACHED_MASK | WARNING_REACHED_MASK)) &&
                 (countingValue <= sBinderProxyCountLowWatermark)) [[unlikely]] {
                 ALOGI("Limit reached bit reset for uid %d (fewer than %d proxies from uid %d held)",
                       getuid(), sBinderProxyCountLowWatermark, mTrackedUid);
-                sTrackingMap[mTrackedUid] &= ~LIMIT_REACHED_MASK;
+                sTrackingMap[mTrackedUid] &= ~(LIMIT_REACHED_MASK | WARNING_REACHED_MASK);
                 sLastLimitCallbackMap.erase(mTrackedUid);
             }
             if (--sTrackingMap[mTrackedUid] == 0) {
@@ -630,8 +643,8 @@ BpBinder::~BpBinder() {
             }
         }
     }
-    --sBinderProxyCount;
-
+    uint32_t numProxies = --sBinderProxyCount;
+    binder::os::trace_int(ATRACE_TAG_AIDL, "binder_proxies", numProxies);
     if (ipc) {
         ipc->expungeHandle(binderHandle(), this);
         ipc->decWeakHandle(binderHandle());
@@ -739,15 +752,18 @@ void BpBinder::enableCountByUid() { sCountByUidEnabled.store(true); }
 void BpBinder::disableCountByUid() { sCountByUidEnabled.store(false); }
 void BpBinder::setCountByUidEnabled(bool enable) { sCountByUidEnabled.store(enable); }
 
-void BpBinder::setLimitCallback(binder_proxy_limit_callback cb) {
+void BpBinder::setBinderProxyCountEventCallback(binder_proxy_limit_callback cbl,
+                                                binder_proxy_warning_callback cbw) {
     RpcMutexUniqueLock _l(sTrackingLock);
-    sLimitCallback = cb;
+    sLimitCallback = std::move(cbl);
+    sWarningCallback = std::move(cbw);
 }
 
-void BpBinder::setBinderProxyCountWatermarks(int high, int low) {
+void BpBinder::setBinderProxyCountWatermarks(int high, int low, int warning) {
     RpcMutexUniqueLock _l(sTrackingLock);
     sBinderProxyCountHighWatermark = high;
     sBinderProxyCountLowWatermark = low;
+    sBinderProxyCountWarningWatermark = warning;
 }
 
 // ---------------------------------------------------------------------------

@@ -28,10 +28,12 @@ MODULE_LIBRARY_DEPS += \
 	$(LIBBINDER_DIR)/trusty/rust/binder_ndk_sys \
 	$(LIBBINDER_DIR)/trusty/rust/binder_rpc_unstable_bindgen \
 	external/rust/crates/downcast-rs \
+	external/rust/crates/libc \
 	trusty/user/base/lib/trusty-sys \
 
 MODULE_RUSTFLAGS += \
 	--cfg 'android_vendor' \
+	--cfg 'trusty' \
 
 # Trusty does not have `ProcessState`, so there are a few
 # doc links in `IBinder` that are still broken.

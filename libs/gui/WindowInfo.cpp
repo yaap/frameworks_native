@@ -73,14 +73,6 @@ void WindowInfo::addTouchableRegion(const Rect& region) {
     touchableRegion.orSelf(region);
 }
 
-bool WindowInfo::touchableRegionContainsPoint(int32_t x, int32_t y) const {
-    return touchableRegion.contains(x, y);
-}
-
-bool WindowInfo::frameContainsPoint(int32_t x, int32_t y) const {
-    return x >= frame.left && x < frame.right && y >= frame.top && y < frame.bottom;
-}
-
 bool WindowInfo::supportsSplitTouch() const {
     return !inputConfig.test(InputConfig::PREVENT_SPLITTING);
 }
@@ -154,7 +146,7 @@ status_t WindowInfo::writeToParcel(android::Parcel* parcel) const {
         parcel->writeInt32(ownerUid.val()) ?:
         parcel->writeUtf8AsUtf16(packageName) ?:
         parcel->writeInt32(inputConfig.get()) ?:
-        parcel->writeInt32(displayId) ?:
+        parcel->writeInt32(displayId.val()) ?:
         applicationInfo.writeToParcel(parcel) ?:
         parcel->write(touchableRegion) ?:
         parcel->writeBool(replaceTouchableRegionWithCrop) ?:
@@ -183,7 +175,8 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
     }
 
     float dsdx, dtdx, tx, dtdy, dsdy, ty;
-    int32_t lpFlags, lpType, touchOcclusionModeInt, inputConfigInt, ownerPidInt, ownerUidInt;
+    int32_t lpFlags, lpType, touchOcclusionModeInt, inputConfigInt, ownerPidInt, ownerUidInt,
+            displayIdInt;
     sp<IBinder> touchableRegionCropHandleSp;
 
     // clang-format off
@@ -206,7 +199,7 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
         parcel->readInt32(&ownerUidInt) ?:
         parcel->readUtf8FromUtf16(&packageName) ?:
         parcel->readInt32(&inputConfigInt) ?:
-        parcel->readInt32(&displayId) ?:
+        parcel->readInt32(&displayIdInt) ?:
         applicationInfo.readFromParcel(parcel) ?:
         parcel->read(touchableRegion) ?:
         parcel->readBool(&replaceTouchableRegionWithCrop) ?:
@@ -229,6 +222,7 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
     ownerPid = Pid{ownerPidInt};
     ownerUid = Uid{static_cast<uid_t>(ownerUidInt)};
     touchableRegionCropHandle = touchableRegionCropHandleSp;
+    displayId = ui::LogicalDisplayId{displayIdInt};
 
     return OK;
 }

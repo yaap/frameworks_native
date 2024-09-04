@@ -39,7 +39,6 @@ class IGraphicBufferConsumer;
 class IGraphicBufferProducer;
 class Layer;
 class LayerFE;
-class StartPropertySetThread;
 class SurfaceFlinger;
 class TimeStats;
 
@@ -71,8 +70,6 @@ public:
     virtual std::unique_ptr<scheduler::VsyncConfiguration> createVsyncConfiguration(
             Fps currentRefreshRate) = 0;
 
-    virtual sp<StartPropertySetThread> createStartPropertySetThread(
-            bool timestampPropertyValue) = 0;
     virtual sp<DisplayDevice> createDisplayDevice(DisplayDeviceCreationArgs&) = 0;
     virtual sp<GraphicBuffer> createGraphicBuffer(uint32_t width, uint32_t height,
                                                   PixelFormat format, uint32_t layerCount,
@@ -88,7 +85,7 @@ public:
 
     virtual sp<Layer> createBufferStateLayer(const LayerCreationArgs& args) = 0;
     virtual sp<Layer> createEffectLayer(const LayerCreationArgs& args) = 0;
-    virtual sp<LayerFE> createLayerFE(const std::string& layerName) = 0;
+    virtual sp<LayerFE> createLayerFE(const std::string& layerName, const Layer* owner) = 0;
     virtual std::unique_ptr<FrameTracer> createFrameTracer() = 0;
     virtual std::unique_ptr<frametimeline::FrameTimeline> createFrameTimeline(
             std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid) = 0;

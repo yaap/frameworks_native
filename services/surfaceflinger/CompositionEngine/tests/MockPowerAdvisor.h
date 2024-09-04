@@ -38,10 +38,12 @@ public:
     MOCK_METHOD(void, notifyDisplayUpdateImminentAndCpuReset, (), (override));
     MOCK_METHOD(bool, usePowerHintSession, (), (override));
     MOCK_METHOD(bool, supportsPowerHintSession, (), (override));
+    MOCK_METHOD(bool, supportsGpuReporting, (), (override));
     MOCK_METHOD(void, updateTargetWorkDuration, (Duration targetDuration), (override));
     MOCK_METHOD(void, reportActualWorkDuration, (), (override));
     MOCK_METHOD(void, enablePowerHintSession, (bool enabled), (override));
     MOCK_METHOD(bool, startPowerHintSession, (std::vector<int32_t> && threadIds), (override));
+    MOCK_METHOD(void, setGpuStartTime, (DisplayId displayId, TimePoint startTime), (override));
     MOCK_METHOD(void, setGpuFenceTime,
                 (DisplayId displayId, std::unique_ptr<FenceTime>&& fenceTime), (override));
     MOCK_METHOD(void, setHwcValidateTiming,
@@ -51,8 +53,8 @@ public:
                 (DisplayId displayId, TimePoint presentStartTime, TimePoint presentEndTime),
                 (override));
     MOCK_METHOD(void, setSkippedValidate, (DisplayId displayId, bool skipped), (override));
-    MOCK_METHOD(void, setRequiresClientComposition,
-                (DisplayId displayId, bool requiresClientComposition), (override));
+    MOCK_METHOD(void, setRequiresRenderEngine, (DisplayId displayId, bool requiresRenderEngine),
+                (override));
     MOCK_METHOD(void, setExpectedPresentTime, (TimePoint expectedPresentTime), (override));
     MOCK_METHOD(void, setSfPresentTiming, (TimePoint presentFenceTime, TimePoint presentEndTime),
                 (override));

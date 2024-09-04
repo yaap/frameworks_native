@@ -334,7 +334,7 @@ void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
                                                                           variant);
         frontend::LayerSnapshot* childSnapshot = getSnapshot(path, layer);
         if (variant == Variant::Attached || variant == Variant::Detached ||
-            variant == Variant::Mirror) {
+            frontend::LayerHierarchy::isMirror(variant)) {
             mChildToParent[childSnapshot->uniqueSequence] = snapshot->uniqueSequence;
             layerProto->add_children(childSnapshot->uniqueSequence);
         } else if (variant == Variant::Relative) {
@@ -382,7 +382,8 @@ void LayerProtoHelper::writeSnapshotToProto(perfetto::protos::LayerProto* layerI
     layerInfo->set_corner_radius(
             (snapshot.roundedCorner.radius.x + snapshot.roundedCorner.radius.y) / 2.0);
     layerInfo->set_background_blur_radius(snapshot.backgroundBlurRadius);
-    layerInfo->set_is_trusted_overlay(snapshot.isTrustedOverlay);
+    layerInfo->set_is_trusted_overlay(snapshot.trustedOverlay == gui::TrustedOverlay::ENABLED);
+    // TODO(b/339701674) update protos
     LayerProtoHelper::writeToProtoDeprecated(transform, layerInfo->mutable_transform());
     LayerProtoHelper::writePositionToProto(transform.tx(), transform.ty(),
                                            [&]() { return layerInfo->mutable_position(); });
@@ -465,7 +466,7 @@ LayerProtoHelper::writeDisplayInfoToProto(const frontend::DisplayInfos& displayI
     displays.Reserve(displayInfos.size());
     for (const auto& [layerStack, displayInfo] : displayInfos) {
         auto displayProto = displays.Add();
-        displayProto->set_id(displayInfo.info.displayId);
+        displayProto->set_id(displayInfo.info.displayId.val());
         displayProto->set_layer_stack(layerStack.id);
         displayProto->mutable_size()->set_w(displayInfo.info.logicalWidth);
         displayProto->mutable_size()->set_h(displayInfo.info.logicalHeight);

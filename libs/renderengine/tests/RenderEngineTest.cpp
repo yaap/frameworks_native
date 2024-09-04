@@ -22,6 +22,7 @@
 #pragma clang diagnostic ignored "-Wconversion"
 #pragma clang diagnostic ignored "-Wextra"
 
+#include <com_android_graphics_surfaceflinger_flags.h>
 #include <cutils/properties.h>
 #include <gtest/gtest.h>
 #include <renderengine/ExternalTexture.h>
@@ -40,6 +41,14 @@
 #include "../skia/SkiaGLRenderEngine.h"
 #include "../skia/SkiaVkRenderEngine.h"
 #include "../threaded/RenderEngineThreaded.h"
+
+// TODO: b/341728634 - Clean up conditional compilation.
+#if COM_ANDROID_GRAPHICS_SURFACEFLINGER_FLAGS(GRAPHITE_RENDERENGINE) || \
+        COM_ANDROID_GRAPHICS_SURFACEFLINGER_FLAGS(FORCE_COMPILE_GRAPHITE_RENDERENGINE)
+#define COMPILE_GRAPHITE_RENDERENGINE 1
+#else
+#define COMPILE_GRAPHITE_RENDERENGINE 0
+#endif
 
 constexpr int DEFAULT_DISPLAY_WIDTH = 128;
 constexpr int DEFAULT_DISPLAY_HEIGHT = 256;
@@ -107,6 +116,7 @@ public:
 
     virtual std::string name() = 0;
     virtual renderengine::RenderEngine::GraphicsApi graphicsApi() = 0;
+    virtual renderengine::RenderEngine::SkiaBackend skiaBackend() = 0;
     bool apiSupported() { return renderengine::RenderEngine::canSupport(graphicsApi()); }
     std::unique_ptr<renderengine::RenderEngine> createRenderEngine() {
         renderengine::RenderEngineCreationArgs reCreationArgs =
@@ -115,21 +125,13 @@ public:
                         .setImageCacheSize(1)
                         .setEnableProtectedContext(false)
                         .setPrecacheToneMapperShaderOnly(false)
-                        .setSupportsBackgroundBlur(true)
+                        .setBlurAlgorithm(renderengine::RenderEngine::BlurAlgorithm::KAWASE)
                         .setContextPriority(renderengine::RenderEngine::ContextPriority::MEDIUM)
                         .setThreaded(renderengine::RenderEngine::Threaded::NO)
                         .setGraphicsApi(graphicsApi())
+                        .setSkiaBackend(skiaBackend())
                         .build();
         return renderengine::RenderEngine::create(reCreationArgs);
-    }
-};
-
-class SkiaVkRenderEngineFactory : public RenderEngineFactory {
-public:
-    std::string name() override { return "SkiaVkRenderEngineFactory"; }
-
-    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
-        return renderengine::RenderEngine::GraphicsApi::VK;
     }
 };
 
@@ -140,7 +142,40 @@ public:
     renderengine::RenderEngine::GraphicsApi graphicsApi() {
         return renderengine::RenderEngine::GraphicsApi::GL;
     }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::GANESH;
+    }
 };
+
+class GaneshVkRenderEngineFactory : public RenderEngineFactory {
+public:
+    std::string name() override { return "GaneshVkRenderEngineFactory"; }
+
+    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
+        return renderengine::RenderEngine::GraphicsApi::VK;
+    }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::GANESH;
+    }
+};
+
+// TODO: b/341728634 - Clean up conditional compilation.
+#if COMPILE_GRAPHITE_RENDERENGINE
+class GraphiteVkRenderEngineFactory : public RenderEngineFactory {
+public:
+    std::string name() override { return "GraphiteVkRenderEngineFactory"; }
+
+    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
+        return renderengine::RenderEngine::GraphicsApi::VK;
+    }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::GRAPHITE;
+    }
+};
+#endif
 
 class RenderEngineTest : public ::testing::TestWithParam<std::shared_ptr<RenderEngineFactory>> {
 public:
@@ -219,7 +254,7 @@ public:
     RenderEngineTest() {
         const ::testing::TestInfo* const test_info =
                 ::testing::UnitTest::GetInstance()->current_test_info();
-        ALOGD("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
+        ALOGI("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
     }
 
     ~RenderEngineTest() {
@@ -228,7 +263,7 @@ public:
         }
         const ::testing::TestInfo* const test_info =
                 ::testing::UnitTest::GetInstance()->current_test_info();
-        ALOGD("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
+        ALOGI("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
     }
 
     void writeBufferToFile(const char* basename) {
@@ -1242,7 +1277,12 @@ void RenderEngineTest::fillRedBufferWithPremultiplyAlpha() {
 
 void RenderEngineTest::fillBufferWithPremultiplyAlpha() {
     fillRedBufferWithPremultiplyAlpha();
-    expectBufferColor(fullscreenRect(), 128, 0, 0, 128);
+    // Different backends and GPUs may round 255 * 0.5 = 127.5 differently, but
+    // either 127 or 128 are acceptable. Checking both 127 and 128 with a
+    // tolerance of 1 allows either 127 or 128 to pass, while preventing 126 or
+    // 129 from erroneously passing.
+    expectBufferColor(fullscreenRect(), 127, 0, 0, 127, 1);
+    expectBufferColor(fullscreenRect(), 128, 0, 0, 128, 1);
 }
 
 void RenderEngineTest::fillRedBufferWithoutPremultiplyAlpha() {
@@ -1469,9 +1509,15 @@ void RenderEngineTest::tonemap(ui::Dataspace sourceDataspace, std::function<vec3
     expectBufferColor(Rect(kGreyLevels, 1), generator, 2);
 }
 
+// TODO: b/341728634 - Clean up conditional compilation.
 INSTANTIATE_TEST_SUITE_P(PerRenderEngineType, RenderEngineTest,
                          testing::Values(std::make_shared<SkiaGLESRenderEngineFactory>(),
-                                         std::make_shared<SkiaVkRenderEngineFactory>()));
+                                         std::make_shared<GaneshVkRenderEngineFactory>()
+#if COMPILE_GRAPHITE_RENDERENGINE
+                                                 ,
+                                         std::make_shared<GraphiteVkRenderEngineFactory>()
+#endif
+                                                 ));
 
 TEST_P(RenderEngineTest, drawLayers_noLayersToDraw) {
     if (!GetParam()->apiSupported()) {
@@ -2490,51 +2536,6 @@ TEST_P(RenderEngineTest, testDisableBlendingBuffer) {
     expectBufferColor(rect, 0, 128, 0, 128);
 }
 
-TEST_P(RenderEngineTest, testBorder) {
-    if (!GetParam()->apiSupported()) {
-        GTEST_SKIP();
-    }
-
-    initializeRenderEngine();
-
-    const ui::Dataspace dataspace = ui::Dataspace::V0_SRGB;
-
-    const auto displayRect = Rect(1080, 2280);
-    renderengine::DisplaySettings display{
-            .physicalDisplay = displayRect,
-            .clip = displayRect,
-            .outputDataspace = dataspace,
-    };
-    display.borderInfoList.clear();
-    renderengine::BorderRenderInfo info;
-    info.combinedRegion = Region(Rect(99, 99, 199, 199));
-    info.width = 20.0f;
-    info.color = half4{1.0f, 128.0f / 255.0f, 0.0f, 1.0f};
-    display.borderInfoList.emplace_back(info);
-
-    const auto greenBuffer = allocateAndFillSourceBuffer(1, 1, ubyte4(0, 255, 0, 255));
-    const renderengine::LayerSettings greenLayer{
-            .geometry.boundaries = FloatRect(0.f, 0.f, 1.f, 1.f),
-            .source =
-                    renderengine::PixelSource{
-                            .buffer =
-                                    renderengine::Buffer{
-                                            .buffer = greenBuffer,
-                                            .usePremultipliedAlpha = true,
-                                    },
-                    },
-            .alpha = 1.0f,
-            .sourceDataspace = dataspace,
-            .whitePointNits = 200.f,
-    };
-
-    std::vector<renderengine::LayerSettings> layers;
-    layers.emplace_back(greenLayer);
-    invokeDraw(display, layers);
-
-    expectBufferColor(Rect(99, 99, 101, 101), 255, 128, 0, 255, 1);
-}
-
 TEST_P(RenderEngineTest, testDimming) {
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
@@ -3147,12 +3148,19 @@ TEST_P(RenderEngineTest, r8_respects_color_transform_when_device_handles) {
 }
 
 TEST_P(RenderEngineTest, primeShaderCache) {
+    // TODO: b/331447071 - Fix in Graphite and re-enable.
+    if (GetParam()->skiaBackend() == renderengine::RenderEngine::SkiaBackend::GRAPHITE) {
+        GTEST_SKIP();
+    }
+
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
     }
     initializeRenderEngine();
 
-    auto fut = mRE->primeCache(false);
+    PrimeCacheConfig config;
+    config.cacheUltraHDR = false;
+    auto fut = mRE->primeCache(config);
     if (fut.valid()) {
         fut.wait();
     }

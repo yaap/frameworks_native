@@ -16,13 +16,6 @@ flag {
 }
 
 flag {
-  name: "enable_pointer_choreographer"
-  namespace: "input"
-  description: "Set to true to enable PointerChoreographer: the new pipeline for showing pointer icons"
-  bug: "293587049"
-}
-
-flag {
   name: "enable_gestures_library_timer_provider"
   namespace: "input"
   description: "Set to true to enable timer support for the touchpad Gestures library"
@@ -87,6 +80,7 @@ flag {
 
 flag {
   name: "override_key_behavior_permission_apis"
+  is_exported: true
   namespace: "input"
   description: "enable override key behavior permission APIs"
   bug: "309018874"
@@ -115,6 +109,7 @@ flag {
 
 flag {
   name: "input_device_view_behavior_api"
+  is_exported: true
   namespace: "input"
   description: "Controls the API to provide InputDevice view behavior."
   bug: "246946631"
@@ -125,4 +120,40 @@ flag {
   namespace: "input"
   description: "Enable fling scrolling to be stopped by putting a finger on the touchpad again"
   bug: "281106755"
+}
+
+flag {
+  name: "enable_prediction_pruning_via_jerk_thresholding"
+  namespace: "input"
+  description: "Enable prediction pruning based on jerk thresholds."
+  bug: "266747654"
+  is_fixed_read_only: true
+}
+
+flag {
+  name: "device_associations"
+  namespace: "input"
+  description: "Binds InputDevice name and InputDevice description against display unique id."
+  bug: "324075859"
+}
+
+flag {
+  name: "enable_multi_device_same_window_stream"
+  namespace: "input"
+  description: "Allow multiple input devices to be active in the same window simultaneously"
+  bug: "330752824"
+}
+
+flag {
+  name: "hide_pointer_indicators_for_secure_windows"
+  namespace: "input"
+  description: "Hide touch and pointer indicators if a secure window is present on display"
+  bug: "325252005"
+}
+
+flag {
+  name: "enable_keyboard_classifier"
+  namespace: "input"
+  description: "Keyboard classifier that classifies all keyboards into alphabetic or non-alphabetic"
+  bug: "263559234"
 }

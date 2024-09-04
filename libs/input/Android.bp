@@ -30,6 +30,7 @@ filegroup {
         "android/os/InputEventInjectionResult.aidl",
         "android/os/InputEventInjectionSync.aidl",
         "android/os/InputConfig.aidl",
+        "android/os/PointerIconType.aidl",
     ],
 }
 
@@ -80,19 +81,10 @@ rust_bindgen {
     visibility: ["//frameworks/native/services/inputflinger"],
     wrapper_src: "InputWrapper.hpp",
 
-    include_dirs: [
-        "frameworks/native/include",
-    ],
-
     source_stem: "bindings",
 
     bindgen_flags: [
         "--verbose",
-        "--allowlist-var=AMOTION_EVENT_FLAG_CANCELED",
-        "--allowlist-var=AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED",
-        "--allowlist-var=AMOTION_EVENT_FLAG_WINDOW_IS_PARTIALLY_OBSCURED",
-        "--allowlist-var=AMOTION_EVENT_FLAG_IS_ACCESSIBILITY_EVENT",
-        "--allowlist-var=AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE",
         "--allowlist-var=AMOTION_EVENT_ACTION_CANCEL",
         "--allowlist-var=AMOTION_EVENT_ACTION_UP",
         "--allowlist-var=AMOTION_EVENT_ACTION_POINTER_DOWN",
@@ -121,6 +113,27 @@ rust_bindgen {
         "--allowlist-var=AINPUT_SOURCE_HDMI",
         "--allowlist-var=AINPUT_SOURCE_SENSOR",
         "--allowlist-var=AINPUT_SOURCE_ROTARY_ENCODER",
+        "--allowlist-var=AINPUT_KEYBOARD_TYPE_NONE",
+        "--allowlist-var=AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC",
+        "--allowlist-var=AINPUT_KEYBOARD_TYPE_ALPHABETIC",
+        "--allowlist-var=AMETA_NONE",
+        "--allowlist-var=AMETA_ALT_ON",
+        "--allowlist-var=AMETA_ALT_LEFT_ON",
+        "--allowlist-var=AMETA_ALT_RIGHT_ON",
+        "--allowlist-var=AMETA_SHIFT_ON",
+        "--allowlist-var=AMETA_SHIFT_LEFT_ON",
+        "--allowlist-var=AMETA_SHIFT_RIGHT_ON",
+        "--allowlist-var=AMETA_SYM_ON",
+        "--allowlist-var=AMETA_FUNCTION_ON",
+        "--allowlist-var=AMETA_CTRL_ON",
+        "--allowlist-var=AMETA_CTRL_LEFT_ON",
+        "--allowlist-var=AMETA_CTRL_RIGHT_ON",
+        "--allowlist-var=AMETA_META_ON",
+        "--allowlist-var=AMETA_META_LEFT_ON",
+        "--allowlist-var=AMETA_META_RIGHT_ON",
+        "--allowlist-var=AMETA_CAPS_LOCK_ON",
+        "--allowlist-var=AMETA_NUM_LOCK_ON",
+        "--allowlist-var=AMETA_SCROLL_LOCK_ON",
     ],
 
     static_libs: [
@@ -133,6 +146,29 @@ rust_bindgen {
         "jni_headers",
         "flatbuffer_headers",
     ],
+}
+
+cc_library_static {
+    name: "iinputflinger_aidl_lib_static",
+    host_supported: true,
+    srcs: [
+        "android/os/IInputFlinger.aidl",
+        "android/os/InputChannelCore.aidl",
+    ],
+    shared_libs: [
+        "libbinder",
+    ],
+    whole_static_libs: [
+        "libgui_window_info_static",
+    ],
+    aidl: {
+        export_aidl_headers: true,
+        local_include_dirs: ["."],
+        include_dirs: [
+            "frameworks/native/libs/gui",
+            "frameworks/native/libs/input",
+        ],
+    },
 }
 
 // Contains methods to help access C++ code from rust
@@ -153,6 +189,10 @@ cc_library_static {
         "cxx-bridge-header",
     ],
     generated_sources: ["libinput_cxx_bridge_code"],
+
+    lto: {
+        never: true,
+    },
 
     shared_libs: [
         "libbase",
@@ -175,16 +215,17 @@ cc_library {
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
     ],
     srcs: [
-        "android/os/IInputFlinger.aidl",
-        "android/os/InputChannelCore.aidl",
         "AccelerationCurve.cpp",
         "Input.cpp",
+        "InputConsumer.cpp",
+        "InputConsumerNoResampling.cpp",
         "InputDevice.cpp",
         "InputEventLabels.cpp",
         "InputTransport.cpp",
         "InputVerifier.cpp",
         "Keyboard.cpp",
         "KeyCharacterMap.cpp",
+        "KeyboardClassifier.cpp",
         "KeyLayoutMap.cpp",
         "MotionPredictor.cpp",
         "MotionPredictorMetricsManager.cpp",
@@ -218,6 +259,7 @@ cc_library {
     shared_libs: [
         "libbase",
         "libbinder",
+        "libbinder_ndk",
         "libcutils",
         "liblog",
         "libPlatformProperties",
@@ -239,7 +281,6 @@ cc_library {
 
     static_libs: [
         "inputconstants-cpp",
-        "libgui_window_info_static",
         "libui-types",
         "libtflite_static",
         "libkernelconfigs",
@@ -248,10 +289,10 @@ cc_library {
     whole_static_libs: [
         "com.android.input.flags-aconfig-cc",
         "libinput_rust_ffi",
+        "iinputflinger_aidl_lib_static",
     ],
 
     export_static_lib_headers: [
-        "libgui_window_info_static",
         "libui-types",
     ],
 
@@ -262,20 +303,13 @@ cc_library {
 
     target: {
         android: {
-            export_shared_lib_headers: ["libbinder"],
-
-            shared_libs: [
-                "libutils",
-                "libbinder",
-                // Stats logging library and its dependencies.
-                "libstatslog_libinput",
-                "libstatsbootstrap",
-                "android.os.statsbootstrap_aidl-cpp",
-            ],
-
             required: [
                 "motion_predictor_model_prebuilt",
                 "motion_predictor_model_config",
+            ],
+            static_libs: [
+                "libstatslog_libinput",
+                "libstatssocket_lazy",
             ],
         },
         host: {
@@ -285,37 +319,32 @@ cc_library {
             ],
         },
     },
-
-    aidl: {
-        local_include_dirs: ["."],
-        export_aidl_headers: true,
-        include_dirs: [
-            "frameworks/native/libs/gui",
-        ],
-    },
 }
 
-// Use bootstrap version of stats logging library.
-// libinput is a bootstrap process (starts early in the boot process), and thus can't use the normal
-// `libstatslog` because that requires `libstatssocket`, which is only available later in the boot.
-cc_library {
+cc_library_static {
     name: "libstatslog_libinput",
     generated_sources: ["statslog_libinput.cpp"],
     generated_headers: ["statslog_libinput.h"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
     export_generated_headers: ["statslog_libinput.h"],
     shared_libs: [
-        "libbinder",
-        "libstatsbootstrap",
+        "libcutils",
+        "liblog",
         "libutils",
-        "android.os.statsbootstrap_aidl-cpp",
+    ],
+    static_libs: [
+        "libstatssocket_lazy",
     ],
 }
 
 genrule {
     name: "statslog_libinput.h",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_libinput.h --module libinput" +
-        " --namespace android,stats,libinput --bootstrap",
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_libinput.h " +
+        "--module libinput --namespace android,libinput",
     out: [
         "statslog_libinput.h",
     ],
@@ -324,9 +353,9 @@ genrule {
 genrule {
     name: "statslog_libinput.cpp",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_libinput.cpp --module libinput" +
-        " --namespace android,stats,libinput --importHeader statslog_libinput.h" +
-        " --bootstrap",
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_libinput.cpp " +
+        "--module libinput --namespace android,libinput " +
+        "--importHeader statslog_libinput.h",
     out: [
         "statslog_libinput.cpp",
     ],

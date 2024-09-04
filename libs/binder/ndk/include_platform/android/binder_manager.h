@@ -18,6 +18,7 @@
 
 #include <android/binder_ibinder.h>
 #include <android/binder_status.h>
+#include <android/llndk-versioning.h>
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
@@ -29,7 +30,11 @@ enum AServiceManager_AddServiceFlag : uint32_t {
      * Services with methods that perform file IO, web socket creation or ways to egress data must
      * not be added with this flag for privacy concerns.
      */
-    ADD_SERVICE_ALLOW_ISOLATED = 1,
+    ADD_SERVICE_ALLOW_ISOLATED = 1 << 0,
+    ADD_SERVICE_DUMP_FLAG_PRIORITY_CRITICAL = 1 << 1,
+    ADD_SERVICE_DUMP_FLAG_PRIORITY_HIGH = 1 << 2,
+    ADD_SERVICE_DUMP_FLAG_PRIORITY_NORMAL = 1 << 3,
+    ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT = 1 << 4,
 };
 
 /**
@@ -252,9 +257,8 @@ void AServiceManager_getUpdatableApexName(const char* instance, void* context,
  * \return the result of dlopen of the specified HAL
  */
 void* AServiceManager_openDeclaredPassthroughHal(const char* interface, const char* instance,
-                                                 int flag)
-        // TODO(b/302113279) use __INTRODUCED_LLNDK for vendor variants
-        __INTRODUCED_IN(__ANDROID_API_V__);
+                                                 int flag) __INTRODUCED_IN(__ANDROID_API_V__)
+        __INTRODUCED_IN_LLNDK(202404);
 
 /**
  * Prevent lazy services without client from shutting down their process

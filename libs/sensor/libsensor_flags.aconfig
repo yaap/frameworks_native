@@ -1,4 +1,5 @@
 package: "com.android.hardware.libsensor.flags"
+container: "system"
 
 flag {
   name: "sensormanager_ping_binder"
@@ -6,4 +7,11 @@ flag {
   description: "Whether to pingBinder on SensorManager init"
   bug: "322228259"
   is_fixed_read_only: true
+}
+
+flag {
+  name: "sensor_event_queue_report_sensor_usage_in_tracing"
+  namespace: "sensors"
+  description: "When this flag is enabled, sensor event queue will report sensor usage when system trace is enabled."
+  bug: "333132224"
 }

@@ -18,7 +18,6 @@
 
 #include <ftl/flags.h>
 #include <gui/WindowInfo.h>
-#include <gui/constants.h>
 #include <ui/Transform.h>
 #include <utils/BitSet.h>
 #include <bitset>
@@ -92,7 +91,8 @@ public:
     InputTarget() = default;
     InputTarget(const std::shared_ptr<Connection>&, ftl::Flags<Flags> = {});
 
-    void addPointers(std::bitset<MAX_POINTER_ID + 1> pointerIds, const ui::Transform& transform);
+    android::base::Result<void> addPointers(std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                            const ui::Transform& transform);
     void setDefaultPointerTransform(const ui::Transform& transform);
 
     /**

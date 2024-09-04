@@ -14,11 +14,9 @@
  * limitations under the License.
  */
 
-#include "TestHelpers.h"
-
 #include <attestation/HmacKeyManager.h>
 #include <gtest/gtest.h>
-#include <gui/constants.h>
+#include <input/InputConsumer.h>
 #include <input/InputTransport.h>
 
 using android::base::Result;
@@ -50,7 +48,7 @@ struct PublishMotionArgs {
     const int32_t eventId;
     const int32_t deviceId = 1;
     const uint32_t source = AINPUT_SOURCE_TOUCHSCREEN;
-    const int32_t displayId = ADISPLAY_ID_DEFAULT;
+    const ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
     const int32_t actionButton = 0;
     const int32_t edgeFlags = AMOTION_EVENT_EDGE_FLAG_TOP;
     const int32_t metaState = AMETA_ALT_LEFT_ON | AMETA_ALT_ON;
@@ -91,7 +89,9 @@ PublishMotionArgs::PublishMotionArgs(int32_t inAction, nsecs_t inDownTime,
     hmac = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
             16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 
-    flags = AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED;
+    flags = AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
+            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
+            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION;
     if (action == AMOTION_EVENT_ACTION_CANCEL) {
         flags |= AMOTION_EVENT_FLAG_CANCELED;
     }
@@ -135,8 +135,10 @@ void verifyArgsEqualToEvent(const PublishMotionArgs& args, const MotionEvent& mo
     EXPECT_EQ(args.buttonState, motionEvent.getButtonState());
     EXPECT_EQ(args.classification, motionEvent.getClassification());
     EXPECT_EQ(args.transform, motionEvent.getTransform());
-    EXPECT_EQ(args.xOffset, motionEvent.getXOffset());
-    EXPECT_EQ(args.yOffset, motionEvent.getYOffset());
+    EXPECT_NEAR((-args.rawXOffset / args.rawXScale) * args.xScale + args.xOffset,
+                motionEvent.getRawXOffset(), EPSILON);
+    EXPECT_NEAR((-args.rawYOffset / args.rawYScale) * args.yScale + args.yOffset,
+                motionEvent.getRawYOffset(), EPSILON);
     EXPECT_EQ(args.xPrecision, motionEvent.getXPrecision());
     EXPECT_EQ(args.yPrecision, motionEvent.getYPrecision());
     EXPECT_NEAR(args.xCursorPosition, motionEvent.getRawXCursorPosition(), EPSILON);
@@ -262,7 +264,7 @@ void InputPublisherAndConsumerTest::publishAndConsumeKeyEvent() {
     int32_t eventId = InputEvent::nextId();
     constexpr int32_t deviceId = 1;
     constexpr uint32_t source = AINPUT_SOURCE_KEYBOARD;
-    constexpr int32_t displayId = ADISPLAY_ID_DEFAULT;
+    constexpr ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
     constexpr std::array<uint8_t, 32> hmac = {31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21,
                                               20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
                                               9,  8,  7,  6,  5,  4,  3,  2,  1,  0};
@@ -622,13 +624,13 @@ TEST_F(InputPublisherAndConsumerTest, PublishMotionEvent_WhenSequenceNumberIsZer
 
     ui::Transform identityTransform;
     status =
-            mPublisher->publishMotionEvent(0, InputEvent::nextId(), 0, 0, 0, INVALID_HMAC, 0, 0, 0,
-                                           0, 0, 0, MotionClassification::NONE, identityTransform,
-                                           0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+            mPublisher->publishMotionEvent(0, InputEvent::nextId(), 0, 0,
+                                           ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
+                                           0, 0, MotionClassification::NONE, identityTransform, 0,
+                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
-    ASSERT_EQ(BAD_VALUE, status)
-            << "publisher publishMotionEvent should return BAD_VALUE";
+    ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";
 }
 
 TEST_F(InputPublisherAndConsumerTest, PublishMotionEvent_WhenPointerCountLessThan1_ReturnsError) {
@@ -639,17 +641,17 @@ TEST_F(InputPublisherAndConsumerTest, PublishMotionEvent_WhenPointerCountLessTha
 
     ui::Transform identityTransform;
     status =
-            mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0, 0, INVALID_HMAC, 0, 0, 0,
-                                           0, 0, 0, MotionClassification::NONE, identityTransform,
-                                           0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+            mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0,
+                                           ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
+                                           0, 0, MotionClassification::NONE, identityTransform, 0,
+                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
-    ASSERT_EQ(BAD_VALUE, status)
-            << "publisher publishMotionEvent should return BAD_VALUE";
+    ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";
 }
 
 TEST_F(InputPublisherAndConsumerTest,
-        PublishMotionEvent_WhenPointerCountGreaterThanMax_ReturnsError) {
+       PublishMotionEvent_WhenPointerCountGreaterThanMax_ReturnsError) {
     status_t status;
     const size_t pointerCount = MAX_POINTERS + 1;
     PointerProperties pointerProperties[pointerCount];
@@ -661,13 +663,13 @@ TEST_F(InputPublisherAndConsumerTest,
 
     ui::Transform identityTransform;
     status =
-            mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0, 0, INVALID_HMAC, 0, 0, 0,
-                                           0, 0, 0, MotionClassification::NONE, identityTransform,
-                                           0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+            mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0,
+                                           ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
+                                           0, 0, MotionClassification::NONE, identityTransform, 0,
+                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
-    ASSERT_EQ(BAD_VALUE, status)
-            << "publisher publishMotionEvent should return BAD_VALUE";
+    ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";
 }
 
 TEST_F(InputPublisherAndConsumerTest, PublishMultipleEvents_EndToEnd) {

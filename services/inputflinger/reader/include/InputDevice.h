@@ -63,8 +63,11 @@ public:
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
         return mAssociatedDisplayPort;
     }
-    inline std::optional<std::string> getAssociatedDisplayUniqueId() const {
-        return mAssociatedDisplayUniqueId;
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByPort() const {
+        return mAssociatedDisplayUniqueIdByPort;
+    }
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByDescriptor() const {
+        return mAssociatedDisplayUniqueIdByDescriptor;
     }
     inline std::optional<std::string> getDeviceTypeAssociation() const {
         return mAssociatedDeviceType;
@@ -75,6 +78,8 @@ public:
     inline bool hasMic() const { return mHasMic; }
 
     inline bool isIgnored() { return !getMapperCount() && !mController; }
+
+    inline KeyboardType getKeyboardType() const { return mKeyboardType; }
 
     bool isEnabled();
 
@@ -121,6 +126,8 @@ public:
 
     void addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode);
 
+    void setKeyboardType(KeyboardType keyboardType);
+
     void bumpGeneration();
 
     [[nodiscard]] NotifyDeviceResetArgs notifyReset(nsecs_t when);
@@ -128,7 +135,7 @@ public:
     inline const PropertyMap& getConfiguration() { return mConfiguration; }
     inline EventHubInterface* getEventHub() { return mContext->getEventHub(); }
 
-    std::optional<int32_t> getAssociatedDisplayId();
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId();
 
     void updateLedState(bool reset);
 
@@ -193,8 +200,10 @@ private:
     uint32_t mSources;
     bool mIsWaking;
     bool mIsExternal;
+    KeyboardType mKeyboardType = KeyboardType::NONE;
     std::optional<uint8_t> mAssociatedDisplayPort;
-    std::optional<std::string> mAssociatedDisplayUniqueId;
+    std::optional<std::string> mAssociatedDisplayUniqueIdByPort;
+    std::optional<std::string> mAssociatedDisplayUniqueIdByDescriptor;
     std::optional<std::string> mAssociatedDeviceType;
     std::optional<DisplayViewport> mAssociatedViewport;
     bool mHasMic;
@@ -449,8 +458,11 @@ public:
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
         return mDevice.getAssociatedDisplayPort();
     }
-    inline std::optional<std::string> getAssociatedDisplayUniqueId() const {
-        return mDevice.getAssociatedDisplayUniqueId();
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByPort() const {
+        return mDevice.getAssociatedDisplayUniqueIdByPort();
+    }
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByDescriptor() const {
+        return mDevice.getAssociatedDisplayUniqueIdByDescriptor();
     }
     inline std::optional<std::string> getDeviceTypeAssociation() const {
         return mDevice.getDeviceTypeAssociation();
@@ -463,6 +475,10 @@ public:
     }
     inline void bumpGeneration() { mDevice.bumpGeneration(); }
     inline const PropertyMap& getConfiguration() const { return mDevice.getConfiguration(); }
+    inline KeyboardType getKeyboardType() const { return mDevice.getKeyboardType(); }
+    inline void setKeyboardType(KeyboardType keyboardType) {
+        return mDevice.setKeyboardType(keyboardType);
+    }
 
 private:
     InputDevice& mDevice;

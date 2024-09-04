@@ -16,17 +16,36 @@
 
 #pragma once
 
+#include <array>
+#include <climits>
+#include <limits>
+#include <list>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include <input/DisplayViewport.h>
+#include <input/Input.h>
+#include <input/InputDevice.h>
+#include <input/VelocityControl.h>
+#include <input/VelocityTracker.h>
 #include <stdint.h>
+#include <ui/Rect.h>
 #include <ui/Rotation.h>
+#include <ui/Size.h>
+#include <ui/Transform.h>
+#include <utils/BitSet.h>
+#include <utils/Timers.h>
 
 #include "CursorButtonAccumulator.h"
 #include "CursorScrollAccumulator.h"
 #include "EventHub.h"
 #include "InputMapper.h"
 #include "InputReaderBase.h"
+#include "NotifyArgs.h"
+#include "StylusState.h"
 #include "TouchButtonAccumulator.h"
 
 namespace android {
@@ -155,7 +174,7 @@ public:
                                                     const InputReaderConfiguration& config,
                                                     ConfigurationChanges changes) override;
     [[nodiscard]] std::list<NotifyArgs> reset(nsecs_t when) override;
-    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent* rawEvent) override;
+    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent& rawEvent) override;
 
     int32_t getKeyCodeState(uint32_t sourceMask, int32_t keyCode) override;
     int32_t getScanCodeState(uint32_t sourceMask, int32_t scanCode) override;
@@ -166,7 +185,7 @@ public:
     [[nodiscard]] std::list<NotifyArgs> timeoutExpired(nsecs_t when) override;
     [[nodiscard]] std::list<NotifyArgs> updateExternalStylusState(
             const StylusState& state) override;
-    std::optional<int32_t> getAssociatedDisplayId() override;
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() override;
 
 protected:
     CursorButtonAccumulator mCursorButtonAccumulator;
@@ -195,7 +214,6 @@ protected:
     enum class DeviceMode {
         DISABLED,   // input is disabled
         DIRECT,     // direct mapping (touchscreen)
-        UNSCALED,   // unscaled mapping (e.g. captured touchpad)
         NAVIGATION, // unscaled mapping with assist gesture (touch navigation)
         POINTER,    // pointer mapping (e.g. uncaptured touchpad, drawing tablet)
 
@@ -371,9 +389,6 @@ protected:
 
     // The time the primary pointer last went down.
     nsecs_t mDownTime{0};
-
-    // The pointer controller, or null if the device is not a pointer.
-    std::shared_ptr<PointerControllerInterface> mPointerController;
 
     std::vector<VirtualKey> mVirtualKeys;
 
@@ -569,6 +584,8 @@ private:
 
             // Waiting for quiet time to end before starting the next gesture.
             QUIET,
+
+            ftl_last = QUIET,
         };
 
         // When a gesture is sent to an unfocused window, return true if it can bring that window
@@ -688,7 +705,7 @@ private:
 
         // Values reported for the last pointer event.
         uint32_t source;
-        int32_t displayId;
+        ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
         float lastCursorX;
         float lastCursorY;
 
@@ -701,7 +718,7 @@ private:
             hovering = false;
             downTime = 0;
             source = 0;
-            displayId = ADISPLAY_ID_NONE;
+            displayId = ui::LogicalDisplayId::INVALID;
             lastCursorX = 0.f;
             lastCursorY = 0.f;
         }
@@ -792,7 +809,8 @@ private:
 
     [[nodiscard]] std::list<NotifyArgs> dispatchPointerSimple(nsecs_t when, nsecs_t readTime,
                                                               uint32_t policyFlags, bool down,
-                                                              bool hovering, int32_t displayId);
+                                                              bool hovering,
+                                                              ui::LogicalDisplayId displayId);
     [[nodiscard]] std::list<NotifyArgs> abortPointerSimple(nsecs_t when, nsecs_t readTime,
                                                            uint32_t policyFlags);
 
@@ -815,9 +833,6 @@ private:
 
     // Returns if this touch device is a touch screen with an associated display.
     bool isTouchScreen();
-    // Updates touch spots if they are enabled. Should only be used when this device is a
-    // touchscreen.
-    void updateTouchSpots();
 
     bool isPointInsidePhysicalFrame(int32_t x, int32_t y) const;
     const VirtualKey* findVirtualKeyHit(int32_t x, int32_t y);

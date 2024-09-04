@@ -42,37 +42,55 @@ public:
     InputTracer& operator=(const InputTracer&) = delete;
 
     std::unique_ptr<EventTrackerInterface> traceInboundEvent(const EventEntry&) override;
+    std::unique_ptr<EventTrackerInterface> createTrackerForSyntheticEvent() override;
     void dispatchToTargetHint(const EventTrackerInterface&, const InputTarget&) override;
-    void eventProcessingComplete(const EventTrackerInterface&) override;
-    void traceEventDispatch(const DispatchEntry&, const EventTrackerInterface*) override;
+    void eventProcessingComplete(const EventTrackerInterface&,
+                                 nsecs_t processingTimestamp) override;
+    std::unique_ptr<EventTrackerInterface> traceDerivedEvent(const EventEntry&,
+                                                             const EventTrackerInterface&) override;
+    void traceEventDispatch(const DispatchEntry&, const EventTrackerInterface&) override;
+    void setInputMethodConnectionIsActive(bool isActive) override {
+        mIsImeConnectionActive = isActive;
+    }
 
 private:
     std::unique_ptr<InputTracingBackendInterface> mBackend;
+    bool mIsImeConnectionActive{false};
 
-    // The state of a tracked event.
+    // The state of a tracked event, shared across all events derived from the original event.
     struct EventState {
-        const TracedEvent event;
-        // TODO(b/210460522): Add additional args for tracking event sensitivity and
-        //  dispatch target UIDs.
+        explicit inline EventState(InputTracer& tracer) : tracer(tracer){};
+        ~EventState();
+
+        void onEventProcessingComplete(nsecs_t processingTimestamp);
+
+        InputTracer& tracer;
+        std::vector<const TracedEvent> events;
+        bool isEventProcessingComplete{false};
+        // A queue to hold dispatch args from being traced until event processing is complete.
+        std::vector<const WindowDispatchArgs> pendingDispatchArgs;
+        // The metadata should not be modified after event processing is complete.
+        TracedEventMetadata metadata{};
     };
 
     // Get the event state associated with a tracking cookie.
-    std::optional<EventState>& getState(const EventTrackerInterface&);
+    std::shared_ptr<EventState>& getState(const EventTrackerInterface&);
+    bool isDerivedCookie(const EventTrackerInterface&);
 
     // Implementation of the event tracker cookie. The cookie holds the event state directly for
     // convenience to avoid the overhead of tracking the state separately in InputTracer.
     class EventTrackerImpl : public EventTrackerInterface {
     public:
-        explicit EventTrackerImpl(InputTracer&, TracedEvent&& entry);
-        virtual ~EventTrackerImpl() override;
+        inline EventTrackerImpl(const std::shared_ptr<EventState>& state, bool isDerivedEvent)
+              : mState(state), mIsDerived(isDerivedEvent) {}
+        EventTrackerImpl(const EventTrackerImpl&) = default;
 
     private:
-        InputTracer& mTracer;
-        // This event tracker cookie will only hold the state as long as it has not been written
-        // to the trace. The state is released when the event is written to the trace.
-        mutable std::optional<EventState> mState;
+        mutable std::shared_ptr<EventState> mState;
+        const bool mIsDerived;
 
-        friend std::optional<EventState>& InputTracer::getState(const EventTrackerInterface&);
+        friend std::shared_ptr<EventState>& InputTracer::getState(const EventTrackerInterface&);
+        friend bool InputTracer::isDerivedCookie(const EventTrackerInterface&);
     };
 };
 

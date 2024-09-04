@@ -18,7 +18,6 @@
 
 #include <android/input.h>
 #include <attestation/HmacKeyManager.h>
-#include <gui/constants.h>
 #include <input/Input.h>
 #include <utils/Timers.h> // for nsecs_t, systemTime
 
@@ -83,7 +82,7 @@ public:
         return *this;
     }
 
-    MotionEventBuilder& displayId(int32_t displayId) {
+    MotionEventBuilder& displayId(ui::LogicalDisplayId displayId) {
         mDisplayId = displayId;
         return *this;
     }
@@ -118,6 +117,16 @@ public:
         return *this;
     }
 
+    MotionEventBuilder& transform(ui::Transform t) {
+        mTransform = t;
+        return *this;
+    }
+
+    MotionEventBuilder& rawTransform(ui::Transform t) {
+        mRawTransform = t;
+        return *this;
+    }
+
     MotionEvent build() {
         std::vector<PointerProperties> pointerProperties;
         std::vector<PointerCoords> pointerCoords;
@@ -134,12 +143,11 @@ public:
         }
 
         MotionEvent event;
-        static const ui::Transform kIdentityTransform;
         event.initialize(InputEvent::nextId(), mDeviceId, mSource, mDisplayId, INVALID_HMAC,
                          mAction, mActionButton, mFlags, /*edgeFlags=*/0, AMETA_NONE, mButtonState,
-                         MotionClassification::NONE, kIdentityTransform,
+                         MotionClassification::NONE, mTransform,
                          /*xPrecision=*/0, /*yPrecision=*/0, mRawXCursorPosition,
-                         mRawYCursorPosition, kIdentityTransform, mDownTime, mEventTime,
+                         mRawYCursorPosition, mRawTransform, mDownTime, mEventTime,
                          mPointers.size(), pointerProperties.data(), pointerCoords.data());
         return event;
     }
@@ -150,12 +158,14 @@ private:
     int32_t mSource;
     nsecs_t mDownTime;
     nsecs_t mEventTime;
-    int32_t mDisplayId{ADISPLAY_ID_DEFAULT};
+    ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     int32_t mActionButton{0};
     int32_t mButtonState{0};
     int32_t mFlags{0};
     float mRawXCursorPosition{AMOTION_EVENT_INVALID_CURSOR_POSITION};
     float mRawYCursorPosition{AMOTION_EVENT_INVALID_CURSOR_POSITION};
+    ui::Transform mTransform;
+    ui::Transform mRawTransform;
 
     std::vector<PointerBuilder> mPointers;
 };
@@ -198,7 +208,7 @@ public:
         return *this;
     }
 
-    KeyEventBuilder& displayId(int32_t displayId) {
+    KeyEventBuilder& displayId(ui::LogicalDisplayId displayId) {
         mDisplayId = displayId;
         return *this;
     }
@@ -237,7 +247,7 @@ private:
     uint32_t mSource;
     nsecs_t mDownTime;
     nsecs_t mEventTime;
-    int32_t mDisplayId{ADISPLAY_ID_DEFAULT};
+    ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     uint32_t mPolicyFlags = DEFAULT_POLICY_FLAGS;
     int32_t mFlags{0};
     int32_t mKeyCode{AKEYCODE_UNKNOWN};

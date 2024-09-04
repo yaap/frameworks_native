@@ -18,11 +18,10 @@
 
 #include <android/os/IInputConstants.h>
 #include <binder/Binder.h>
-#include <gui/constants.h>
 #include "../dispatcher/InputDispatcher.h"
 #include "../tests/FakeApplicationHandle.h"
 #include "../tests/FakeInputDispatcherPolicy.h"
-#include "../tests/FakeWindowHandle.h"
+#include "../tests/FakeWindows.h"
 
 using android::base::Result;
 using android::gui::WindowInfo;
@@ -38,7 +37,7 @@ namespace {
 constexpr DeviceId DEVICE_ID = 1;
 
 // An arbitrary display id
-constexpr int32_t DISPLAY_ID = ADISPLAY_ID_DEFAULT;
+constexpr ui::LogicalDisplayId DISPLAY_ID = ui::LogicalDisplayId::DEFAULT;
 
 static constexpr std::chrono::duration INJECT_EVENT_TIMEOUT = 5s;
 
@@ -63,7 +62,7 @@ static MotionEvent generateMotionEvent() {
     ui::Transform identityTransform;
     MotionEvent event;
     event.initialize(IInputConstants::INVALID_INPUT_EVENT_ID, DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN,
-                     ADISPLAY_ID_DEFAULT, INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN,
+                     ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN,
                      /* actionButton */ 0, /* flags */ 0,
                      /* edgeFlags */ 0, AMETA_NONE, /* buttonState */ 0, MotionClassification::NONE,
                      identityTransform, /* xPrecision */ 0,
@@ -89,7 +88,7 @@ static NotifyMotionArgs generateMotionArgs() {
     const nsecs_t currentTime = now();
     // Define a valid motion event.
     NotifyMotionArgs args(IInputConstants::INVALID_INPUT_EVENT_ID, currentTime, currentTime,
-                          DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN, ADISPLAY_ID_DEFAULT,
+                          DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN, ui::LogicalDisplayId::DEFAULT,
                           POLICY_FLAG_PASS_TO_USER, AMOTION_EVENT_ACTION_DOWN,
                           /* actionButton */ 0, /* flags */ 0, AMETA_NONE, /* buttonState */ 0,
                           MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
@@ -104,16 +103,16 @@ static NotifyMotionArgs generateMotionArgs() {
 static void benchmarkNotifyMotion(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    InputDispatcher dispatcher(fakePolicy);
-    dispatcher.setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
-    dispatcher.start();
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
+    dispatcher->start();
 
     // Create a window that will receive motion events
     std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
     sp<FakeWindowHandle> window =
             sp<FakeWindowHandle>::make(application, dispatcher, "Fake Window", DISPLAY_ID);
 
-    dispatcher.onWindowInfosChanged({{*window->getInfo()}, {}, 0, 0});
+    dispatcher->onWindowInfosChanged({{*window->getInfo()}, {}, 0, 0});
 
     NotifyMotionArgs motionArgs = generateMotionArgs();
 
@@ -122,60 +121,60 @@ static void benchmarkNotifyMotion(benchmark::State& state) {
         motionArgs.action = AMOTION_EVENT_ACTION_DOWN;
         motionArgs.downTime = now();
         motionArgs.eventTime = motionArgs.downTime;
-        dispatcher.notifyMotion(motionArgs);
+        dispatcher->notifyMotion(motionArgs);
 
         // Send ACTION_UP
         motionArgs.action = AMOTION_EVENT_ACTION_UP;
         motionArgs.eventTime = now();
-        dispatcher.notifyMotion(motionArgs);
+        dispatcher->notifyMotion(motionArgs);
 
-        window->consumeMotion();
-        window->consumeMotion();
+        window->consumeMotionEvent();
+        window->consumeMotionEvent();
     }
 
-    dispatcher.stop();
+    dispatcher->stop();
 }
 
 static void benchmarkInjectMotion(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    InputDispatcher dispatcher(fakePolicy);
-    dispatcher.setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
-    dispatcher.start();
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
+    dispatcher->start();
 
     // Create a window that will receive motion events
     std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
     sp<FakeWindowHandle> window =
             sp<FakeWindowHandle>::make(application, dispatcher, "Fake Window", DISPLAY_ID);
 
-    dispatcher.onWindowInfosChanged({{*window->getInfo()}, {}, 0, 0});
+    dispatcher->onWindowInfosChanged({{*window->getInfo()}, {}, 0, 0});
 
     for (auto _ : state) {
         MotionEvent event = generateMotionEvent();
         // Send ACTION_DOWN
-        dispatcher.injectInputEvent(&event, /*targetUid=*/{}, InputEventInjectionSync::NONE,
-                                    INJECT_EVENT_TIMEOUT,
-                                    POLICY_FLAG_FILTERED | POLICY_FLAG_PASS_TO_USER);
+        dispatcher->injectInputEvent(&event, /*targetUid=*/{}, InputEventInjectionSync::NONE,
+                                     INJECT_EVENT_TIMEOUT,
+                                     POLICY_FLAG_FILTERED | POLICY_FLAG_PASS_TO_USER);
 
         // Send ACTION_UP
         event.setAction(AMOTION_EVENT_ACTION_UP);
-        dispatcher.injectInputEvent(&event, /*targetUid=*/{}, InputEventInjectionSync::NONE,
-                                    INJECT_EVENT_TIMEOUT,
-                                    POLICY_FLAG_FILTERED | POLICY_FLAG_PASS_TO_USER);
+        dispatcher->injectInputEvent(&event, /*targetUid=*/{}, InputEventInjectionSync::NONE,
+                                     INJECT_EVENT_TIMEOUT,
+                                     POLICY_FLAG_FILTERED | POLICY_FLAG_PASS_TO_USER);
 
-        window->consumeMotion();
-        window->consumeMotion();
+        window->consumeMotionEvent();
+        window->consumeMotionEvent();
     }
 
-    dispatcher.stop();
+    dispatcher->stop();
 }
 
 static void benchmarkOnWindowInfosChanged(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    InputDispatcher dispatcher(fakePolicy);
-    dispatcher.setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
-    dispatcher.start();
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
+    dispatcher->start();
 
     // Create a window
     std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
@@ -188,12 +187,12 @@ static void benchmarkOnWindowInfosChanged(benchmark::State& state) {
     std::vector<gui::DisplayInfo> displayInfos{info};
 
     for (auto _ : state) {
-        dispatcher.onWindowInfosChanged(
+        dispatcher->onWindowInfosChanged(
                 {windowInfos, displayInfos, /*vsyncId=*/0, /*timestamp=*/0});
-        dispatcher.onWindowInfosChanged(
+        dispatcher->onWindowInfosChanged(
                 {/*windowInfos=*/{}, /*displayInfos=*/{}, /*vsyncId=*/{}, /*timestamp=*/0});
     }
-    dispatcher.stop();
+    dispatcher->stop();
 }
 
 } // namespace

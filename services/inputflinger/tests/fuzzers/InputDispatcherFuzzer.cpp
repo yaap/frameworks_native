@@ -18,7 +18,7 @@
 #include <fuzzer/FuzzedDataProvider.h>
 #include "../FakeApplicationHandle.h"
 #include "../FakeInputDispatcherPolicy.h"
-#include "../FakeWindowHandle.h"
+#include "../FakeWindows.h"
 #include "FuzzedInputStream.h"
 #include "dispatcher/InputDispatcher.h"
 #include "input/InputVerifier.h"
@@ -88,8 +88,9 @@ void scrambleWindow(FuzzedDataProvider& fdp, FakeWindowHandle& window) {
 
 } // namespace
 
-sp<FakeWindowHandle> generateFuzzedWindow(FuzzedDataProvider& fdp, InputDispatcher& dispatcher,
-                                          int32_t displayId) {
+sp<FakeWindowHandle> generateFuzzedWindow(FuzzedDataProvider& fdp,
+                                          std::unique_ptr<InputDispatcher>& dispatcher,
+                                          ui::LogicalDisplayId displayId) {
     static size_t windowNumber = 0;
     std::shared_ptr<FakeApplicationHandle> application = std::make_shared<FakeApplicationHandle>();
     std::string windowName = android::base::StringPrintf("Win") + std::to_string(windowNumber++);
@@ -100,10 +101,11 @@ sp<FakeWindowHandle> generateFuzzedWindow(FuzzedDataProvider& fdp, InputDispatch
     return window;
 }
 
-void randomizeWindows(
-        std::unordered_map<int32_t, std::vector<sp<FakeWindowHandle>>>& windowsPerDisplay,
-        FuzzedDataProvider& fdp, InputDispatcher& dispatcher) {
-    const int32_t displayId = fdp.ConsumeIntegralInRange<int32_t>(0, MAX_RANDOM_DISPLAYS - 1);
+void randomizeWindows(std::unordered_map<ui::LogicalDisplayId, std::vector<sp<FakeWindowHandle>>>&
+                              windowsPerDisplay,
+                      FuzzedDataProvider& fdp, std::unique_ptr<InputDispatcher>& dispatcher) {
+    const ui::LogicalDisplayId displayId{
+            fdp.ConsumeIntegralInRange<int32_t>(0, MAX_RANDOM_DISPLAYS - 1)};
     std::vector<sp<FakeWindowHandle>>& windows = windowsPerDisplay[displayId];
 
     fdp.PickValueInArray<std::function<void()>>({
@@ -142,12 +144,12 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
     NotifyStreamProvider streamProvider(fdp);
 
     FakeInputDispatcherPolicy fakePolicy;
-    InputDispatcher dispatcher(fakePolicy);
-    dispatcher.setInputDispatchMode(/*enabled=*/true, /*frozen=*/false);
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    dispatcher->setInputDispatchMode(/*enabled=*/true, /*frozen=*/false);
     // Start InputDispatcher thread
-    dispatcher.start();
+    dispatcher->start();
 
-    std::unordered_map<int32_t, std::vector<sp<FakeWindowHandle>>> windowsPerDisplay;
+    std::unordered_map<ui::LogicalDisplayId, std::vector<sp<FakeWindowHandle>>> windowsPerDisplay;
 
     // Randomly invoke InputDispatcher api's until randomness is exhausted.
     while (fdp.remaining_bytes() > 0) {
@@ -155,7 +157,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                 [&]() -> void {
                     std::optional<NotifyMotionArgs> motion = streamProvider.nextMotion();
                     if (motion) {
-                        dispatcher.notifyMotion(*motion);
+                        dispatcher->notifyMotion(*motion);
                     }
                 },
                 [&]() -> void {
@@ -169,7 +171,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                         }
                     }
 
-                    dispatcher.onWindowInfosChanged(
+                    dispatcher->onWindowInfosChanged(
                             {windowInfos, {}, /*vsyncId=*/0, /*timestamp=*/0});
                 },
                 // Consume on all the windows
@@ -187,7 +189,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
         })();
     }
 
-    dispatcher.stop();
+    dispatcher->stop();
 
     return 0;
 }

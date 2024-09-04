@@ -2014,10 +2014,19 @@ struct OutputPresentTest : public testing::Test {
         MOCK_METHOD0(prepareFrameAsync, GpuCompositionResult());
         MOCK_METHOD1(devOptRepaintFlash, void(const compositionengine::CompositionRefreshArgs&));
         MOCK_METHOD1(finishFrame, void(GpuCompositionResult&&));
-        MOCK_METHOD0(presentFrameAndReleaseLayers, void());
+        MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled), (override));
         MOCK_METHOD1(renderCachedSets, void(const compositionengine::CompositionRefreshArgs&));
         MOCK_METHOD1(canPredictCompositionStrategy, bool(const CompositionRefreshArgs&));
+        MOCK_METHOD(void, setHintSessionRequiresRenderEngine, (bool requiresRenderEngine),
+                    (override));
+        MOCK_METHOD(bool, isPowerHintSessionEnabled, (), (override));
+        MOCK_METHOD(bool, isPowerHintSessionGpuReportingEnabled, (), (override));
     };
+
+    OutputPresentTest() {
+        EXPECT_CALL(mOutput, isPowerHintSessionEnabled()).WillRepeatedly(Return(true));
+        EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillRepeatedly(Return(true));
+    }
 
     StrictMock<OutputPartialMock> mOutput;
 };
@@ -2032,11 +2041,12 @@ TEST_F(OutputPresentTest, justInvokesChildFunctionsInSequence) {
     EXPECT_CALL(mOutput, writeCompositionState(Ref(args)));
     EXPECT_CALL(mOutput, setColorTransform(Ref(args)));
     EXPECT_CALL(mOutput, beginFrame());
+    EXPECT_CALL(mOutput, setHintSessionRequiresRenderEngine(false));
     EXPECT_CALL(mOutput, canPredictCompositionStrategy(Ref(args))).WillOnce(Return(false));
     EXPECT_CALL(mOutput, prepareFrame());
     EXPECT_CALL(mOutput, devOptRepaintFlash(Ref(args)));
     EXPECT_CALL(mOutput, finishFrame(_));
-    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers());
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(false));
     EXPECT_CALL(mOutput, renderCachedSets(Ref(args)));
 
     mOutput.present(args);
@@ -2052,11 +2062,12 @@ TEST_F(OutputPresentTest, predictingCompositionStrategyInvokesPrepareFrameAsync)
     EXPECT_CALL(mOutput, writeCompositionState(Ref(args)));
     EXPECT_CALL(mOutput, setColorTransform(Ref(args)));
     EXPECT_CALL(mOutput, beginFrame());
+    EXPECT_CALL(mOutput, setHintSessionRequiresRenderEngine(false));
     EXPECT_CALL(mOutput, canPredictCompositionStrategy(Ref(args))).WillOnce(Return(true));
     EXPECT_CALL(mOutput, prepareFrameAsync());
     EXPECT_CALL(mOutput, devOptRepaintFlash(Ref(args)));
     EXPECT_CALL(mOutput, finishFrame(_));
-    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers());
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(false));
     EXPECT_CALL(mOutput, renderCachedSets(Ref(args)));
 
     mOutput.present(args);
@@ -2902,7 +2913,7 @@ struct OutputDevOptRepaintFlashTest : public testing::Test {
                      std::optional<base::unique_fd>(const Region&,
                                                     std::shared_ptr<renderengine::ExternalTexture>,
                                                     base::unique_fd&));
-        MOCK_METHOD0(presentFrameAndReleaseLayers, void());
+        MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled));
         MOCK_METHOD0(prepareFrame, void());
         MOCK_METHOD0(updateProtectedContentState, void());
         MOCK_METHOD2(dequeueRenderBuffer,
@@ -2939,7 +2950,8 @@ TEST_F(OutputDevOptRepaintFlashTest, postsAndPreparesANewFrameIfNotEnabled) {
     mOutput.mState.isEnabled = false;
 
     InSequence seq;
-    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers());
+    constexpr bool kFlushEvenWhenDisabled = false;
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled));
     EXPECT_CALL(mOutput, prepareFrame());
 
     mOutput.devOptRepaintFlash(mRefreshArgs);
@@ -2951,7 +2963,8 @@ TEST_F(OutputDevOptRepaintFlashTest, postsAndPreparesANewFrameIfEnabled) {
 
     InSequence seq;
     EXPECT_CALL(mOutput, getDirtyRegion()).WillOnce(Return(kEmptyRegion));
-    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers());
+    constexpr bool kFlushEvenWhenDisabled = false;
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled));
     EXPECT_CALL(mOutput, prepareFrame());
 
     mOutput.devOptRepaintFlash(mRefreshArgs);
@@ -2967,7 +2980,8 @@ TEST_F(OutputDevOptRepaintFlashTest, alsoComposesSurfacesAndQueuesABufferIfDirty
     EXPECT_CALL(mOutput, dequeueRenderBuffer(_, _));
     EXPECT_CALL(mOutput, composeSurfaces(RegionEq(kNotEmptyRegion), _, _));
     EXPECT_CALL(*mRenderSurface, queueBuffer(_, 1.f));
-    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers());
+    constexpr bool kFlushEvenWhenDisabled = false;
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled));
     EXPECT_CALL(mOutput, prepareFrame());
 
     mOutput.devOptRepaintFlash(mRefreshArgs);
@@ -2985,10 +2999,14 @@ struct OutputFinishFrameTest : public testing::Test {
                      std::optional<base::unique_fd>(const Region&,
                                                     std::shared_ptr<renderengine::ExternalTexture>,
                                                     base::unique_fd&));
-        MOCK_METHOD0(presentFrameAndReleaseLayers, void());
+        MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled), (override));
         MOCK_METHOD0(updateProtectedContentState, void());
         MOCK_METHOD2(dequeueRenderBuffer,
                      bool(base::unique_fd*, std::shared_ptr<renderengine::ExternalTexture>*));
+        MOCK_METHOD(void, setHintSessionGpuFence, (std::unique_ptr<FenceTime> && gpuFence),
+                    (override));
+        MOCK_METHOD(bool, isPowerHintSessionEnabled, (), (override));
+        MOCK_METHOD(bool, isPowerHintSessionGpuReportingEnabled, (), (override));
     };
 
     OutputFinishFrameTest() {
@@ -2997,6 +3015,8 @@ struct OutputFinishFrameTest : public testing::Test {
         mOutput.setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(mRenderSurface));
         EXPECT_CALL(mOutput, getCompositionEngine()).WillRepeatedly(ReturnRef(mCompositionEngine));
         EXPECT_CALL(mCompositionEngine, getRenderEngine()).WillRepeatedly(ReturnRef(mRenderEngine));
+        EXPECT_CALL(mOutput, isPowerHintSessionEnabled()).WillRepeatedly(Return(true));
+        EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillRepeatedly(Return(true));
     }
 
     StrictMock<OutputPartialMock> mOutput;
@@ -3023,6 +3043,22 @@ TEST_F(OutputFinishFrameTest, takesEarlyOutifComposeSurfacesReturnsNoFence) {
     mOutput.finishFrame(std::move(result));
 }
 
+TEST_F(OutputFinishFrameTest, queuesBufferIfComposeSurfacesReturnsAFenceWithAdpfGpuOff) {
+    EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillOnce(Return(false));
+    mOutput.mState.isEnabled = true;
+
+    InSequence seq;
+    EXPECT_CALL(mOutput, updateProtectedContentState());
+    EXPECT_CALL(mOutput, dequeueRenderBuffer(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(mOutput, composeSurfaces(RegionEq(Region::INVALID_REGION), _, _))
+            .WillOnce(Return(ByMove(base::unique_fd())));
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_));
+    EXPECT_CALL(*mRenderSurface, queueBuffer(_, 1.f));
+
+    impl::GpuCompositionResult result;
+    mOutput.finishFrame(std::move(result));
+}
+
 TEST_F(OutputFinishFrameTest, queuesBufferIfComposeSurfacesReturnsAFence) {
     mOutput.mState.isEnabled = true;
 
@@ -3031,6 +3067,7 @@ TEST_F(OutputFinishFrameTest, queuesBufferIfComposeSurfacesReturnsAFence) {
     EXPECT_CALL(mOutput, dequeueRenderBuffer(_, _)).WillOnce(Return(true));
     EXPECT_CALL(mOutput, composeSurfaces(RegionEq(Region::INVALID_REGION), _, _))
             .WillOnce(Return(ByMove(base::unique_fd())));
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
     EXPECT_CALL(*mRenderSurface, queueBuffer(_, 1.f));
 
     impl::GpuCompositionResult result;
@@ -3058,6 +3095,7 @@ TEST_F(OutputFinishFrameTest, queuesBufferWithHdrSdrRatio) {
             .WillOnce(DoAll(SetArgPointee<1>(texture), Return(true)));
     EXPECT_CALL(mOutput, composeSurfaces(RegionEq(Region::INVALID_REGION), _, _))
             .WillOnce(Return(ByMove(base::unique_fd())));
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
     EXPECT_CALL(*mRenderSurface, queueBuffer(_, 2.f));
 
     impl::GpuCompositionResult result;
@@ -3068,6 +3106,7 @@ TEST_F(OutputFinishFrameTest, predictionSucceeded) {
     mOutput.mState.isEnabled = true;
     mOutput.mState.strategyPrediction = CompositionStrategyPredictionState::SUCCESS;
     InSequence seq;
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
     EXPECT_CALL(*mRenderSurface, queueBuffer(_, 1.f));
 
     impl::GpuCompositionResult result;
@@ -3090,6 +3129,7 @@ TEST_F(OutputFinishFrameTest, predictionFailedAndBufferIsReused) {
                 composeSurfaces(RegionEq(Region::INVALID_REGION), result.buffer,
                                 Eq(ByRef(result.fence))))
             .WillOnce(Return(ByMove(base::unique_fd())));
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
     EXPECT_CALL(*mRenderSurface, queueBuffer(_, 1.f));
     mOutput.finishFrame(std::move(result));
 }
@@ -3102,7 +3142,8 @@ struct OutputPostFramebufferTest : public testing::Test {
     struct OutputPartialMock : public OutputPartialMockBase {
         // Sets up the helper functions called by the function under test to use
         // mock implementations.
-        MOCK_METHOD0(presentFrame, compositionengine::Output::FrameFences());
+        MOCK_METHOD(compositionengine::Output::FrameFences, presentFrame, ());
+        MOCK_METHOD(void, executeCommands, ());
     };
 
     struct Layer {
@@ -3140,9 +3181,67 @@ struct OutputPostFramebufferTest : public testing::Test {
 };
 
 TEST_F(OutputPostFramebufferTest, ifNotEnabledDoesNothing) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
+                      true);
     mOutput.mState.isEnabled = false;
+    EXPECT_CALL(mOutput, executeCommands()).Times(0);
+    EXPECT_CALL(mOutput, presentFrame()).Times(0);
 
-    mOutput.presentFrameAndReleaseLayers();
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+}
+
+TEST_F(OutputPostFramebufferTest, ifNotEnabledExecutesCommandsIfFlush) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
+                      true);
+    mOutput.mState.isEnabled = false;
+    EXPECT_CALL(mOutput, executeCommands());
+    EXPECT_CALL(mOutput, presentFrame()).Times(0);
+
+    constexpr bool kFlushEvenWhenDisabled = true;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+}
+
+TEST_F(OutputPostFramebufferTest, ifEnabledDoNotExecuteCommands) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
+                      true);
+    mOutput.mState.isEnabled = true;
+
+    compositionengine::Output::FrameFences frameFences;
+
+    EXPECT_CALL(mOutput, getOutputLayerCount()).WillOnce(Return(0u));
+
+    // This should only be called for disabled outputs. This test's goal is to verify this line;
+    // the other expectations help satisfy the StrictMocks.
+    EXPECT_CALL(mOutput, executeCommands()).Times(0);
+
+    EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
+    EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
+
+    constexpr bool kFlushEvenWhenDisabled = true;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+}
+
+TEST_F(OutputPostFramebufferTest, ifEnabledDoNotExecuteCommands2) {
+    // Same test as ifEnabledDoNotExecuteCommands, but with this variable set to false.
+    constexpr bool kFlushEvenWhenDisabled = false;
+
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
+                      true);
+    mOutput.mState.isEnabled = true;
+
+    compositionengine::Output::FrameFences frameFences;
+
+    EXPECT_CALL(mOutput, getOutputLayerCount()).WillOnce(Return(0u));
+
+    // This should only be called for disabled outputs. This test's goal is to verify this line;
+    // the other expectations help satisfy the StrictMocks.
+    EXPECT_CALL(mOutput, executeCommands()).Times(0);
+
+    EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
+    EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
+
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
 }
 
 TEST_F(OutputPostFramebufferTest, ifEnabledMustFlipThenPresentThenSendPresentCompleted) {
@@ -3160,10 +3259,13 @@ TEST_F(OutputPostFramebufferTest, ifEnabledMustFlipThenPresentThenSendPresentCom
     EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
     EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
 
-    mOutput.presentFrameAndReleaseLayers();
+    constexpr bool kFlushEvenWhenDisabled = true;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
 }
 
 TEST_F(OutputPostFramebufferTest, releaseFencesAreSentToLayerFE) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, false);
+    ASSERT_FALSE(FlagManager::getInstance().ce_fence_promise());
     // Simulate getting release fences from each layer, and ensure they are passed to the
     // front-end layer interface for each layer correctly.
 
@@ -3202,10 +3304,56 @@ TEST_F(OutputPostFramebufferTest, releaseFencesAreSentToLayerFE) {
                 EXPECT_EQ(FenceResult(layer3Fence), futureFenceResult.get());
             });
 
-    mOutput.presentFrameAndReleaseLayers();
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+}
+
+TEST_F(OutputPostFramebufferTest, releaseFencesAreSetInLayerFE) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, true);
+    ASSERT_TRUE(FlagManager::getInstance().ce_fence_promise());
+    // Simulate getting release fences from each layer, and ensure they are passed to the
+    // front-end layer interface for each layer correctly.
+
+    mOutput.mState.isEnabled = true;
+
+    // Create three unique fence instances
+    sp<Fence> layer1Fence = sp<Fence>::make();
+    sp<Fence> layer2Fence = sp<Fence>::make();
+    sp<Fence> layer3Fence = sp<Fence>::make();
+
+    Output::FrameFences frameFences;
+    frameFences.layerFences.emplace(&mLayer1.hwc2Layer, layer1Fence);
+    frameFences.layerFences.emplace(&mLayer2.hwc2Layer, layer2Fence);
+    frameFences.layerFences.emplace(&mLayer3.hwc2Layer, layer3Fence);
+
+    EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
+    EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
+
+    // Compare the pointers values of each fence to make sure the correct ones
+    // are passed. This happens to work with the current implementation, but
+    // would not survive certain calls like Fence::merge() which would return a
+    // new instance.
+    EXPECT_CALL(*mLayer1.layerFE, setReleaseFence(_))
+            .WillOnce([&layer1Fence](FenceResult releaseFence) {
+                EXPECT_EQ(FenceResult(layer1Fence), releaseFence);
+            });
+    EXPECT_CALL(*mLayer2.layerFE, setReleaseFence(_))
+            .WillOnce([&layer2Fence](FenceResult releaseFence) {
+                EXPECT_EQ(FenceResult(layer2Fence), releaseFence);
+            });
+    EXPECT_CALL(*mLayer3.layerFE, setReleaseFence(_))
+            .WillOnce([&layer3Fence](FenceResult releaseFence) {
+                EXPECT_EQ(FenceResult(layer3Fence), releaseFence);
+            });
+
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
 }
 
 TEST_F(OutputPostFramebufferTest, releaseFencesIncludeClientTargetAcquireFence) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, false);
+    ASSERT_FALSE(FlagManager::getInstance().ce_fence_promise());
+
     mOutput.mState.isEnabled = true;
     mOutput.mState.usesClientComposition = true;
 
@@ -3225,10 +3373,40 @@ TEST_F(OutputPostFramebufferTest, releaseFencesIncludeClientTargetAcquireFence) 
     EXPECT_CALL(*mLayer2.layerFE, onLayerDisplayed).WillOnce(Return());
     EXPECT_CALL(*mLayer3.layerFE, onLayerDisplayed).WillOnce(Return());
 
-    mOutput.presentFrameAndReleaseLayers();
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+}
+
+TEST_F(OutputPostFramebufferTest, setReleaseFencesIncludeClientTargetAcquireFence) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, true);
+    ASSERT_TRUE(FlagManager::getInstance().ce_fence_promise());
+
+    mOutput.mState.isEnabled = true;
+    mOutput.mState.usesClientComposition = true;
+
+    Output::FrameFences frameFences;
+    frameFences.clientTargetAcquireFence = sp<Fence>::make();
+    frameFences.layerFences.emplace(&mLayer1.hwc2Layer, sp<Fence>::make());
+    frameFences.layerFences.emplace(&mLayer2.hwc2Layer, sp<Fence>::make());
+    frameFences.layerFences.emplace(&mLayer3.hwc2Layer, sp<Fence>::make());
+
+    EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
+    EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
+
+    // Fence::merge is called, and since none of the fences are actually valid,
+    // Fence::NO_FENCE is returned and passed to each setReleaseFence() call.
+    // This is the best we can do without creating a real kernel fence object.
+    EXPECT_CALL(*mLayer1.layerFE, setReleaseFence).WillOnce(Return());
+    EXPECT_CALL(*mLayer2.layerFE, setReleaseFence).WillOnce(Return());
+    EXPECT_CALL(*mLayer3.layerFE, setReleaseFence).WillOnce(Return());
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
 }
 
 TEST_F(OutputPostFramebufferTest, releasedLayersSentPresentFence) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, false);
+    ASSERT_FALSE(FlagManager::getInstance().ce_fence_promise());
+
     mOutput.mState.isEnabled = true;
     mOutput.mState.usesClientComposition = true;
 
@@ -3270,7 +3448,57 @@ TEST_F(OutputPostFramebufferTest, releasedLayersSentPresentFence) {
                 EXPECT_EQ(FenceResult(presentFence), futureFenceResult.get());
             });
 
-    mOutput.presentFrameAndReleaseLayers();
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
+
+    // After the call the list of released layers should have been cleared.
+    EXPECT_TRUE(mOutput.getReleasedLayersForTest().empty());
+}
+
+TEST_F(OutputPostFramebufferTest, setReleasedLayersSentPresentFence) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, true);
+    ASSERT_TRUE(FlagManager::getInstance().ce_fence_promise());
+
+    mOutput.mState.isEnabled = true;
+    mOutput.mState.usesClientComposition = true;
+
+    // This should happen even if there are no (current) output layers.
+    EXPECT_CALL(mOutput, getOutputLayerCount()).WillOnce(Return(0u));
+
+    // Load up the released layers with some mock instances
+    sp<StrictMock<mock::LayerFE>> releasedLayer1 = sp<StrictMock<mock::LayerFE>>::make();
+    sp<StrictMock<mock::LayerFE>> releasedLayer2 = sp<StrictMock<mock::LayerFE>>::make();
+    sp<StrictMock<mock::LayerFE>> releasedLayer3 = sp<StrictMock<mock::LayerFE>>::make();
+    Output::ReleasedLayers layers;
+    layers.push_back(releasedLayer1);
+    layers.push_back(releasedLayer2);
+    layers.push_back(releasedLayer3);
+    mOutput.setReleasedLayers(std::move(layers));
+
+    // Set up a fake present fence
+    sp<Fence> presentFence = sp<Fence>::make();
+    Output::FrameFences frameFences;
+    frameFences.presentFence = presentFence;
+
+    EXPECT_CALL(mOutput, presentFrame()).WillOnce(Return(frameFences));
+    EXPECT_CALL(*mRenderSurface, onPresentDisplayCompleted());
+
+    // Each released layer should be given the presentFence.
+    EXPECT_CALL(*releasedLayer1, setReleaseFence(_))
+            .WillOnce([&presentFence](FenceResult fenceResult) {
+                EXPECT_EQ(FenceResult(presentFence), fenceResult);
+            });
+    EXPECT_CALL(*releasedLayer2, setReleaseFence(_))
+            .WillOnce([&presentFence](FenceResult fenceResult) {
+                EXPECT_EQ(FenceResult(presentFence), fenceResult);
+            });
+    EXPECT_CALL(*releasedLayer3, setReleaseFence(_))
+            .WillOnce([&presentFence](FenceResult fenceResult) {
+                EXPECT_EQ(FenceResult(presentFence), fenceResult);
+            });
+
+    constexpr bool kFlushEvenWhenDisabled = false;
+    mOutput.presentFrameAndReleaseLayers(kFlushEvenWhenDisabled);
 
     // After the call the list of released layers should have been cleared.
     EXPECT_TRUE(mOutput.getReleasedLayersForTest().empty());
@@ -3293,9 +3521,12 @@ struct OutputComposeSurfacesTest : public testing::Test {
         MOCK_METHOD2(appendRegionFlashRequests,
                      void(const Region&, std::vector<LayerFE::LayerSettings>&));
         MOCK_METHOD1(setExpensiveRenderingExpected, void(bool));
+        MOCK_METHOD(void, setHintSessionGpuStart, (TimePoint startTime), (override));
         MOCK_METHOD(void, setHintSessionGpuFence, (std::unique_ptr<FenceTime> && gpuFence),
                     (override));
+        MOCK_METHOD(void, setHintSessionRequiresRenderEngine, (bool), (override));
         MOCK_METHOD(bool, isPowerHintSessionEnabled, (), (override));
+        MOCK_METHOD(bool, isPowerHintSessionGpuReportingEnabled, (), (override));
     };
 
     OutputComposeSurfacesTest() {
@@ -3325,6 +3556,8 @@ struct OutputComposeSurfacesTest : public testing::Test {
         EXPECT_CALL(mCompositionEngine, getTimeStats()).WillRepeatedly(Return(mTimeStats.get()));
         EXPECT_CALL(*mDisplayColorProfile, getHdrCapabilities())
                 .WillRepeatedly(ReturnRef(kHdrCapabilities));
+        EXPECT_CALL(mOutput, isPowerHintSessionEnabled()).WillRepeatedly(Return(true));
+        EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillRepeatedly(Return(true));
     }
 
     struct ExecuteState : public CallOrderStateMachineHelper<TestType, ExecuteState> {
@@ -3590,8 +3823,55 @@ TEST_F(OutputComposeSurfacesTest, skipDuplicateClientCompositionRequests) {
     EXPECT_FALSE(mOutput.mState.reusedClientComposition);
 
     // We do not expect another call to draw layers.
+    EXPECT_CALL(mOutput, setHintSessionRequiresRenderEngine(_)).Times(0);
+    EXPECT_CALL(mOutput, setHintSessionGpuStart(_)).Times(0);
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
     verify().execute().expectAFenceWasReturned();
     EXPECT_TRUE(mOutput.mState.reusedClientComposition);
+}
+
+TEST_F(OutputComposeSurfacesTest, clientCompositionIfBufferChangesWithAdpfGpuOff) {
+    EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillOnce(Return(false));
+    LayerFE::LayerSettings r1;
+    LayerFE::LayerSettings r2;
+
+    r1.geometry.boundaries = FloatRect{1, 2, 3, 4};
+    r2.geometry.boundaries = FloatRect{5, 6, 7, 8};
+
+    EXPECT_CALL(mOutput, getSkipColorTransform()).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mDisplayColorProfile, hasWideColorGamut()).WillRepeatedly(Return(true));
+    EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(false));
+    EXPECT_CALL(mRenderEngine, isProtected()).WillRepeatedly(Return(false));
+    EXPECT_CALL(mOutput, generateClientCompositionRequests(_, kDefaultOutputDataspace, _))
+            .WillRepeatedly(Return(std::vector<LayerFE::LayerSettings>{r1, r2}));
+    EXPECT_CALL(mOutput, appendRegionFlashRequests(RegionEq(kDebugRegion), _))
+            .WillRepeatedly(Return());
+
+    const auto otherOutputBuffer = std::make_shared<
+            renderengine::impl::
+                    ExternalTexture>(sp<GraphicBuffer>::make(), mRenderEngine,
+                                     renderengine::impl::ExternalTexture::Usage::READABLE |
+                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
+    EXPECT_CALL(*mRenderSurface, dequeueBuffer(_))
+            .WillOnce(Return(mOutputBuffer))
+            .WillOnce(Return(otherOutputBuffer));
+    base::unique_fd fd(open("/dev/null", O_RDONLY));
+    EXPECT_CALL(mRenderEngine, drawLayers(_, ElementsAre(r1, r2), _, _))
+            .WillRepeatedly([&](const renderengine::DisplaySettings&,
+                                const std::vector<renderengine::LayerSettings>&,
+                                const std::shared_ptr<renderengine::ExternalTexture>&,
+                                base::unique_fd&&) -> ftl::Future<FenceResult> {
+                return ftl::yield<FenceResult>(sp<Fence>::make(std::move(fd)));
+            });
+
+    EXPECT_CALL(mOutput, setHintSessionRequiresRenderEngine(true));
+    EXPECT_CALL(mOutput, setHintSessionGpuStart(_)).Times(0);
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_)).Times(0);
+    verify().execute().expectAFenceWasReturned();
+    EXPECT_FALSE(mOutput.mState.reusedClientComposition);
+
+    verify().execute().expectAFenceWasReturned();
+    EXPECT_FALSE(mOutput.mState.reusedClientComposition);
 }
 
 TEST_F(OutputComposeSurfacesTest, clientCompositionIfBufferChanges) {
@@ -3618,14 +3898,18 @@ TEST_F(OutputComposeSurfacesTest, clientCompositionIfBufferChanges) {
     EXPECT_CALL(*mRenderSurface, dequeueBuffer(_))
             .WillOnce(Return(mOutputBuffer))
             .WillOnce(Return(otherOutputBuffer));
+    base::unique_fd fd(open("/dev/null", O_RDONLY));
     EXPECT_CALL(mRenderEngine, drawLayers(_, ElementsAre(r1, r2), _, _))
             .WillRepeatedly([&](const renderengine::DisplaySettings&,
                                 const std::vector<renderengine::LayerSettings>&,
                                 const std::shared_ptr<renderengine::ExternalTexture>&,
                                 base::unique_fd&&) -> ftl::Future<FenceResult> {
-                return ftl::yield<FenceResult>(Fence::NO_FENCE);
+                return ftl::yield<FenceResult>(sp<Fence>::make(std::move(fd)));
             });
 
+    EXPECT_CALL(mOutput, setHintSessionRequiresRenderEngine(true));
+    EXPECT_CALL(mOutput, setHintSessionGpuStart(_));
+    EXPECT_CALL(mOutput, setHintSessionGpuFence(_));
     verify().execute().expectAFenceWasReturned();
     EXPECT_FALSE(mOutput.mState.reusedClientComposition);
 
@@ -5057,8 +5341,9 @@ struct OutputPresentFrameAndReleaseLayersAsyncTest : public ::testing::Test {
     struct OutputPartialMock : public OutputPrepareFrameAsyncTest::OutputPartialMock {
         // Set up the helper functions called by the function under test to use
         // mock implementations.
-        MOCK_METHOD0(presentFrameAndReleaseLayers, void());
-        MOCK_METHOD0(presentFrameAndReleaseLayersAsync, ftl::Future<std::monostate>());
+        MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled));
+        MOCK_METHOD(ftl::Future<std::monostate>, presentFrameAndReleaseLayersAsync,
+                    (bool flushEvenWhenDisabled));
     };
     OutputPresentFrameAndReleaseLayersAsyncTest() {
         mOutput->setDisplayColorProfileForTest(
@@ -5075,16 +5360,16 @@ struct OutputPresentFrameAndReleaseLayersAsyncTest : public ::testing::Test {
 };
 
 TEST_F(OutputPresentFrameAndReleaseLayersAsyncTest, notCalledWhenNotRequested) {
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync()).Times(0);
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers()).Times(1);
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync(_)).Times(0);
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers(_)).Times(1);
 
     mOutput->present(mRefreshArgs);
 }
 
 TEST_F(OutputPresentFrameAndReleaseLayersAsyncTest, calledWhenRequested) {
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync())
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync(false))
             .WillOnce(Return(ftl::yield<std::monostate>({})));
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers()).Times(0);
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers(_)).Times(0);
 
     mOutput->offloadPresentNextFrame();
     mOutput->present(mRefreshArgs);
@@ -5092,9 +5377,10 @@ TEST_F(OutputPresentFrameAndReleaseLayersAsyncTest, calledWhenRequested) {
 
 TEST_F(OutputPresentFrameAndReleaseLayersAsyncTest, calledForOneFrame) {
     ::testing::InSequence inseq;
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync())
+    constexpr bool kFlushEvenWhenDisabled = false;
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayersAsync(kFlushEvenWhenDisabled))
             .WillOnce(Return(ftl::yield<std::monostate>({})));
-    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers()).Times(1);
+    EXPECT_CALL(*mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled)).Times(1);
 
     mOutput->offloadPresentNextFrame();
     mOutput->present(mRefreshArgs);
@@ -5173,6 +5459,60 @@ TEST_F(OutputUpdateProtectedContentStateTest, ifProtectedContentLayerComposeByCl
     EXPECT_CALL(mLayer1.mOutputLayer, requiresClientComposition()).WillRepeatedly(Return(true));
     EXPECT_CALL(mLayer2.mOutputLayer, requiresClientComposition()).WillRepeatedly(Return(true));
     mOutput.updateProtectedContentState();
+}
+
+struct OutputPresentFrameAndReleaseLayersTest : public testing::Test {
+    struct OutputPartialMock : public OutputPartialMockBase {
+        // Sets up the helper functions called by the function under test (and functions we can
+        // ignore) to use mock implementations.
+        MOCK_METHOD1(updateColorProfile, void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD1(updateCompositionState,
+                     void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD0(planComposition, void());
+        MOCK_METHOD1(writeCompositionState, void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD1(setColorTransform, void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD0(beginFrame, void());
+        MOCK_METHOD0(prepareFrame, void());
+        MOCK_METHOD0(prepareFrameAsync, GpuCompositionResult());
+        MOCK_METHOD1(devOptRepaintFlash, void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD1(finishFrame, void(GpuCompositionResult&&));
+        MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled), (override));
+        MOCK_METHOD1(renderCachedSets, void(const compositionengine::CompositionRefreshArgs&));
+        MOCK_METHOD1(canPredictCompositionStrategy, bool(const CompositionRefreshArgs&));
+        MOCK_METHOD(void, setHintSessionRequiresRenderEngine, (bool requiresRenderEngine),
+                    (override));
+        MOCK_METHOD(bool, isPowerHintSessionEnabled, (), (override));
+        MOCK_METHOD(bool, isPowerHintSessionGpuReportingEnabled, (), (override));
+    };
+
+    OutputPresentFrameAndReleaseLayersTest() {
+        EXPECT_CALL(mOutput, isPowerHintSessionEnabled()).WillRepeatedly(Return(true));
+        EXPECT_CALL(mOutput, isPowerHintSessionGpuReportingEnabled()).WillRepeatedly(Return(true));
+    }
+
+    NiceMock<OutputPartialMock> mOutput;
+};
+
+TEST_F(OutputPresentFrameAndReleaseLayersTest, noBuffersToUncache) {
+    CompositionRefreshArgs args;
+    ASSERT_TRUE(args.bufferIdsToUncache.empty());
+    mOutput.editState().isEnabled = false;
+
+    constexpr bool kFlushEvenWhenDisabled = false;
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled));
+
+    mOutput.present(args);
+}
+
+TEST_F(OutputPresentFrameAndReleaseLayersTest, buffersToUncache) {
+    CompositionRefreshArgs args;
+    args.bufferIdsToUncache.push_back(1);
+    mOutput.editState().isEnabled = false;
+
+    constexpr bool kFlushEvenWhenDisabled = true;
+    EXPECT_CALL(mOutput, presentFrameAndReleaseLayers(kFlushEvenWhenDisabled));
+
+    mOutput.present(args);
 }
 
 } // namespace

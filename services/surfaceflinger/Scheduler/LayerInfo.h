@@ -146,6 +146,13 @@ public:
         // selection.
         bool isNoVote() const;
 
+        // Returns true if the FrameRate has a valid valueless (0 Hz) frame rate type.
+        bool isValuelessType() const;
+
+        // Checks whether the given FrameRate's vote specifications is valid for MRR devices
+        // given the current flagging.
+        bool isVoteValidForMrr(bool isVrrDevice) const;
+
     private:
         static Seamlessness getSeamlessness(Fps rate, Seamlessness seamlessness) {
             if (!rate.isValid()) {
