@@ -141,6 +141,7 @@ flag {
   metadata {
     purpose: PURPOSE_BUGFIX
   }
+  is_exported: true
 } # disable_synthetic_vsync_for_performance
 
 flag {
