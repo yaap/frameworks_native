@@ -110,7 +110,7 @@ struct NotifyMotionArgs {
     NotifyMotionArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, int32_t deviceId,
                      uint32_t source, ui::LogicalDisplayId displayId, uint32_t policyFlags,
                      int32_t action, int32_t actionButton, int32_t flags, int32_t metaState,
-                     int32_t buttonState, MotionClassification classification, int32_t edgeFlags,
+                     int32_t buttonState, MotionClassification classification,
                      uint32_t pointerCount, const PointerProperties* pointerProperties,
                      const PointerCoords* pointerCoords, float xPrecision, float yPrecision,
                      float xCursorPosition, float yCursorPosition, nsecs_t downTime,

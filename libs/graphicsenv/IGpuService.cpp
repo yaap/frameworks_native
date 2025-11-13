@@ -108,6 +108,18 @@ public:
                            IBinder::FLAG_ONEWAY);
     }
 
+    std::string getPersistGraphicsEgl() override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        status_t error = remote()->transact(BnGpuService::GET_PERSIST_GRAPHICS_EGL, data, &reply);
+        std::string persistGraphicsEgl;
+        if (error == OK) {
+            error = reply.readUtf8FromUtf16(&persistGraphicsEgl);
+        }
+        return persistGraphicsEgl;
+    }
+
     std::string getUpdatableDriverPath() override {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
@@ -285,6 +297,12 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
 
             toggleAngleAsSystemDriver(enableAngleAsSystemDriver);
             return OK;
+        }
+        case GET_PERSIST_GRAPHICS_EGL: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            std::string persistGraphicsEgl = getPersistGraphicsEgl();
+            return reply->writeUtf8AsUtf16(persistGraphicsEgl);
         }
         case GET_FEATURE_CONFIG_OVERRIDES: {
             CHECK_INTERFACE(IGpuService, data, reply);

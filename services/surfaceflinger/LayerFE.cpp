@@ -114,6 +114,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     prepareShadowClientComposition(*layerSettings, targetSettings.viewport);
 
     layerSettings->borderSettings = mSnapshot->borderSettings;
+    layerSettings->boxShadowSettings = mSnapshot->boxShadowSettings;
 
     return layerSettings;
 }
@@ -123,6 +124,14 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     SFTRACE_CALL();
     compositionengine::LayerFE::LayerSettings layerSettings;
     layerSettings.geometry.originalBounds = mSnapshot->geomLayerBounds;
+
+    if (mSnapshot->parentRoundedCorner.hasRequestedRadius()) {
+        layerSettings.geometry.otherRoundedCornersRadius = mSnapshot->parentRoundedCorner.radius;
+        layerSettings.geometry.otherCrop = mSnapshot->parentRoundedCorner.cropRect;
+    } else {
+        layerSettings.geometry.otherCrop = mSnapshot->parentGeomLayerCrop;
+    }
+
     layerSettings.geometry.boundaries =
             reduce(mSnapshot->geomLayerBounds, mSnapshot->transparentRegionHint);
     layerSettings.geometry.positionTransform = mSnapshot->geomLayerTransform.asMatrix4();
@@ -158,11 +167,13 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     switch (targetSettings.blurSetting) {
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::Enabled:
             layerSettings.backgroundBlurRadius = mSnapshot->backgroundBlurRadius;
+            layerSettings.backgroundBlurScale = mSnapshot->backgroundBlurScale;
             layerSettings.blurRegions = mSnapshot->blurRegions;
             layerSettings.blurRegionTransform = mSnapshot->localTransformInverse.asMatrix4();
             break;
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::BackgroundBlurOnly:
             layerSettings.backgroundBlurRadius = mSnapshot->backgroundBlurRadius;
+            layerSettings.backgroundBlurScale = mSnapshot->backgroundBlurScale;
             break;
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::BlurRegionsOnly:
             layerSettings.blurRegions = mSnapshot->blurRegions;
@@ -208,7 +219,7 @@ void LayerFE::prepareEffectsClientComposition(
     if (targetSettings.realContentIsVisible && fillsColor()) {
         // Set color for color fill settings.
         layerSettings.source.solidColor = mSnapshot->color.rgb;
-    } else if (hasBlur() || drawShadows() || hasOutline()) {
+    } else if (hasBlur() || drawShadows() || hasBorderSettings() || hasBoxShadowSettings()) {
         layerSettings.skipContentDraw = true;
     }
 }
@@ -222,15 +233,8 @@ void LayerFE::prepareBufferStateClientComposition(
         // activeBuffer, then we need to return LayerSettings.
         return;
     }
-    bool blackOutLayer;
-    if (FlagManager::getInstance().display_protected()) {
-        blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
+    bool blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
                 (mSnapshot->isSecure && !targetSettings.isSecure);
-    } else {
-        blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
-                ((mSnapshot->isSecure || mSnapshot->hasProtectedContent) &&
-                 !targetSettings.isSecure);
-    }
     const bool bufferCanBeUsedAsHwTexture =
             mSnapshot->externalTexture->getUsage() & GraphicBuffer::USAGE_HW_TEXTURE;
     if (blackOutLayer || !bufferCanBeUsedAsHwTexture) {
@@ -282,7 +286,7 @@ void LayerFE::prepareBufferStateClientComposition(
          * the code below applies the primary display's inverse transform to
          * the texture transform
          */
-        uint32_t transform = SurfaceFlinger::getActiveDisplayRotationFlags();
+        uint32_t transform = SurfaceFlinger::getFrontInternalDisplayRotationFlags();
         mat4 tr = inverseOrientation(transform);
 
         /**
@@ -339,11 +343,19 @@ void LayerFE::prepareShadowClientComposition(LayerFE::LayerSettings& caster,
         return;
     }
 
-    // Shift the spot light x-position to the middle of the display and then
-    // offset it by casting layer's screen pos.
-    state.lightPos.x =
-            (static_cast<float>(layerStackRect.width()) / 2.f) - mSnapshot->transformedBounds.left;
-    state.lightPos.y -= mSnapshot->transformedBounds.top;
+    // The light source should be at (screenWidth/2, globalShadowSettings.lightPos.y) in
+    // screenspace.
+    vec2 lightPosScreenSpace = {
+            (static_cast<float>(layerStackRect.width()) / 2.f),
+            state.lightPos.y,
+    };
+
+    // Skia expects light pos in layer space.
+    vec2 lightPosLayerSpace = mSnapshot->geomInverseLayerTransform.transform(lightPosScreenSpace);
+
+    state.lightPos.x = lightPosLayerSpace.x;
+    state.lightPos.y = lightPosLayerSpace.y;
+
     caster.shadow = state;
 }
 
@@ -395,8 +407,12 @@ bool LayerFE::hasBlur() const {
     return mSnapshot->backgroundBlurRadius > 0 || mSnapshot->blurRegions.size() > 0;
 }
 
-bool LayerFE::hasOutline() const {
-    return mSnapshot->borderSettings.strokeWidth > 0;
+bool LayerFE::hasBorderSettings() const {
+    return mSnapshot->hasBorderSettings();
+}
+
+bool LayerFE::hasBoxShadowSettings() const {
+    return mSnapshot->hasBoxShadowSettings();
 }
 
 bool LayerFE::drawShadows() const {

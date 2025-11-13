@@ -30,7 +30,6 @@ inputflinger_tidy_checks = [
 cc_defaults {
     name: "inputflinger_defaults",
     host_supported: true,
-    cpp_std: "c++20",
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-Wall",
@@ -47,6 +46,7 @@ cc_defaults {
             "bounds",
         ],
     },
+    afdo: true,
     tidy: true,
     tidy_checks: [
         "-*", // Disable all checks not explicitly enabled for now
@@ -113,7 +113,7 @@ cc_defaults {
         "libkll",
         "liblog",
         "libprotobuf-cpp-lite",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
         "libutils",
@@ -218,7 +218,9 @@ cc_defaults {
         "libinput",
         "liblog",
         "libprocessgroup",
-        "libstatslog",
+        "libstatslog_inputflinger",
+        "libstatspull",
+        "libstatssocket",
         "libutils",
     ],
     header_libs: [
@@ -282,5 +284,38 @@ phony {
         "libpalmrejection_test",
         "libservices.core",
         "monkey_test",
+    ],
+}
+
+cc_library_shared {
+    name: "libstatslog_inputflinger",
+    host_supported: true,
+    generated_sources: ["statslog_inputflinger.cpp"],
+    generated_headers: ["statslog_inputflinger.h"],
+    export_generated_headers: ["statslog_inputflinger.h"],
+    shared_libs: [
+        "libstatspull",
+        "libstatssocket",
+    ],
+}
+
+genrule {
+    name: "statslog_inputflinger.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_inputflinger.h" +
+        " --module input --namespace android,inputflinger,stats",
+    out: [
+        "statslog_inputflinger.h",
+    ],
+}
+
+genrule {
+    name: "statslog_inputflinger.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_inputflinger.cpp" +
+        " --module input --namespace android,inputflinger,stats" +
+        " --importHeader statslog_inputflinger.h",
+    out: [
+        "statslog_inputflinger.cpp",
     ],
 }

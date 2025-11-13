@@ -134,4 +134,8 @@ cc_test {
         "device-tests",
     ],
     native_coverage: false,
+    device_first_data: [
+        ":keychars_test_data",
+        ":keylayout_test_data",
+    ],
 }

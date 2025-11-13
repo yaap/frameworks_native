@@ -82,7 +82,6 @@ GestureConverter::GestureConverter(InputReaderContext& readerContext,
                                    const InputDeviceContext& deviceContext, int32_t deviceId)
       : mDeviceId(deviceId),
         mReaderContext(readerContext),
-        mEnableNoFocusChange(input_flags::enable_touchpad_no_focus_change()),
         // We can safely assume that ABS_MT_POSITION_X and _Y axes will be available, as EventHub
         // won't classify a device as a touchpad if they're not present.
         mXAxisInfo(deviceContext.getAbsoluteAxisInfo(ABS_MT_POSITION_X).value()),
@@ -690,7 +689,7 @@ NotifyMotionArgs GestureConverter::makeMotionArgs(nsecs_t when, nsecs_t readTime
     if (action == AMOTION_EVENT_ACTION_CANCEL) {
         flags |= AMOTION_EVENT_FLAG_CANCELED;
     }
-    if (mEnableNoFocusChange && isGestureNoFocusChange(mCurrentClassification)) {
+    if (isGestureNoFocusChange(mCurrentClassification)) {
         flags |= AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE;
     }
     if (mCurrentClassification == MotionClassification::TWO_FINGER_SWIPE) {
@@ -711,7 +710,6 @@ NotifyMotionArgs GestureConverter::makeMotionArgs(nsecs_t when, nsecs_t readTime
             mReaderContext.getGlobalMetaState(),
             buttonState,
             mCurrentClassification,
-            AMOTION_EVENT_EDGE_FLAG_NONE,
             pointerCount,
             mFingerProps.data(),
             pointerCoords,

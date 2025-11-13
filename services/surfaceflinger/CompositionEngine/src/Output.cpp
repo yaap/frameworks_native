@@ -393,6 +393,10 @@ void Output::setRenderSurfaceForTest(std::unique_ptr<compositionengine::RenderSu
     mRenderSurface = std::move(surface);
 }
 
+bool Output::plannerTexturePoolEnabled() const {
+    return mPlanner && mPlanner->isTexturePoolEnabled();
+}
+
 Region Output::getDirtyRegion() const {
     const auto& outputState = getState();
     return outputState.dirtyRegion.intersect(outputState.layerStackSpace.getContent());
@@ -403,6 +407,10 @@ bool Output::includesLayer(ui::LayerFilter filter) const {
 }
 
 bool Output::includesLayer(const sp<LayerFE>& layerFE) const {
+    return includesLayer(layerFE.get());
+}
+
+bool Output::includesLayer(LayerFE* layerFE) const {
     const auto* layerFEState = layerFE->getCompositionState();
     return layerFEState && includesLayer(layerFEState->outputFilter);
 }
@@ -621,7 +629,7 @@ void Output::ensureOutputLayerIfVisible(sp<compositionengine::LayerFE>& layerFE,
     Region transparentRegion;
 
     /*
-     * shadowRegion: Region cast by the layer's shadow.
+     * shadowRegion: Region cast by the layer's shadow or border.
      */
     Region shadowRegion;
 
@@ -635,18 +643,9 @@ void Output::ensureOutputLayerIfVisible(sp<compositionengine::LayerFE>& layerFE,
     // Get the visible region
     // TODO(b/121291683): Is it worth creating helper methods on LayerFEState
     // for computations like this?
-    const Rect visibleRect(tr.transform(layerFEState->geomLayerBounds));
-    visibleRegion.set(visibleRect);
-
-    if (layerFEState->shadowSettings.length > 0.0f) {
-        // if the layer casts a shadow, offset the layers visible region and
-        // calculate the shadow region.
-        const auto inset = static_cast<int32_t>(ceilf(layerFEState->shadowSettings.length) * -1.0f);
-        Rect visibleRectWithShadows(visibleRect);
-        visibleRectWithShadows.inset(inset, inset, inset, inset);
-        visibleRegion.set(visibleRectWithShadows);
-        shadowRegion = visibleRegion.subtract(visibleRect);
-    }
+    const Rect geomRect(tr.transform(layerFEState->geomLayerBounds));
+    visibleRegion.set(Rect(layerFEState->outsetRectForShadow(geomRect.toFloatRect())));
+    shadowRegion = visibleRegion.subtract(geomRect);
 
     if (visibleRegion.isEmpty()) {
         return;
@@ -693,7 +692,7 @@ void Output::ensureOutputLayerIfVisible(sp<compositionengine::LayerFE>& layerFE,
         // Otherwise we don't try and compute the opaque region since there may
         // be errors at the edges, and we treat the entire layer as
         // translucent.
-        opaqueRegion.set(visibleRect);
+        opaqueRegion.set(geomRect);
     }
 
     // Clip the covered region to the visible region
@@ -1179,6 +1178,15 @@ void Output::prepareFrame() {
 
     std::optional<android::HWComposer::DeviceRequestedChanges> changes;
     bool success = chooseCompositionStrategy(&changes);
+
+    if (success && changes.has_value()) {
+        for (const compositionengine::OutputLayer* layer : getOutputLayersOrderedByZ()) {
+            HWC2::Layer* hwcLayer = layer->getHwcLayer();
+            if (!hwcLayer || changes->changedTypes.contains(hwcLayer)) continue;
+            changes->changedTypes[hwcLayer] = layer->getState().hwc->hwcCompositionType;
+        }
+    }
+
     resetCompositionStrategy();
     outputState.strategyPrediction = CompositionStrategyPredictionState::DISABLED;
     outputState.previousDeviceRequestedChanges = changes;
@@ -1210,6 +1218,14 @@ GpuCompositionResult Output::prepareFrameAsync() {
     const auto& previousChanges = state.previousDeviceRequestedChanges;
     std::optional<android::HWComposer::DeviceRequestedChanges> changes;
     resetCompositionStrategy();
+    // Store all layer composition types before appplying composition strategy
+    android::HWComposer::DeviceRequestedChanges::ChangedTypes backups;
+    for (const compositionengine::OutputLayer* layer : getOutputLayersOrderedByZ()) {
+        HWC2::Layer* hwcLayer = layer->getHwcLayer();
+        if (!hwcLayer) continue;
+        backups[hwcLayer] = layer->getState().hwc->hwcCompositionType;
+    }
+
     auto hwcResult = chooseCompositionStrategyAsync(&changes);
     if (state.previousDeviceRequestedSuccess) {
         applyCompositionStrategy(previousChanges);
@@ -1230,6 +1246,14 @@ GpuCompositionResult Output::prepareFrameAsync() {
     }
 
     auto chooseCompositionSuccess = hwcResult.get();
+    if (chooseCompositionSuccess && changes.has_value()) {
+        // Keep track of all layer composition types, not just changes
+        for (const compositionengine::OutputLayer* layer : getOutputLayersOrderedByZ()) {
+            HWC2::Layer* hwcLayer = layer->getHwcLayer();
+            if (!hwcLayer || changes->changedTypes.contains(hwcLayer)) continue;
+            changes->changedTypes[hwcLayer] = backups[hwcLayer];
+        }
+    }
     const bool predictionSucceeded = dequeueSucceeded && changes == previousChanges;
     state.strategyPrediction = predictionSucceeded ? CompositionStrategyPredictionState::SUCCESS
                                                    : CompositionStrategyPredictionState::FAIL;
@@ -1318,18 +1342,11 @@ void Output::updateProtectedContentState() {
     auto& renderEngine = getCompositionEngine().getRenderEngine();
     const bool supportsProtectedContent = renderEngine.supportsProtectedContent();
 
-    bool isProtected;
-    if (FlagManager::getInstance().display_protected()) {
-        isProtected = outputState.isProtected;
-    } else {
-        isProtected = outputState.isSecure;
-    }
-
     // We need to set the render surface as protected (DRM) if all the following conditions are met:
     // 1. The display is protected (in legacy, check if the display is secure)
     // 2. Protected content is supported
     // 3. At least one layer has protected content.
-    if (isProtected && supportsProtectedContent) {
+    if (outputState.isProtected && supportsProtectedContent) {
         auto layers = getOutputLayersOrderedByZ();
         bool needsProtected = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
             return layer->getLayerFE().getCompositionState()->hasProtectedContent &&
@@ -1583,16 +1600,13 @@ std::vector<LayerFE::LayerSettings> Output::generateClientCompositionRequests(
                                              BlurRegionsOnly
                                    : LayerFE::ClientCompositionTargetSettings::BlurSetting::
                                              Enabled);
-                bool isProtected = supportsProtectedContent;
-                if (FlagManager::getInstance().display_protected()) {
-                    isProtected = outputState.isProtected && supportsProtectedContent;
-                }
                 compositionengine::LayerFE::ClientCompositionTargetSettings
                         targetSettings{.clip = clip,
                                        .needsFiltering = layer->needsFiltering() ||
                                                outputState.needsFiltering,
                                        .isSecure = outputState.isSecure,
-                                       .isProtected = isProtected,
+                                       .isProtected = outputState.isProtected &&
+                                               supportsProtectedContent,
                                        .viewport = outputState.layerStackSpace.getContent(),
                                        .dataspace = outputDataspace,
                                        .realContentIsVisible = realContentIsVisible,
@@ -1744,6 +1758,9 @@ void Output::resetCompositionStrategy() {
 }
 
 bool Output::getSkipColorTransform() const {
+    // TODO: This needs to be true because the color transform is a global across all displays, but
+    // use-cases like screen recording don't want the color transform. Please make color transforms
+    // actually a per-display concept :(
     return true;
 }
 

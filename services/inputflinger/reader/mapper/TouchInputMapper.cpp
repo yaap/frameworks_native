@@ -237,7 +237,6 @@ void TouchInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
     if (mCursorScrollAccumulator.haveRelativeHWheel()) {
         info.addMotionRange(AMOTION_EVENT_AXIS_HSCROLL, mSource, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f);
     }
-    info.setButtonUnderPad(mParameters.hasButtonUnderPad);
     info.setUsiVersion(mParameters.usiVersion);
 }
 
@@ -408,25 +407,7 @@ void TouchInputMapper::resolveExternalStylusPresence() {
 TouchInputMapper::Parameters TouchInputMapper::computeParameters(
         const InputDeviceContext& deviceContext) {
     Parameters parameters;
-    // Use the pointer presentation mode for devices that do not support distinct
-    // multitouch.  The spot-based presentation relies on being able to accurately
-    // locate two or more fingers on the touch pad.
-    parameters.gestureMode = deviceContext.hasInputProperty(INPUT_PROP_SEMI_MT)
-            ? Parameters::GestureMode::SINGLE_TOUCH
-            : Parameters::GestureMode::MULTI_TOUCH;
-
     const PropertyMap& config = deviceContext.getConfiguration();
-    std::optional<std::string> gestureModeString = config.getString("touch.gestureMode");
-    if (gestureModeString.has_value()) {
-        if (*gestureModeString == "single-touch") {
-            parameters.gestureMode = Parameters::GestureMode::SINGLE_TOUCH;
-        } else if (*gestureModeString == "multi-touch") {
-            parameters.gestureMode = Parameters::GestureMode::MULTI_TOUCH;
-        } else if (*gestureModeString != "default") {
-            ALOGW("Invalid value for touch.gestureMode: '%s'", gestureModeString->c_str());
-        }
-    }
-
     parameters.deviceType = computeDeviceType(deviceContext);
 
     parameters.hasButtonUnderPad = deviceContext.hasInputProperty(INPUT_PROP_BUTTONPAD);
@@ -522,8 +503,6 @@ TouchInputMapper::Parameters::DeviceType TouchInputMapper::computeDeviceType(
 
 void TouchInputMapper::dumpParameters(std::string& dump) {
     dump += INDENT3 "Parameters:\n";
-
-    dump += INDENT4 "GestureMode: " + ftl::enum_string(mParameters.gestureMode) + "\n";
 
     dump += INDENT4 "DeviceType: " + ftl::enum_string(mParameters.deviceType) + "\n";
 
@@ -1991,7 +1970,7 @@ std::list<NotifyArgs> TouchInputMapper::abortTouches(
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource,
                                      currentGestureDisplayId.value_or(resolveDisplayId()),
                                      AMOTION_EVENT_ACTION_CANCEL, 0, AMOTION_EVENT_FLAG_CANCELED,
-                                     metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
+                                     metaState, buttonState,
                                      mCurrentCookedState.cookedPointerData.pointerProperties,
                                      mCurrentCookedState.cookedPointerData.pointerCoords,
                                      mCurrentCookedState.cookedPointerData.idToIndex, currentIdBits,
@@ -2046,7 +2025,6 @@ std::list<NotifyArgs> TouchInputMapper::dispatchTouches(nsecs_t when, nsecs_t re
             // The listener takes care of batching moves so we don't have to deal with that here.
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                          AMOTION_EVENT_ACTION_MOVE, 0, 0, metaState, buttonState,
-                                         AMOTION_EVENT_EDGE_FLAG_NONE,
                                          mCurrentCookedState.cookedPointerData.pointerProperties,
                                          mCurrentCookedState.cookedPointerData.pointerCoords,
                                          mCurrentCookedState.cookedPointerData.idToIndex,
@@ -2085,7 +2063,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchTouches(nsecs_t when, nsecs_t re
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                          AMOTION_EVENT_ACTION_POINTER_UP, 0,
                                          isCanceled ? AMOTION_EVENT_FLAG_CANCELED : 0, metaState,
-                                         buttonState, 0,
+                                         buttonState,
                                          mLastCookedState.cookedPointerData.pointerProperties,
                                          mLastCookedState.cookedPointerData.pointerCoords,
                                          mLastCookedState.cookedPointerData.idToIndex,
@@ -2102,7 +2080,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchTouches(nsecs_t when, nsecs_t re
         if (moveNeeded && !moveIdBits.isEmpty()) {
             ALOG_ASSERT(moveIdBits.value == dispatchedIdBits.value);
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
-                                         AMOTION_EVENT_ACTION_MOVE, 0, 0, metaState, buttonState, 0,
+                                         AMOTION_EVENT_ACTION_MOVE, 0, 0, metaState, buttonState,
                                          mCurrentCookedState.cookedPointerData.pointerProperties,
                                          mCurrentCookedState.cookedPointerData.pointerCoords,
                                          mCurrentCookedState.cookedPointerData.idToIndex,
@@ -2124,7 +2102,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchTouches(nsecs_t when, nsecs_t re
             out.push_back(
                     dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                    AMOTION_EVENT_ACTION_POINTER_DOWN, 0, 0, metaState, buttonState,
-                                   0, mCurrentCookedState.cookedPointerData.pointerProperties,
+                                   mCurrentCookedState.cookedPointerData.pointerProperties,
                                    mCurrentCookedState.cookedPointerData.pointerCoords,
                                    mCurrentCookedState.cookedPointerData.idToIndex,
                                    dispatchedIdBits, downId, mOrientedXPrecision,
@@ -2143,7 +2121,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchHoverExit(nsecs_t when, nsecs_t 
         int32_t metaState = getContext()->getGlobalMetaState();
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_HOVER_EXIT, 0, 0, metaState,
-                                     mLastCookedState.buttonState, 0,
+                                     mLastCookedState.buttonState,
                                      mLastCookedState.cookedPointerData.pointerProperties,
                                      mLastCookedState.cookedPointerData.pointerCoords,
                                      mLastCookedState.cookedPointerData.idToIndex,
@@ -2164,7 +2142,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchHoverEnterAndMove(nsecs_t when, 
         if (!mSentHoverEnter) {
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                          AMOTION_EVENT_ACTION_HOVER_ENTER, 0, 0, metaState,
-                                         mCurrentRawState.buttonState, 0,
+                                         mCurrentRawState.buttonState,
                                          mCurrentCookedState.cookedPointerData.pointerProperties,
                                          mCurrentCookedState.cookedPointerData.pointerCoords,
                                          mCurrentCookedState.cookedPointerData.idToIndex,
@@ -2176,7 +2154,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchHoverEnterAndMove(nsecs_t when, 
 
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0, metaState,
-                                     mCurrentRawState.buttonState, 0,
+                                     mCurrentRawState.buttonState,
                                      mCurrentCookedState.cookedPointerData.pointerProperties,
                                      mCurrentCookedState.cookedPointerData.pointerCoords,
                                      mCurrentCookedState.cookedPointerData.idToIndex,
@@ -2199,7 +2177,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchButtonRelease(nsecs_t when, nsec
         buttonState &= ~actionButton;
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_BUTTON_RELEASE, actionButton, 0,
-                                     metaState, buttonState, 0,
+                                     metaState, buttonState,
                                      mLastCookedState.cookedPointerData.pointerProperties,
                                      mLastCookedState.cookedPointerData.pointerCoords,
                                      mLastCookedState.cookedPointerData.idToIndex, idBits, -1,
@@ -2221,7 +2199,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchButtonPress(nsecs_t when, nsecs_
         buttonState |= actionButton;
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_BUTTON_PRESS, actionButton, 0, metaState,
-                                     buttonState, 0,
+                                     buttonState,
                                      mCurrentCookedState.cookedPointerData.pointerProperties,
                                      mCurrentCookedState.cookedPointerData.pointerCoords,
                                      mCurrentCookedState.cookedPointerData.idToIndex, idBits, -1,
@@ -2245,8 +2223,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchGestureButtonRelease(nsecs_t whe
         buttonState &= ~actionButton;
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_BUTTON_RELEASE, actionButton, 0,
-                                     metaState, buttonState, 0,
-                                     mPointerGesture.lastGestureProperties,
+                                     metaState, buttonState, mPointerGesture.lastGestureProperties,
                                      mPointerGesture.lastGestureCoords,
                                      mPointerGesture.lastGestureIdToIndex, idBits, -1,
                                      mOrientedXPrecision, mOrientedYPrecision,
@@ -2269,7 +2246,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchGestureButtonPress(nsecs_t when,
         buttonState |= actionButton;
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_BUTTON_PRESS, actionButton, 0, metaState,
-                                     buttonState, 0, mPointerGesture.currentGestureProperties,
+                                     buttonState, mPointerGesture.currentGestureProperties,
                                      mPointerGesture.currentGestureCoords,
                                      mPointerGesture.currentGestureIdToIndex, idBits, -1,
                                      mOrientedXPrecision, mOrientedYPrecision,
@@ -2617,8 +2594,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
             const uint32_t cancelFlags = flags | AMOTION_EVENT_FLAG_CANCELED;
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                          AMOTION_EVENT_ACTION_CANCEL, 0, cancelFlags, metaState,
-                                         buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
-                                         mPointerGesture.lastGestureProperties,
+                                         buttonState, mPointerGesture.lastGestureProperties,
                                          mPointerGesture.lastGestureCoords,
                                          mPointerGesture.lastGestureIdToIndex,
                                          dispatchedGestureIdBits, -1, 0, 0,
@@ -2644,7 +2620,6 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
                 out.push_back(dispatchMotion(when, readTime, policyFlags, mSource,
                                              resolveDisplayId(), AMOTION_EVENT_ACTION_POINTER_UP, 0,
                                              flags, metaState, buttonState,
-                                             AMOTION_EVENT_EDGE_FLAG_NONE,
                                              mPointerGesture.lastGestureProperties,
                                              mPointerGesture.lastGestureCoords,
                                              mPointerGesture.lastGestureIdToIndex,
@@ -2660,7 +2635,6 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
     if (moveNeeded) {
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_MOVE, 0, flags, metaState, buttonState,
-                                     AMOTION_EVENT_EDGE_FLAG_NONE,
                                      mPointerGesture.currentGestureProperties,
                                      mPointerGesture.currentGestureCoords,
                                      mPointerGesture.currentGestureIdToIndex,
@@ -2682,7 +2656,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
 
             out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                          AMOTION_EVENT_ACTION_POINTER_DOWN, 0, flags, metaState,
-                                         buttonState, 0, mPointerGesture.currentGestureProperties,
+                                         buttonState, mPointerGesture.currentGestureProperties,
                                          mPointerGesture.currentGestureCoords,
                                          mPointerGesture.currentGestureIdToIndex,
                                          dispatchedGestureIdBits, id, 0, 0,
@@ -2700,8 +2674,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
     if (mPointerGesture.currentGestureMode == PointerGesture::Mode::HOVER) {
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_HOVER_MOVE, 0, flags, metaState,
-                                     buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
-                                     mPointerGesture.currentGestureProperties,
+                                     buttonState, mPointerGesture.currentGestureProperties,
                                      mPointerGesture.currentGestureCoords,
                                      mPointerGesture.currentGestureIdToIndex,
                                      mPointerGesture.currentGestureIdBits, -1, 0, 0,
@@ -2722,10 +2695,9 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerGestures(nsecs_t when, ns
         out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                        mSource, ui::LogicalDisplayId::INVALID, policyFlags,
                                        AMOTION_EVENT_ACTION_HOVER_MOVE, 0, flags, metaState,
-                                       buttonState, MotionClassification::NONE,
-                                       AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                       &pointerCoords, 0, 0, 0.f, 0.f, mPointerGesture.downTime,
-                                       /*videoFrames=*/{}));
+                                       buttonState, MotionClassification::NONE, 1,
+                                       &pointerProperties, &pointerCoords, 0, 0, 0.f, 0.f,
+                                       mPointerGesture.downTime, /*videoFrames=*/{}));
     }
 
     // Update state.
@@ -2759,8 +2731,7 @@ std::list<NotifyArgs> TouchInputMapper::abortPointerGestures(nsecs_t when, nsecs
         int32_t buttonState = mCurrentRawState.buttonState;
         out.push_back(dispatchMotion(when, readTime, policyFlags, mSource, resolveDisplayId(),
                                      AMOTION_EVENT_ACTION_CANCEL, 0, AMOTION_EVENT_FLAG_CANCELED,
-                                     metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
-                                     mPointerGesture.lastGestureProperties,
+                                     metaState, buttonState, mPointerGesture.lastGestureProperties,
                                      mPointerGesture.lastGestureCoords,
                                      mPointerGesture.lastGestureIdToIndex,
                                      mPointerGesture.lastGestureIdBits, -1, 0, 0,
@@ -3580,7 +3551,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
         out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                        mSource, displayId, policyFlags, AMOTION_EVENT_ACTION_UP, 0,
                                        0, metaState, mLastRawState.buttonState,
-                                       MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
+                                       MotionClassification::NONE, 1,
                                        &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
                                        mOrientedXPrecision, mOrientedYPrecision,
                                        mPointerSimple.lastCursorX, mPointerSimple.lastCursorY,
@@ -3596,11 +3567,10 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
                 NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(), mSource,
                                  displayId, policyFlags, AMOTION_EVENT_ACTION_HOVER_EXIT, 0, 0,
                                  metaState, mLastRawState.buttonState, MotionClassification::NONE,
-                                 AMOTION_EVENT_EDGE_FLAG_NONE, 1, &mPointerSimple.lastProperties,
-                                 &mPointerSimple.lastCoords, mOrientedXPrecision,
-                                 mOrientedYPrecision, mPointerSimple.lastCursorX,
-                                 mPointerSimple.lastCursorY, mPointerSimple.downTime,
-                                 /*videoFrames=*/{}));
+                                 1, &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
+                                 mOrientedXPrecision, mOrientedYPrecision,
+                                 mPointerSimple.lastCursorX, mPointerSimple.lastCursorY,
+                                 mPointerSimple.downTime, /*videoFrames=*/{}));
     }
 
     if (down) {
@@ -3613,8 +3583,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
                                            mSource, displayId, policyFlags,
                                            AMOTION_EVENT_ACTION_DOWN, 0, 0, metaState,
                                            mCurrentRawState.buttonState, MotionClassification::NONE,
-                                           AMOTION_EVENT_EDGE_FLAG_NONE, 1,
-                                           &mPointerSimple.currentProperties,
+                                           1, &mPointerSimple.currentProperties,
                                            &mPointerSimple.currentCoords, mOrientedXPrecision,
                                            mOrientedYPrecision, cursorPosition.x, cursorPosition.y,
                                            mPointerSimple.downTime, /*videoFrames=*/{}));
@@ -3624,7 +3593,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
         out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                        mSource, displayId, policyFlags, AMOTION_EVENT_ACTION_MOVE,
                                        0, 0, metaState, mCurrentRawState.buttonState,
-                                       MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
+                                       MotionClassification::NONE, 1,
                                        &mPointerSimple.currentProperties,
                                        &mPointerSimple.currentCoords, mOrientedXPrecision,
                                        mOrientedYPrecision, cursorPosition.x, cursorPosition.y,
@@ -3640,8 +3609,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
                                            mSource, displayId, policyFlags,
                                            AMOTION_EVENT_ACTION_HOVER_ENTER, 0, 0, metaState,
                                            mCurrentRawState.buttonState, MotionClassification::NONE,
-                                           AMOTION_EVENT_EDGE_FLAG_NONE, 1,
-                                           &mPointerSimple.currentProperties,
+                                           1, &mPointerSimple.currentProperties,
                                            &mPointerSimple.currentCoords, mOrientedXPrecision,
                                            mOrientedYPrecision, cursorPosition.x, cursorPosition.y,
                                            mPointerSimple.downTime, /*videoFrames=*/{}));
@@ -3652,10 +3620,10 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
                 NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(), mSource,
                                  displayId, policyFlags, AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0,
                                  metaState, mCurrentRawState.buttonState,
-                                 MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
-                                 &mPointerSimple.currentProperties, &mPointerSimple.currentCoords,
-                                 mOrientedXPrecision, mOrientedYPrecision, cursorPosition.x,
-                                 cursorPosition.y, mPointerSimple.downTime, /*videoFrames=*/{}));
+                                 MotionClassification::NONE, 1, &mPointerSimple.currentProperties,
+                                 &mPointerSimple.currentCoords, mOrientedXPrecision,
+                                 mOrientedYPrecision, cursorPosition.x, cursorPosition.y,
+                                 mPointerSimple.downTime, /*videoFrames=*/{}));
     }
 
     if (mCurrentRawState.rawVScroll || mCurrentRawState.rawHScroll) {
@@ -3672,7 +3640,7 @@ std::list<NotifyArgs> TouchInputMapper::dispatchPointerSimple(nsecs_t when, nsec
         out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                        mSource, displayId, policyFlags, AMOTION_EVENT_ACTION_SCROLL,
                                        0, 0, metaState, mCurrentRawState.buttonState,
-                                       MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
+                                       MotionClassification::NONE, 1,
                                        &mPointerSimple.currentProperties, &pointerCoords,
                                        mOrientedXPrecision, mOrientedYPrecision, cursorPosition.x,
                                        cursorPosition.y, mPointerSimple.downTime,
@@ -3702,7 +3670,7 @@ std::list<NotifyArgs> TouchInputMapper::abortPointerSimple(nsecs_t when, nsecs_t
                                        mPointerSimple.source, mPointerSimple.displayId, policyFlags,
                                        AMOTION_EVENT_ACTION_CANCEL, 0, AMOTION_EVENT_FLAG_CANCELED,
                                        metaState, mLastRawState.buttonState,
-                                       MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
+                                       MotionClassification::NONE, 1,
                                        &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
                                        mOrientedXPrecision, mOrientedYPrecision,
                                        mPointerSimple.lastCursorX, mPointerSimple.lastCursorY,
@@ -3716,10 +3684,10 @@ std::list<NotifyArgs> TouchInputMapper::abortPointerSimple(nsecs_t when, nsecs_t
 NotifyMotionArgs TouchInputMapper::dispatchMotion(
         nsecs_t when, nsecs_t readTime, uint32_t policyFlags, uint32_t source,
         ui::LogicalDisplayId displayId, int32_t action, int32_t actionButton, int32_t flags,
-        int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-        const PropertiesArray& properties, const CoordsArray& coords,
-        const IdToIndexArray& idToIndex, BitSet32 idBits, int32_t changedId, float xPrecision,
-        float yPrecision, nsecs_t downTime, MotionClassification classification) const {
+        int32_t metaState, int32_t buttonState, const PropertiesArray& properties,
+        const CoordsArray& coords, const IdToIndexArray& idToIndex, BitSet32 idBits,
+        int32_t changedId, float xPrecision, float yPrecision, nsecs_t downTime,
+        MotionClassification classification) const {
     std::vector<PointerCoords> pointerCoords;
     std::vector<PointerProperties> pointerProperties;
     uint32_t pointerCount = 0;
@@ -3781,7 +3749,7 @@ NotifyMotionArgs TouchInputMapper::dispatchMotion(
                   [this](TouchVideoFrame& frame) { frame.rotate(this->mInputDeviceOrientation); });
     return NotifyMotionArgs(getContext()->getNextId(), when, readTime, deviceId, source, displayId,
                             policyFlags, action, actionButton, flags, metaState, buttonState,
-                            classification, edgeFlags, pointerCount, pointerProperties.data(),
+                            classification, pointerCount, pointerProperties.data(),
                             pointerCoords.data(), xPrecision, yPrecision, xCursorPosition,
                             yCursorPosition, downTime, std::move(frames));
 }
@@ -3853,6 +3821,11 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
     // match (by distance) for each current pointer.
     // The pointers must have the same tool type but it is possible for them to
     // transition from hovering to touching or vice-versa while retaining the same id.
+    struct PointerDistanceHeapElement {
+        uint32_t currentPointerIndex : 8 {};
+        uint32_t lastPointerIndex : 8 {};
+        uint64_t distanceSq : 48 {};
+    };
     PointerDistanceHeapElement heap[MAX_POINTERS * MAX_POINTERS];
 
     uint32_t heapSize = 0;
@@ -3868,12 +3841,12 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
                 int64_t deltaX = currentPointer.x - lastPointer.x;
                 int64_t deltaY = currentPointer.y - lastPointer.y;
 
-                uint64_t distance = uint64_t(deltaX * deltaX + deltaY * deltaY);
+                uint64_t distanceSq = uint64_t(deltaX * deltaX + deltaY * deltaY);
 
                 // Insert new element into the heap (sift up).
                 heap[heapSize].currentPointerIndex = currentPointerIndex;
                 heap[heapSize].lastPointerIndex = lastPointerIndex;
-                heap[heapSize].distance = distance;
+                heap[heapSize].distanceSq = distanceSq;
                 heapSize += 1;
             }
         }
@@ -3889,11 +3862,11 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
             }
 
             if (childIndex + 1 < heapSize &&
-                heap[childIndex + 1].distance < heap[childIndex].distance) {
+                heap[childIndex + 1].distanceSq < heap[childIndex].distanceSq) {
                 childIndex += 1;
             }
 
-            if (heap[parentIndex].distance <= heap[childIndex].distance) {
+            if (heap[parentIndex].distanceSq <= heap[childIndex].distanceSq) {
                 break;
             }
 
@@ -3906,7 +3879,7 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
         ALOGD("assignPointerIds - initial distance min-heap: size=%d", heapSize);
         for (size_t i = 0; i < heapSize; i++) {
             ALOGD("  heap[%zu]: cur=%" PRIu32 ", last=%" PRIu32 ", distance=%" PRIu64, i,
-                  heap[i].currentPointerIndex, heap[i].lastPointerIndex, heap[i].distance);
+                  heap[i].currentPointerIndex, heap[i].lastPointerIndex, heap[i].distanceSq);
         }
     }
 
@@ -3935,11 +3908,11 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
                     }
 
                     if (childIndex + 1 < heapSize &&
-                        heap[childIndex + 1].distance < heap[childIndex].distance) {
+                        heap[childIndex + 1].distanceSq < heap[childIndex].distanceSq) {
                         childIndex += 1;
                     }
 
-                    if (heap[parentIndex].distance <= heap[childIndex].distance) {
+                    if (heap[parentIndex].distanceSq <= heap[childIndex].distanceSq) {
                         break;
                     }
 
@@ -3952,7 +3925,7 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
                     for (size_t j = 0; j < heapSize; j++) {
                         ALOGD("  heap[%zu]: cur=%" PRIu32 ", last=%" PRIu32 ", distance=%" PRIu64,
                               j, heap[j].currentPointerIndex, heap[j].lastPointerIndex,
-                              heap[j].distance);
+                              heap[j].distanceSq);
                     }
                 }
             }
@@ -3978,8 +3951,8 @@ void TouchInputMapper::assignPointerIds(const RawState& last, RawState& current)
 
             ALOGD_IF(DEBUG_POINTER_ASSIGNMENT,
                      "assignPointerIds - matched: cur=%" PRIu32 ", last=%" PRIu32 ", id=%" PRIu32
-                     ", distance=%" PRIu64,
-                     lastPointerIndex, currentPointerIndex, id, heap[0].distance);
+                     ", distanceSq=%" PRIu64,
+                     lastPointerIndex, currentPointerIndex, id, heap[0].distanceSq);
             break;
         }
     }

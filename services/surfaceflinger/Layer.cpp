@@ -64,12 +64,12 @@
 
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWComposer.h"
-#include "FrameTimeline/FrameTimeline.h"
 #include "FrameTracer/FrameTracer.h"
 #include "FrontEnd/LayerCreationArgs.h"
 #include "FrontEnd/LayerHandle.h"
 #include "Layer.h"
 #include "LayerProtoHelper.h"
+#include "Scheduler/FrameTimeline.h"
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
 #include "TransactionCallbackInvoker.h"
@@ -128,7 +128,7 @@ using gui::LayerMetadata;
 using gui::WindowInfo;
 using ui::Size;
 
-using PresentState = frametimeline::SurfaceFrame::PresentState;
+using PresentState = scheduler::SurfaceFrame::PresentState;
 
 Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
       : sequence(args.sequence),
@@ -143,9 +143,7 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mDrawingState.transform.set(0, 0);
     mDrawingState.frameNumber = 0;
     mDrawingState.previousFrameNumber = 0;
-    mDrawingState.barrierFrameNumber = 0;
     mDrawingState.producerId = 0;
-    mDrawingState.barrierProducerId = 0;
     mDrawingState.bufferTransform = 0;
     mDrawingState.transformToDisplayInverse = false;
     mDrawingState.acquireFence = sp<Fence>::make(-1);
@@ -186,11 +184,11 @@ Layer::~Layer() {
     mFlinger->onLayerDestroyed(this);
 
     const auto currentTime = std::chrono::steady_clock::now();
-    if (mBufferInfo.mTimeSinceDataspaceUpdate > std::chrono::steady_clock::time_point::min()) {
-        mFlinger->mLayerEvents.emplace_back(mOwnerUid, getSequence(), mBufferInfo.mDataspace,
-                                            std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                    currentTime -
-                                                    mBufferInfo.mTimeSinceDataspaceUpdate));
+    if (mLastLayerEvent.has_value() &&
+        mTimeSinceLayerEventsUpdate > std::chrono::steady_clock::time_point::min()) {
+        mLastLayerEvent->timeSinceLastEvent = std::chrono::duration_cast<std::chrono::milliseconds>(
+                currentTime - mTimeSinceLayerEventsUpdate);
+        mFlinger->mLayerEvents.emplace_back(mLastLayerEvent.value());
     }
 
     if (mDrawingState.sidebandStream != nullptr) {
@@ -450,15 +448,15 @@ void Layer::setFrameTimelineVsyncForBufferlessTransaction(const FrameTimelineInf
     setFrameTimelineVsyncForSkippedFrames(info, postTime, mTransactionName, gameMode);
 }
 
-void Layer::addSurfaceFrameDroppedForBuffer(
-        std::shared_ptr<frametimeline::SurfaceFrame>& surfaceFrame, nsecs_t dropTime) {
+void Layer::addSurfaceFrameDroppedForBuffer(std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame,
+                                            nsecs_t dropTime) {
     surfaceFrame->setDropTime(dropTime);
     surfaceFrame->setPresentState(PresentState::Dropped);
     mFlinger->mFrameTimeline->addSurfaceFrame(surfaceFrame);
 }
 
 void Layer::addSurfaceFramePresentedForBuffer(
-        std::shared_ptr<frametimeline::SurfaceFrame>& surfaceFrame, nsecs_t acquireFenceTime,
+        std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame, nsecs_t acquireFenceTime,
         nsecs_t currentLatchTime) REQUIRES(mFlinger->mStateLock) {
     surfaceFrame->setAcquireFenceTime(acquireFenceTime);
     surfaceFrame->setPresentState(PresentState::Presented, mLastLatchTime);
@@ -466,7 +464,7 @@ void Layer::addSurfaceFramePresentedForBuffer(
     updateLastLatchTime(currentLatchTime);
 }
 
-std::shared_ptr<frametimeline::SurfaceFrame> Layer::createSurfaceFrameForTransaction(
+std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForTransaction(
         const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode)
         REQUIRES(mFlinger->mStateLock) {
     auto surfaceFrame =
@@ -488,7 +486,7 @@ std::shared_ptr<frametimeline::SurfaceFrame> Layer::createSurfaceFrameForTransac
     return surfaceFrame;
 }
 
-std::shared_ptr<frametimeline::SurfaceFrame> Layer::createSurfaceFrameForBuffer(
+std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForBuffer(
         const FrameTimelineInfo& info, nsecs_t queueTime, std::string debugName,
         gui::GameMode gameMode) REQUIRES(mFlinger->mStateLock) {
     auto surfaceFrame =
@@ -644,9 +642,16 @@ void Layer::clearFrameStats() {
 void Layer::getFrameStats(FrameStats* outStats) const {
     if (FlagManager::getInstance().deprecate_frame_tracker()) {
         if (auto ftl = getTimeline()) {
-            float fps = ftl->get().computeFps({getSequence()});
+            nsecs_t refreshPeriod =
+                    Fps::fromValue(ftl->get().computeFps({getSequence()})).getPeriodNsecs();
+            // FPS computation requires some number of layer updates before the calculation can be
+            // made. If not enough frames are available return the projected FPS based on the
+            // pacesetter display's native refresh rate.
+            if (!refreshPeriod) {
+                refreshPeriod = mFlinger->mScheduler->getPacesetterVsyncPeriod().ns();
+            }
             ftl->get().generateFrameStats(getSequence(), mFrameStatsHistorySize, outStats);
-            outStats->refreshPeriodNano = Fps::fromValue(fps).getPeriodNsecs();
+            outStats->refreshPeriodNano = refreshPeriod;
         }
     } else {
         mDeprecatedFrameTracker.getStats(outStats);
@@ -895,12 +900,6 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
         REQUIRES(mFlinger->mStateLock) {
     SFTRACE_FORMAT("setBuffer %s - hasBuffer=%s", getDebugName(), (buffer ? "true" : "false"));
 
-    const bool frameNumberChanged =
-            bufferData.flags.test(BufferData::BufferDataChange::frameNumberChanged);
-    const uint64_t frameNumber =
-            frameNumberChanged ? bufferData.frameNumber : mDrawingState.frameNumber + 1;
-    SFTRACE_FORMAT_INSTANT("setBuffer %s - %" PRIu64, getDebugName(), frameNumber);
-
     if (mDrawingState.buffer) {
         releasePreviousBuffer();
     } else if (buffer) {
@@ -926,22 +925,9 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
         }
     }
 
-    if ((mDrawingState.producerId > bufferData.producerId) ||
-        ((mDrawingState.producerId == bufferData.producerId) &&
-         (mDrawingState.frameNumber > frameNumber))) {
-        ALOGE("Out of order buffers detected for %s producedId=%d frameNumber=%" PRIu64
-              " -> producedId=%d frameNumber=%" PRIu64,
-              getDebugName(), mDrawingState.producerId, mDrawingState.frameNumber,
-              bufferData.producerId, frameNumber);
-        TransactionTraceWriter::getInstance().invoke("out_of_order_buffers_", /*overwrite=*/false);
-    }
-
     mDrawingState.producerId = bufferData.producerId;
-    mDrawingState.barrierProducerId =
-            std::max(mDrawingState.producerId, mDrawingState.barrierProducerId);
-    mDrawingState.frameNumber = frameNumber;
-    mDrawingState.barrierFrameNumber =
-            std::max(mDrawingState.frameNumber, mDrawingState.barrierFrameNumber);
+    mDrawingState.frameNumber = bufferData.frameNumber;
+    SFTRACE_FORMAT_INSTANT("setBuffer %s - %" PRIu64, getDebugName(), bufferData.frameNumber);
 
     mDrawingState.releaseBufferListener = bufferData.releaseBufferListener;
     mDrawingState.previousBuffer = std::move(mDrawingState.buffer);
@@ -969,10 +955,10 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
     if (bufferData.dequeueTime > 0) {
         const uint64_t bufferId = mDrawingState.buffer->getId();
         mFlinger->mFrameTracer->traceNewLayer(layerId, getName().c_str());
-        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, frameNumber,
+        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, bufferData.frameNumber,
                                                bufferData.dequeueTime,
                                                FrameTracer::FrameEvent::DEQUEUE);
-        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, frameNumber, postTime,
+        mFlinger->mFrameTracer->traceTimestamp(layerId, bufferId, bufferData.frameNumber, postTime,
                                                FrameTracer::FrameEvent::QUEUE);
     }
 
@@ -1173,7 +1159,7 @@ Rect Layer::getBufferSize(const State& /*s*/) const {
     }
 
     if (getTransformToDisplayInverse()) {
-        uint32_t invTransform = SurfaceFlinger::getActiveDisplayRotationFlags();
+        uint32_t invTransform = SurfaceFlinger::getFrontInternalDisplayRotationFlags();
         if (invTransform & ui::Transform::ROT_90) {
             std::swap(bufWidth, bufHeight);
         }
@@ -1326,17 +1312,8 @@ void Layer::gatherBufferInfo() {
             }
         }
     }
-    if (lastDataspace != mBufferInfo.mDataspace ||
-        mBufferInfo.mTimeSinceDataspaceUpdate == std::chrono::steady_clock::time_point::min()) {
+    if (lastDataspace != mBufferInfo.mDataspace) {
         mFlinger->mHdrLayerInfoChanged = true;
-        const auto currentTime = std::chrono::steady_clock::now();
-        if (mBufferInfo.mTimeSinceDataspaceUpdate > std::chrono::steady_clock::time_point::min()) {
-            mFlinger->mLayerEvents
-                    .emplace_back(mOwnerUid, getSequence(), lastDataspace,
-                                  std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          currentTime - mBufferInfo.mTimeSinceDataspaceUpdate));
-        }
-        mBufferInfo.mTimeSinceDataspaceUpdate = currentTime;
     }
     if (mBufferInfo.mDesiredHdrSdrRatio != mDrawingState.desiredHdrSdrRatio) {
         mBufferInfo.mDesiredHdrSdrRatio = mDrawingState.desiredHdrSdrRatio;
@@ -1344,6 +1321,30 @@ void Layer::gatherBufferInfo() {
     }
     mBufferInfo.mCrop = computeBufferCrop(mDrawingState);
     mBufferInfo.mTransformToDisplayInverse = mDrawingState.transformToDisplayInverse;
+
+    // update layer event
+    // a new layer event instance is added if any defined parameter changes.
+    if (!mLastLayerEvent.has_value()) {
+        mLastLayerEvent =
+                std::make_optional<SurfaceFlinger::LayerEvent>({mOwnerUid, getSequence()});
+    }
+
+    if (mLastLayerEvent->dataspace != mBufferInfo.mDataspace ||
+        mLastLayerEvent->desiredHdrHeadroom != mBufferInfo.mDesiredHdrSdrRatio ||
+        mLastLayerEvent->useLuts != mDrawingState.useLuts ||
+        mTimeSinceLayerEventsUpdate == std::chrono::steady_clock::time_point::min()) {
+        const auto currentTime = std::chrono::steady_clock::now();
+        if (mTimeSinceLayerEventsUpdate > std::chrono::steady_clock::time_point::min()) {
+            mLastLayerEvent->timeSinceLastEvent =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                            currentTime - mTimeSinceLayerEventsUpdate);
+            mFlinger->mLayerEvents.emplace_back(mLastLayerEvent.value());
+        }
+        mTimeSinceLayerEventsUpdate = currentTime;
+        mLastLayerEvent->dataspace = mBufferInfo.mDataspace;
+        mLastLayerEvent->useLuts = mDrawingState.useLuts;
+        mLastLayerEvent->desiredHdrHeadroom = mBufferInfo.mDesiredHdrSdrRatio;
+    }
 }
 
 Rect Layer::computeBufferCrop(const State& s) {

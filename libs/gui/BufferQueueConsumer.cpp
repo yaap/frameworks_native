@@ -789,7 +789,8 @@ status_t BufferQueueConsumer::setMaxAcquiredBufferCount(
                 BufferQueueCore::MAX_MAX_ACQUIRED_BUFFERS;
 #endif
         if (maxAcquiredBuffers < 1 || maxAcquiredBuffers > maxMaxAcquiredBuffers) {
-            BQ_LOGE("setMaxAcquiredBufferCount: invalid count %d", maxAcquiredBuffers);
+            BQ_LOGE("setMaxAcquiredBufferCount: invalid count %d allowed maxCount is %d",
+                    maxAcquiredBuffers, maxMaxAcquiredBuffers);
             return BAD_VALUE;
         }
 

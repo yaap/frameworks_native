@@ -32,11 +32,7 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-VulkanBackendContext VulkanInterface::getGaneshBackendContext() {
-    return this->getGraphiteBackendContext();
-};
-
-VulkanBackendContext VulkanInterface::getGraphiteBackendContext() {
+VulkanBackendContext VulkanInterface::createSkiaVulkanBackendContext() {
     VulkanBackendContext backendContext;
     backendContext.fInstance = mInstance;
     backendContext.fPhysicalDevice = mPhysicalDevice;
@@ -375,6 +371,7 @@ void VulkanInterface::init(bool protectedContent) {
     for (uint32_t i = 0; i < queueCount; ++i) {
         queuePriorityProps[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_EXT;
         queuePriorityProps[i].pNext = nullptr;
+        queueProps[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
         queueProps[i].pNext = &queuePriorityProps[i];
     }
     vkGetPhysicalDeviceQueueFamilyProperties2(physicalDevice, &queueCount, queueProps.data());
@@ -533,7 +530,7 @@ void VulkanInterface::init(bool protectedContent) {
     mDevice = device;
     mQueue = graphicsQueue;
     mQueueIndex = graphicsQueueIndex;
-    mApiVersion = physicalDeviceApiVersion;
+    mApiVersion = std::min(physicalDeviceApiVersion, appInfo.apiVersion);
     // grExtensions already constructed
     // feature pointers already constructed
     mGrGetProc = sGetProc;

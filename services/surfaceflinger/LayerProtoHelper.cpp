@@ -351,13 +351,13 @@ frontend::LayerSnapshot* LayerProtoFromSnapshotGenerator::getSnapshot(
 void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
         const frontend::LayerHierarchy& root, const frontend::LayerHierarchy::TraversalPath& path) {
     using Variant = frontend::LayerHierarchy::Variant;
-    perfetto::protos::LayerProto* layerProto = mLayersProto.add_layers();
     const frontend::RequestedLayerState& layer = *root.getLayer();
     frontend::LayerSnapshot* snapshot = getSnapshot(path, layer);
     if (mVisitedLayers.find(snapshot->uniqueSequence) != mVisitedLayers.end()) {
         TransactionTraceWriter::getInstance().invoke("DuplicateLayer", /* overwrite= */ false);
         return;
     }
+    perfetto::protos::LayerProto* layerProto = mLayersProto.add_layers();
     mVisitedLayers.insert(snapshot->uniqueSequence);
     LayerProtoHelper::writeSnapshotToProto(layerProto, layer, *snapshot, mTraceFlags);
 

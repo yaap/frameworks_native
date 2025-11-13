@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "Parcel"
+#define LOG_TAG "libbinder.Parcel"
 //#define LOG_NDEBUG 0
 
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -581,12 +580,26 @@ status_t Parcel::appendFrom(const Parcel* parcel, size_t offset, size_t len) {
             const sp<ProcessState> proc(ProcessState::self());
             // grow objects
             if (kernelFields->mObjectsCapacity < kernelFields->mObjectsSize + numObjects) {
-                if ((size_t)numObjects > SIZE_MAX - kernelFields->mObjectsSize)
+                if ((size_t)numObjects > SIZE_MAX - kernelFields->mObjectsSize) {
+                    ALOGE("%s: binder objects buffer overflow (newObjects: %d, currentObjects: "
+                          "%zu) - max size reached",
+                          __FUNCTION__, numObjects, kernelFields->mObjectsSize);
+                    return NO_MEMORY; // overflosw
+                }
+                if (kernelFields->mObjectsSize + numObjects > SIZE_MAX / 3) {
+                    ALOGE("%s: cannot realloc to handle additional binder objects (newObjects: %d, "
+                          "currentObjects: %zu) - overflow",
+                          __FUNCTION__, numObjects, kernelFields->mObjectsSize);
                     return NO_MEMORY; // overflow
-                if (kernelFields->mObjectsSize + numObjects > SIZE_MAX / 3)
-                    return NO_MEMORY; // overflow
+                }
                 size_t newSize = ((kernelFields->mObjectsSize + numObjects) * 3) / 2;
-                if (newSize > SIZE_MAX / sizeof(binder_size_t)) return NO_MEMORY; // overflow
+                if (newSize > SIZE_MAX / sizeof(binder_size_t)) {
+                    ALOGE("%s: cannot realloc to handle additional binder objects for new size "
+                          "(newObjects: %d currentObjects: %zu) - "
+                          "overflow",
+                          __FUNCTION__, numObjects, kernelFields->mObjectsSize);
+                    return NO_MEMORY; // overflow
+                }
                 binder_size_t* objects = (binder_size_t*)realloc(kernelFields->mObjects,
                                                                  newSize * sizeof(binder_size_t));
                 if (objects == (binder_size_t*)nullptr) {
@@ -1162,14 +1175,12 @@ status_t Parcel::finishWrite(size_t len)
         return BAD_VALUE;
     }
 
-    //printf("Finish write of %d\n", len);
     mDataPos += len;
     ALOGV("finishWrite Setting data pos of %p to %zu", this, mDataPos);
     if (mDataPos > mDataSize) {
         mDataSize = mDataPos;
         ALOGV("finishWrite Setting data size of %p to %zu", this, mDataSize);
     }
-    //printf("New pos=%d, size=%d\n", mDataPos, mDataSize);
     return NO_ERROR;
 }
 
@@ -1194,6 +1205,7 @@ void* Parcel::writeInplace(size_t len)
     if (len > INT32_MAX) {
         // don't accept size_t values which may have come from an
         // inadvertent conversion from a negative int.
+        ALOGI("%s: len %zu exceeds INT32_MAX (%d)", __FUNCTION__, len, INT32_MAX);
         return nullptr;
     }
 
@@ -1201,6 +1213,7 @@ void* Parcel::writeInplace(size_t len)
 
     // check for integer overflow
     if (mDataPos+padded < mDataPos) {
+        ALOGI("%s: integer overflow (mDataPos: %zu padded: %zu)", __FUNCTION__, mDataPos, padded);
         return nullptr;
     }
 
@@ -1210,6 +1223,7 @@ restart_write:
         uint8_t* const data = mData+mDataPos;
 
         if (status_t status = validateReadData(mDataPos + padded); status != OK) {
+            ALOGI("%s: validateReadData failed", __FUNCTION__);
             return nullptr; // drops status
         }
 
@@ -1597,6 +1611,7 @@ status_t Parcel::writeFileDescriptor(int fd, bool takeOwnership) {
                 }
                 size_t dataPos = mDataPos;
                 if (dataPos > UINT32_MAX) {
+                    ALOGE("%s: dataPos %zu larger than MAX %u", __FUNCTION__, dataPos, UINT32_MAX);
                     return NO_MEMORY;
                 }
                 if (status_t err = writeInt32(RpcFields::TYPE_NATIVE_FILE_DESCRIPTOR); err != OK) {
@@ -1696,7 +1711,10 @@ status_t Parcel::writeBlob(size_t len, bool mutableCopy, WritableBlob* outBlob)
 
     ALOGV("writeBlob: write to ashmem");
     int fd = ashmem_create_region("Parcel Blob", len);
-    if (fd < 0) return NO_MEMORY;
+    if (fd < 0) {
+        ALOGE("%s: failed to create ashmem", __FUNCTION__);
+        return NO_MEMORY;
+    }
 
     int result = ashmem_set_prot_region(fd, PROT_READ | PROT_WRITE);
     if (result < 0) {
@@ -1837,10 +1855,23 @@ restart_write:
         if (err != NO_ERROR) return err;
     }
     if (!enoughObjects) {
-        if (kernelFields->mObjectsSize > SIZE_MAX - 2) return NO_MEMORY;       // overflow
-        if ((kernelFields->mObjectsSize + 2) > SIZE_MAX / 3) return NO_MEMORY; // overflow
+        if (kernelFields->mObjectsSize > SIZE_MAX - 2) {
+            ALOGE("%s: kernel binder objects overflow (objectsSize: %zu)", __FUNCTION__,
+                  kernelFields->mObjectsSize);
+            return NO_MEMORY; // overflow
+        }
+        if ((kernelFields->mObjectsSize + 2) > SIZE_MAX / 3) {
+            ALOGE("%s: cannot resize to handle additional kernel binder objects (objectsSize: %zu)",
+                  __FUNCTION__, kernelFields->mObjectsSize);
+            return NO_MEMORY; // overflow
+        }
         size_t newSize = ((kernelFields->mObjectsSize + 2) * 3) / 2;
-        if (newSize > SIZE_MAX / sizeof(binder_size_t)) return NO_MEMORY; // overflow
+        if (newSize > SIZE_MAX / sizeof(binder_size_t)) {
+            ALOGE("%s: cannot resize to handle additional kernel binder objects with new size "
+                  "(objectsSize: %zu)",
+                  __FUNCTION__, newSize);
+            return NO_MEMORY; // overflow
+        }
         binder_size_t* objects =
                 (binder_size_t*)realloc(kernelFields->mObjects, newSize * sizeof(binder_size_t));
         if (objects == nullptr) return NO_MEMORY;
@@ -2003,13 +2034,18 @@ status_t Parcel::readOutVectorSizeWithCheck(size_t elmSize, int32_t* size) const
     // allocations)
     static_assert(sizeof(int) == sizeof(int32_t), "Android is LP64");
     int32_t allocationSize;
-    if (__builtin_smul_overflow(elmSize, *size, &allocationSize)) return NO_MEMORY;
+    if (__builtin_smul_overflow(elmSize, *size, &allocationSize)) {
+        ALOGE("%s: smul_overflow failed (elmSize: %zu, size: %d)", __FUNCTION__, elmSize, *size);
+        return NO_MEMORY;
+    }
 
     // High limit of 1MB since something this big could never be returned. Could
     // probably scope this down, but might impact very specific usecases.
     constexpr int32_t kMaxAllocationSize = 1 * 1000 * 1000;
 
     if (allocationSize >= kMaxAllocationSize) {
+        ALOGE("%s: allocation size %d larger than max allowed %d", __FUNCTION__, allocationSize,
+              kMaxAllocationSize);
         return NO_MEMORY;
     }
 
@@ -2566,7 +2602,10 @@ status_t Parcel::readBlob(size_t len, ReadableBlob* outBlob) const
     }
     void* ptr = ::mmap(nullptr, len, isMutable ? PROT_READ | PROT_WRITE : PROT_READ,
             MAP_SHARED, fd, 0);
-    if (ptr == MAP_FAILED) return NO_MEMORY;
+    if (ptr == MAP_FAILED) {
+        ALOGE("%s: mmap failed", __FUNCTION__);
+        return NO_MEMORY;
+    }
 
     outBlob->init(fd, ptr, len, isMutable);
     return NO_ERROR;
@@ -3040,9 +3079,22 @@ status_t Parcel::growData(size_t len)
         return BAD_VALUE;
     }
 
-    if (len > SIZE_MAX - mDataSize) return NO_MEMORY; // overflow
-    if (mDataSize + len > SIZE_MAX / 3) return NO_MEMORY; // overflow
+    if (len > SIZE_MAX - mDataSize) {
+        ALOGE("%s: attempt to grow data past the max size (len: %zu mDataSize: %zu)", __FUNCTION__,
+              len, mDataSize);
+        return NO_MEMORY; // overflow
+    }
+    if (mDataSize + len > SIZE_MAX / 3) {
+        ALOGE("%s: cannot resize to grow data (len: %zu, mDataSize: %zu)", __FUNCTION__, len,
+              mDataSize);
+        return NO_MEMORY; // overflow
+    }
     size_t newSize = ((mDataSize+len)*3)/2;
+    if (newSize <= mDataSize) {
+        ALOGE("%s: cannot resize to grow data even with newSize: %zu (mDataSize: %zu)",
+              __FUNCTION__, newSize, mDataSize);
+    }
+
     return (newSize <= mDataSize)
             ? (status_t) NO_MEMORY
             : continueWrite(std::max(newSize, (size_t) 128));
@@ -3080,7 +3132,8 @@ status_t Parcel::restartWrite(size_t desired)
 
     uint8_t* data = reallocZeroFree(mData, mDataCapacity, desired, mDeallocZero);
     if (!data && desired > mDataCapacity) {
-        LOG_ALWAYS_FATAL("out of memory");
+        LOG_ALWAYS_FATAL("%s: realloc failed as desired size %zu is larger than capacity %zu", __FUNCTION__,
+              desired, mDataCapacity);
         mError = NO_MEMORY;
         return NO_MEMORY;
     }

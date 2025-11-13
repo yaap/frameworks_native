@@ -187,6 +187,50 @@ protected:
 
     static inline const DisplayModes kModes =
             makeModes(kMode60, kMode90, kMode120, kMode90_4K, kMode60_8K);
+
+    void setupChangeRefreshRateTests(bool allowGroupSwitching = false) {
+        EXPECT_THAT(mDisplay, ModeSettledTo(&dmc(), kModeId60));
+
+        EXPECT_EQ(NO_ERROR,
+                  mFlinger.setDesiredDisplayModeSpecs(
+                          mDisplay->getDisplayToken().promote(),
+                          mock::createDisplayModeSpecs(kModeId90, 120_Hz, allowGroupSwitching)));
+
+        EXPECT_THAT(mDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
+
+        // Verify that next commit will call setActiveConfigWithConstraints in HWC
+        const VsyncPeriodChangeTimeline timeline{.refreshRequired = true};
+        EXPECT_SET_ACTIVE_CONFIG(kInnerDisplayHwcId, kModeId90);
+
+        mFlinger.commit();
+        Mock::VerifyAndClearExpectations(mComposer);
+
+        EXPECT_THAT(mDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
+    }
+
+    void setupChangeRefreshRateOnTwoDisplays(sp<DisplayDevice> innerDisplay,
+                                             sp<DisplayDevice> outerDisplay) {
+        EXPECT_THAT(innerDisplay, ModeSettledTo(&dmc(), kModeId60));
+        EXPECT_THAT(outerDisplay, ModeSettledTo(&dmc(), kModeId120));
+
+        EXPECT_EQ(NO_ERROR,
+                  mFlinger.setDesiredDisplayModeSpecs(innerDisplay->getDisplayToken().promote(),
+                                                      mock::createDisplayModeSpecs(kModeId90,
+                                                                                   120_Hz, true)));
+        EXPECT_EQ(NO_ERROR,
+                  mFlinger.setDesiredDisplayModeSpecs(outerDisplay->getDisplayToken().promote(),
+                                                      mock::createDisplayModeSpecs(kModeId60, 60_Hz,
+                                                                                   true)));
+
+        EXPECT_THAT(innerDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
+        EXPECT_THAT(outerDisplay, ModeSwitchingTo(&mFlinger, kModeId60));
+
+        // Verify that next commit will call setActiveConfigWithConstraints in HWC
+        // and complete the mode change.
+        const VsyncPeriodChangeTimeline timeline{.refreshRequired = false};
+        EXPECT_SET_ACTIVE_CONFIG(kInnerDisplayHwcId, kModeId90);
+        EXPECT_SET_ACTIVE_CONFIG(kOuterDisplayHwcId, kModeId60);
+    }
 };
 
 void DisplayModeSwitchingTest::setupScheduler(
@@ -213,28 +257,13 @@ void DisplayModeSwitchingTest::setupScheduler(
 }
 
 TEST_F(DisplayModeSwitchingTest, changeRefreshRateWithRefreshRequired) {
-    EXPECT_THAT(mDisplay, ModeSettledTo(&dmc(), kModeId60));
-
-    EXPECT_EQ(NO_ERROR,
-              mFlinger.setDesiredDisplayModeSpecs(mDisplay->getDisplayToken().promote(),
-                                                  mock::createDisplayModeSpecs(kModeId90, 120_Hz)));
-
-    EXPECT_THAT(mDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
-
-    // Verify that next commit will call setActiveConfigWithConstraints in HWC
-    const VsyncPeriodChangeTimeline timeline{.refreshRequired = true};
-    EXPECT_SET_ACTIVE_CONFIG(kInnerDisplayHwcId, kModeId90);
-
-    mFlinger.commit();
-    Mock::VerifyAndClearExpectations(mComposer);
-
-    EXPECT_THAT(mDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, false);
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateTests());
 
     // Verify that the next commit will complete the mode change and send
     // a onModeChanged event to the framework.
-
     EXPECT_CALL(*mAppEventThread,
-                onModeChanged(scheduler::FrameRateMode{90_Hz, ftl::as_non_null(kMode90)}));
+                onModeChanged(scheduler::FrameRateMode{90_Hz, ftl::as_non_null(kMode90)}, _));
 
     mFlinger.commit();
     Mock::VerifyAndClearExpectations(mAppEventThread);
@@ -243,23 +272,47 @@ TEST_F(DisplayModeSwitchingTest, changeRefreshRateWithRefreshRequired) {
 }
 
 TEST_F(DisplayModeSwitchingTest, changeRefreshRateWithoutRefreshRequired) {
-    EXPECT_THAT(mDisplay, ModeSettledTo(&dmc(), kModeId60));
-
-    constexpr bool kAllowGroupSwitching = true;
-    EXPECT_EQ(NO_ERROR,
-              mFlinger.setDesiredDisplayModeSpecs(
-                      mDisplay->getDisplayToken().promote(),
-                      mock::createDisplayModeSpecs(kModeId90, 120_Hz, kAllowGroupSwitching)));
-
-    EXPECT_THAT(mDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
-
-    // Verify that next commit will call setActiveConfigWithConstraints in HWC
-    // and complete the mode change.
-    const VsyncPeriodChangeTimeline timeline{.refreshRequired = false};
-    EXPECT_SET_ACTIVE_CONFIG(kInnerDisplayHwcId, kModeId90);
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, false);
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateTests(true));
 
     EXPECT_CALL(*mAppEventThread,
-                onModeChanged(scheduler::FrameRateMode{90_Hz, ftl::as_non_null(kMode90)}));
+                onModeChanged(scheduler::FrameRateMode{90_Hz, ftl::as_non_null(kMode90)}, _));
+
+    mFlinger.commit();
+
+    EXPECT_THAT(mDisplay, ModeSettledTo(&dmc(), kModeId90));
+}
+
+TEST_F(DisplayModeSwitchingTest, changeRefreshRateWithRefreshRequired_unifyRefreshRateCallbacks) {
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, true);
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateTests());
+
+    // Verify that the next commit will complete the mode change and send
+    // a onModeChanged event to the framework.
+    EXPECT_CALL(*mAppEventThread,
+                onModeAndFrameRateOverridesChanged(_,
+                                                   scheduler::FrameRateMode{90_Hz,
+                                                                            ftl::as_non_null(
+                                                                                    kMode90)},
+                                                   _, _));
+
+    mFlinger.commit();
+    Mock::VerifyAndClearExpectations(mAppEventThread);
+
+    EXPECT_THAT(mDisplay, ModeSettledTo(&dmc(), kModeId90));
+}
+
+TEST_F(DisplayModeSwitchingTest,
+       changeRefreshRateWithoutRefreshRequired_unifyRefreshRateCallbacks) {
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, true);
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateTests(true));
+
+    EXPECT_CALL(*mAppEventThread,
+                onModeAndFrameRateOverridesChanged(_,
+                                                   scheduler::FrameRateMode{90_Hz,
+                                                                            ftl::as_non_null(
+                                                                                    kMode90)},
+                                                   _, _));
 
     mFlinger.commit();
 
@@ -267,30 +320,25 @@ TEST_F(DisplayModeSwitchingTest, changeRefreshRateWithoutRefreshRequired) {
 }
 
 TEST_F(DisplayModeSwitchingTest, changeRefreshRateOnTwoDisplaysWithoutRefreshRequired) {
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, false);
     const auto [innerDisplay, outerDisplay] = injectOuterDisplay();
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateOnTwoDisplays(innerDisplay, outerDisplay));
 
-    EXPECT_THAT(innerDisplay, ModeSettledTo(&dmc(), kModeId60));
-    EXPECT_THAT(outerDisplay, ModeSettledTo(&dmc(), kModeId120));
+    EXPECT_CALL(*mAppEventThread, onModeChanged(_, _)).Times(2);
 
-    EXPECT_EQ(NO_ERROR,
-              mFlinger.setDesiredDisplayModeSpecs(innerDisplay->getDisplayToken().promote(),
-                                                  mock::createDisplayModeSpecs(kModeId90, 120_Hz,
-                                                                               true)));
-    EXPECT_EQ(NO_ERROR,
-              mFlinger.setDesiredDisplayModeSpecs(outerDisplay->getDisplayToken().promote(),
-                                                  mock::createDisplayModeSpecs(kModeId60, 60_Hz,
-                                                                               true)));
+    mFlinger.commit();
 
-    EXPECT_THAT(innerDisplay, ModeSwitchingTo(&mFlinger, kModeId90));
-    EXPECT_THAT(outerDisplay, ModeSwitchingTo(&mFlinger, kModeId60));
+    EXPECT_THAT(innerDisplay, ModeSettledTo(&dmc(), kModeId90));
+    EXPECT_THAT(outerDisplay, ModeSettledTo(&dmc(), kModeId60));
+}
 
-    // Verify that next commit will call setActiveConfigWithConstraints in HWC
-    // and complete the mode change.
-    const VsyncPeriodChangeTimeline timeline{.refreshRequired = false};
-    EXPECT_SET_ACTIVE_CONFIG(kInnerDisplayHwcId, kModeId90);
-    EXPECT_SET_ACTIVE_CONFIG(kOuterDisplayHwcId, kModeId60);
+TEST_F(DisplayModeSwitchingTest,
+       changeRefreshRateOnTwoDisplaysWithoutRefreshRequired_unifyRefreshRateCallbacks) {
+    SET_FLAG_FOR_TEST(flags::unify_refresh_rate_callbacks, true);
+    const auto [innerDisplay, outerDisplay] = injectOuterDisplay();
+    EXPECT_NO_FATAL_FAILURE(setupChangeRefreshRateOnTwoDisplays(innerDisplay, outerDisplay));
 
-    EXPECT_CALL(*mAppEventThread, onModeChanged(_)).Times(2);
+    EXPECT_CALL(*mAppEventThread, onModeAndFrameRateOverridesChanged(_, _, _, _)).Times(2);
 
     mFlinger.commit();
 

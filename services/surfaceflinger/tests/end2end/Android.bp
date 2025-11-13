@@ -12,6 +12,10 @@ cc_test {
     test_suites: ["device-tests"],
     require_root: true,
 
+    defaults: [
+        "android.hardware.graphics.common-ndk_static",
+    ],
+
     cpp_std: "experimental",
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
@@ -32,10 +36,29 @@ cc_test {
     ],
     srcs: [
         "main.cpp",
+        "test_framework/core/BufferId.cpp",
+        "test_framework/core/EdidBuilder.cpp",
         "test_framework/core/TestService.cpp",
-        "test_framework/fake_hwc3/Hwc3Composer.cpp",
-        "test_framework/fake_hwc3/Hwc3Controller.cpp",
+        "test_framework/hwc3/DisplayVSyncEventService.cpp",
+        "test_framework/hwc3/FakeComposer.cpp",
+        "test_framework/hwc3/Hwc3Controller.cpp",
+        "test_framework/hwc3/MultiDisplayRefreshEventGenerator.cpp",
+        "test_framework/hwc3/ObservingComposer.cpp",
+        "test_framework/hwc3/SingleDisplayRefreshEventGenerator.cpp",
+        "test_framework/hwc3/SingleDisplayRefreshSchedule.cpp",
+        "test_framework/hwc3/TimeKeeperThread.cpp",
+        "test_framework/surfaceflinger/DisplayEventReceiver.cpp",
+        "test_framework/surfaceflinger/PollFdThread.cpp",
         "test_framework/surfaceflinger/SFController.cpp",
+        "test_framework/surfaceflinger/SimpleBufferPool.cpp",
+        "test_framework/surfaceflinger/Surface.cpp",
+
+        // Internal tests
+        "tests/internal/AsyncFunction_test.cpp",
+        "tests/internal/DisplayRefresh_test.cpp",
+        "tests/internal/EdidBuilder_test.cpp",
+
+        // SurfaceFlinger tests
         "tests/Placeholder_test.cpp",
     ],
     tidy: true,
@@ -61,7 +84,6 @@ cc_test {
     ],
     static_libs: [
         "android.hardware.common-V2-ndk",
-        "android.hardware.graphics.common-V6-ndk",
         "android.hardware.graphics.composer3-V3-ndk",
         "libgtest",
     ],

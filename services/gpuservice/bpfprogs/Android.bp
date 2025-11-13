@@ -24,4 +24,15 @@ package {
 bpf {
     name: "gpuMem.o",
     srcs: ["gpuMem.c"],
+    include_dirs: [
+        "system/bpf/include/defs",
+    ],
+}
+
+libbpf_prog {
+    name: "gpuMem.bpf",
+    srcs: ["gpuMem.c"],
+    header_libs: [
+        "android_bpf_defs",
+    ],
 }

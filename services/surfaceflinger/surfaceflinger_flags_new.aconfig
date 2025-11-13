@@ -4,6 +4,16 @@ package: "com.android.graphics.surfaceflinger.flags"
 container: "system"
 
 flag {
+  name: "adpf_cpu_effects_loadup"
+  namespace: "window_surfaces"
+  description: "Enables CPU loadup hints for effects using client composition"
+  bug: "409887260"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # adpf_cpu_effects_loadup
+
+flag {
   name: "adpf_fmq_sf"
   namespace: "game"
   description: "Guards use of the ADPF FMQ system specifically for SurfaceFlinger"
@@ -58,28 +68,6 @@ flag {
   bug: "362510107"
   is_fixed_read_only: true
 } # begone_bright_hlg
-
-flag {
-  name: "ce_fence_promise"
-  namespace: "window_surfaces"
-  description: "Moves logic for buffer release fences into LayerFE"
-  bug: "294936197"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
- } # ce_fence_promise
-
-flag {
-  name: "commit_not_composited"
-  namespace: "core_graphics"
-  description: "mark frames as non janky if the transaction resulted in no composition"
-  bug: "340633280"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # commit_not_composited
 
 flag {
   name: "connected_display_hdr"
@@ -153,17 +141,6 @@ flag {
 } # display_config_error_hal
 
 flag {
-  name: "filter_frames_before_trace_starts"
-  namespace: "core_graphics"
-  description: "Do not trace FrameTimeline events for frames started before the trace started"
-  bug: "364194637"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # filter_frames_before_trace_starts
-
-flag {
   name: "flush_buffer_slots_to_uncache"
   namespace: "core_graphics"
   description: "Flush DisplayCommands for disabled displays in order to uncache requested buffers."
@@ -218,17 +195,6 @@ flag {
 } # increase_missed_frame_jank_threshold
 
 flag {
-  name: "latch_unsignaled_with_auto_refresh_changed"
-  namespace: "core_graphics"
-  description: "Ignore eAutoRefreshChanged with latch unsignaled"
-  bug: "331513837"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # latch_unsignaled_with_auto_refresh_changed
-
-flag {
   name: "local_tonemap_screenshots"
   namespace: "core_graphics"
   description: "Enables local tonemapping when capturing screenshots"
@@ -252,26 +218,18 @@ flag {
 } # no_vsyncs_on_screen_off
 
 flag {
-  name: "reject_dupe_layerstacks"
-  namespace: "window_surfaces"
-  description: "Reject duplicate layerstacks for displays"
-  bug: "370358572"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
- } # reject_dupe_layerstacks
+  name: "pacesetter_selection"
+  namespace: "desktop_display"
+  description: "Moves pacesetter designation to the display with highest refresh rate. Prefers to keep the same display as pacesetter if there are multiple displays of the same highest refresh rate."
+  bug: "374072507"
+} # pacesetter_selection
 
 flag {
-  name: "single_hop_screenshot"
-  namespace: "window_surfaces"
-  description: "Only access SF main thread once during a screenshot"
-  bug: "285553970"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
- } # single_hop_screenshot
+  name: "readback_screenshot"
+  namespace: "core_graphics"
+  description: "Allows devices to use DPU readback for fullscreen screenshots"
+  bug: "384816457"
+} # readback_screenshot
 
 flag {
   name: "skip_invisible_windows_in_input"
@@ -291,6 +249,14 @@ flag {
   bug: "352320847"
   is_fixed_read_only: true
 } # stable_edid_ids
+
+flag {
+    name: "stop_layer"
+    namespace: "window_surfaces"
+    description: "Enables stop layers when building layer snapshots"
+    bug: "403312802"
+    is_fixed_read_only: true
+} # stop_layer
 
 flag {
   name: "synced_resolution_switch"
@@ -319,34 +285,24 @@ flag {
 } # override_trusted_overlay
 
 flag {
-  name: "view_set_requested_frame_rate_mrr"
-  namespace: "core_graphics"
-  description: "Enable to use frame rate category NoPreference with fixed frame rate vote on MRR devices"
-  bug: "352206100"
-  is_fixed_read_only: true
-} # view_set_requested_frame_rate_mrr
+    name: "unify_refresh_rate_callbacks"
+    namespace: "core_graphics"
+    description: "Unifies mode changed and FrameRateOverride callbacks"
+    bug: "399482301"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+} # unify_refresh_rate_callbacks
 
 flag {
-  name: "vrr_bugfix_24q4"
+  name: "vsync_predictor_rate_change_with_aligned_sequence"
   namespace: "core_graphics"
-  description: "bug fixes for VRR"
-  bug: "331513837"
-  is_fixed_read_only: true
+  description: "Render rate changes where all the frame rate overrides align"
+  bug: "377240935"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
-} # vrr_bugfix_24q4
-
-flag {
-  name: "vrr_bugfix_dropped_frame"
-  namespace: "core_graphics"
-  description: "bug fix for VRR dropped frame"
-  bug: "343603085"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # vrr_bugfix_dropped_frame
+} # vsync_predictor_rate_change_with_aligned_sequence
 
 flag {
   name: "vsync_predictor_recovery"
@@ -357,6 +313,13 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
  } # vsync_predictor_recovery
+
+flag {
+  name: "wb_virtualdisplay2"
+  namespace: "core_graphics"
+  description: "When enabled, use VirtualDisplaySurface2 instead of the legacy one"
+  bug: "340933138"
+} # wb_virtualdisplay2
 
 flag {
   name: "window_blur_kawase2"

@@ -51,11 +51,17 @@ namespace android {
 
 class IConsumerListener;
 class IProducerListener;
+#ifdef ENABLE_BQC_TESTING
+class MockBufferQueueCore;
+#endif
 
 class BufferQueueCore : public virtual RefBase {
 
     friend class BufferQueueProducer;
     friend class BufferQueueConsumer;
+#ifdef ENABLE_BQC_TESTING
+    friend class TestableBufferQueueCore;
+#endif
 
 public:
     // Used as a placeholder slot number when the value isn't pointing to an

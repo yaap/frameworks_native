@@ -76,6 +76,71 @@ sp<SurfaceType> convertParcelableSurfaceTypeToSurface(const ParcelableSurfaceTyp
     return surface;
 #endif
 }
-
 } // namespace flagtools
+namespace mediaflagtools {
+sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp) {
+    if (igbp == nullptr) {
+        return nullptr;
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+    return new Surface(igbp);
+#else
+    return igbp;
+#endif
+}
+
+sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<MediaSurfaceType>& mst) {
+    if (mst == nullptr) {
+        return nullptr;
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+    return mst->getIGraphicBufferProducer();
+#else
+    return mst;
+#endif
+}
+
+sp<SurfaceType> mediaSurfaceToCameraSurfaceType(const sp<MediaSurfaceType>& mst,
+                                                [[maybe_unused]] bool controlledByApp) {
+    if (mst == nullptr) {
+        return nullptr;
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+    return mst;
+#else
+    return mst->getGraphicBufferProducer();
+#endif
+#else
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+    return sp<Surface>::make(mst, controlledByApp);
+#else
+    return mst;
+#endif
+#endif
+}
+
+sp<Surface> surfaceTypeToSurface(const sp<MediaSurfaceType>& mst,
+                                 [[maybe_unused]] bool controlledByApp) {
+    if (mst == nullptr) {
+        return nullptr;
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+    return mst;
+#else
+    return sp<Surface>::make(mst, controlledByApp);
+#endif
+}
+
+sp<MediaSurfaceType> surfaceToSurfaceType(const sp<Surface>& surface) {
+    if (surface == nullptr) {
+        return nullptr;
+    }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+    return surface;
+#else
+    return surface->getIGraphicBufferProducer();
+#endif
+}
+} // namespace mediaflagtools
 } // namespace android

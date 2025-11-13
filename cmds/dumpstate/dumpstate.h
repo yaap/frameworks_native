@@ -208,11 +208,12 @@ class Dumpstate {
     // The flags used to customize bugreport requests.
     enum BugreportFlag {
         BUGREPORT_USE_PREDUMPED_UI_DATA =
-          android::os::IDumpstate::BUGREPORT_FLAG_USE_PREDUMPED_UI_DATA,
-        BUGREPORT_FLAG_DEFER_CONSENT =
-          android::os::IDumpstate::BUGREPORT_FLAG_DEFER_CONSENT,
-          BUGREPORT_FLAG_KEEP_BUGREPORT_ON_RETRIEVAL =
-                    android::os::IDumpstate::BUGREPORT_FLAG_KEEP_BUGREPORT_ON_RETRIEVAL
+            android::os::IDumpstate::BUGREPORT_FLAG_USE_PREDUMPED_UI_DATA,
+        BUGREPORT_FLAG_DEFER_CONSENT = android::os::IDumpstate::BUGREPORT_FLAG_DEFER_CONSENT,
+        BUGREPORT_FLAG_KEEP_BUGREPORT_ON_RETRIEVAL =
+            android::os::IDumpstate::BUGREPORT_FLAG_KEEP_BUGREPORT_ON_RETRIEVAL,
+        BUGREPORT_FLAG_CAPTURE_MULTI_DISPLAY_SCREENSHOT =
+            android::os::IDumpstate::BUGREPORT_FLAG_CAPTURE_MULTI_DISPLAY_SCREENSHOT
     };
 
     static android::os::dumpstate::CommandOptions DEFAULT_DUMPSYS;
@@ -410,6 +411,7 @@ class Dumpstate {
         // Writes generation progress updates to a socket.
         bool progress_updates_to_socket = false;
         bool do_screenshot = false;
+        bool multi_display_screenshot = false;
         bool is_screenshot_copied = false;
         bool is_consent_deferred = false;
         bool skip_user_consent = false;
@@ -513,6 +515,9 @@ class Dumpstate {
     // Full path of the file containing the screenshot (when requested).
     std::string screenshot_path_;
 
+    // Full paths of the files containing the screenshots for multi displays (when requested).
+    std::map<std::string, std::string> screenshot_path_by_display_id_;
+
     // Pointer to the zipped file.
     std::unique_ptr<FILE, int (*)(FILE*)> zip_file{nullptr, fclose};
 
@@ -572,7 +577,17 @@ class Dumpstate {
     RunStatus DumpstateDefaultAfterCritical();
     RunStatus dumpstate();
 
+    bool AddZipEntry(const std::unique_ptr<ZipWriter>& zip_writer, const std::string& entry_name,
+                     const std::string& entry_path);
+    android::status_t AddZipEntryFromFd(const std::unique_ptr<ZipWriter>& zip_writer,
+                                        const std::string& entry_name, int fd,
+                                        std::chrono::milliseconds timeout);
+
+    void TakeSingleDisplayScreenshot(const std::string& path = "");
+    void TakeMultiDisplayScreenshots(const std::string& path = "");
+
     void MaybeTakeEarlyScreenshot();
+    void MaybeSavePlaceholderScreenshot();
     std::future<std::string> MaybeSnapshotSystemTraceAsync();
     void MaybeWaitForSnapshotSystemTrace(std::future<std::string> task);
     void MaybeSnapshotUiTraces();

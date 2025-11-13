@@ -22,6 +22,7 @@
 #pragma clang diagnostic ignored "-Wextra"
 
 #include <type_traits>
+#include "Display/DisplayIdentification.h"
 #include "DisplayIdentificationTestHelpers.h"
 
 #include <binder/IPCThreadState.h>
@@ -189,10 +190,10 @@ struct DisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
                                                        ? LEGACY_DISPLAY_TYPE_PRIMARY
                                                        : LEGACY_DISPLAY_TYPE_EXTERNAL);
         }
-
         const auto info =
-                parseDisplayIdentificationData(PhysicalDisplay::PORT,
-                                               PhysicalDisplay::GET_IDENTIFICATION_DATA());
+                display::parseDisplayIdentificationData(PhysicalDisplay::PORT,
+                                                        PhysicalDisplay::GET_IDENTIFICATION_DATA(),
+                                                        android::ScreenPartStatus::UNSUPPORTED);
         return info ? info->id : PhysicalDisplayId::fromPort(PhysicalDisplay::PORT);
     }
 };
@@ -491,12 +492,12 @@ struct HwcDisplayVariant {
         setupHwcGetConfigsCallExpectations(test);
 
         if (PhysicalDisplay::HAS_IDENTIFICATION_DATA) {
-            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
+            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _, _))
                     .WillOnce(DoAll(SetArgPointee<1>(PhysicalDisplay::PORT),
                                     SetArgPointee<2>(PhysicalDisplay::GET_IDENTIFICATION_DATA()),
                                     Return(Error::NONE)));
         } else {
-            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
+            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _, _))
                     .WillOnce(Return(Error::UNSUPPORTED));
         }
     }

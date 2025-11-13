@@ -117,9 +117,6 @@ private:
     static void resetRelativeState(LayerSnapshot& snapshot);
     static void updateRoundedCorner(LayerSnapshot& snapshot, const RequestedLayerState& layerState,
                                     const LayerSnapshot& parentSnapshot, const Args& args);
-    static bool extensionEdgeSharedWithParent(LayerSnapshot& snapshot,
-                                              const RequestedLayerState& requested,
-                                              const LayerSnapshot& parentSnapshot);
     static void updateBoundsForEdgeExtension(LayerSnapshot& snapshot);
     void updateLayerBounds(LayerSnapshot& snapshot, const RequestedLayerState& layerState,
                            const LayerSnapshot& parentSnapshot, uint32_t displayRotationFlags);
@@ -138,6 +135,11 @@ private:
                                           const RequestedLayerState& requestedCHildState,
                                           const Args& args, bool* outChildHasValidFrameRate);
     void updateTouchableRegionCrop(const Args& args);
+
+    void applyStopLayers(const LayerHierarchy&, const LayerHierarchy::TraversalPath&);
+    void applyStopLayersInternal(const LayerHierarchy&, const LayerHierarchy::TraversalPath&,
+                                 ftl::SmallVector<uint32_t, 5>& stopLayers,
+                                 ftl::SmallVector<uint32_t, 5>& activeStopLayers);
 
     std::unordered_map<LayerHierarchy::TraversalPath, LayerSnapshot*,
                        LayerHierarchy::TraversalPathHash>

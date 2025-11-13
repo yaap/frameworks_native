@@ -90,7 +90,7 @@ cc_defaults {
         "libnativewindow",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
-        "libstatslog_surfaceflinger",
+        "libstatslog_surfaceflinger_bootstrap",
         "libsync",
         "libui",
         "libutils",
@@ -208,12 +208,12 @@ filegroup {
         "BackgroundExecutor.cpp",
         "Client.cpp",
         "ClientCache.cpp",
+        "Display/DisplayIdentification.cpp",
         "Display/DisplayModeController.cpp",
         "Display/DisplaySnapshot.cpp",
         "DisplayDevice.cpp",
         "Effects/Daltonizer.cpp",
         "FpsReporter.cpp",
-        "FrameTimeline/FrameTimeline.cpp",
         "FrameTracer/FrameTracer.cpp",
         "FrameTracker.cpp",
         "FrontEnd/LayerCreationArgs.cpp",
@@ -236,6 +236,7 @@ filegroup {
         "RegionSamplingThread.cpp",
         "Scheduler/EventThread.cpp",
         "Scheduler/FrameRateOverrideMappings.cpp",
+        "Scheduler/FrameTimeline.cpp",
         "Scheduler/LayerHistory.cpp",
         "Scheduler/LayerInfo.cpp",
         "Scheduler/MessageQueue.cpp",
@@ -352,12 +353,11 @@ cc_library_shared {
 }
 
 cc_library {
-    name: "libstatslog_surfaceflinger",
-    generated_sources: ["statslog_surfaceflinger.cpp"],
-    generated_headers: ["statslog_surfaceflinger.h"],
-    export_generated_headers: ["statslog_surfaceflinger.h"],
+    name: "libstatslog_surfaceflinger_bootstrap",
+    generated_sources: ["statslog_surfaceflinger_bootstrap.cpp"],
+    generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
+    export_generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
     shared_libs: [
-        "android.os.statsbootstrap_aidl-cpp",
         "libbinder",
         "libstatsbootstrap",
         "libutils",
@@ -365,10 +365,42 @@ cc_library {
 }
 
 genrule {
+    name: "statslog_surfaceflinger_bootstrap.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger_bootstrap.h" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+    out: [
+        "statslog_surfaceflinger_bootstrap.h",
+    ],
+}
+
+genrule {
+    name: "statslog_surfaceflinger_bootstrap.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger_bootstrap.cpp" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats" +
+        " --importHeader statslog_surfaceflinger_bootstrap.h --bootstrap",
+    out: [
+        "statslog_surfaceflinger_bootstrap.cpp",
+    ],
+}
+
+cc_library {
+    name: "libstatslog_surfaceflinger",
+    generated_sources: ["statslog_surfaceflinger.cpp"],
+    generated_headers: ["statslog_surfaceflinger.h"],
+    export_generated_headers: ["statslog_surfaceflinger.h"],
+    shared_libs: [
+        "libstatspull",
+        "libstatssocket",
+    ],
+}
+
+genrule {
     name: "statslog_surfaceflinger.h",
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger.h" +
-        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+        " --module surfaceflinger --namespace android,surfaceflinger,stats",
     out: [
         "statslog_surfaceflinger.h",
     ],
@@ -379,7 +411,7 @@ genrule {
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger.cpp" +
         " --module surfaceflinger --namespace android,surfaceflinger,stats" +
-        " --importHeader statslog_surfaceflinger.h --bootstrap",
+        " --importHeader statslog_surfaceflinger.h",
     out: [
         "statslog_surfaceflinger.cpp",
     ],

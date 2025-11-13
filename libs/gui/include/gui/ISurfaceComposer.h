@@ -19,6 +19,7 @@
 #include <android/gui/CachingHint.h>
 #include <android/gui/DisplayBrightness.h>
 #include <android/gui/DisplayCaptureArgs.h>
+#include <android/gui/EarlyWakeupInfo.h>
 #include <android/gui/FrameTimelineInfo.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/IFpsListener.h>
@@ -65,7 +66,9 @@ struct DisplayState;
 struct InputWindowCommands;
 class HdrCapabilities;
 class Rect;
-class TransactionState;
+struct SimpleTransactionState;
+struct ComplexTransactionState;
+struct MutableTransactionState;
 
 using gui::FrameTimelineInfo;
 using gui::IDisplayEventConnection;
@@ -106,7 +109,10 @@ public:
     };
 
     /* open/close transactions. requires ACCESS_SURFACE_FLINGER permission */
-    virtual status_t setTransactionState(TransactionState&& state) = 0;
+    virtual status_t setTransactionState(SimpleTransactionState simpleState,
+                                         const ComplexTransactionState& complexState,
+                                         MutableTransactionState& mutableState,
+                                         const sp<IBinder>& applyToken) = 0;
 };
 
 // ----------------------------------------------------------------------------

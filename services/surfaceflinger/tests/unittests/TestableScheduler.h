@@ -143,6 +143,8 @@ public:
         return mLayerHistory.mActiveLayerInfos.size();
     }
 
+    bool layerHistoryModeChangePending() const { return mLayerHistory.mModeChangePending; }
+
     void replaceTouchTimer(int64_t millis,
                            std::function<void(bool isReset)>&& testCallback = nullptr) {
         if (mTouchTimer) {

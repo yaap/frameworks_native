@@ -288,8 +288,7 @@ void RefreshRateOverlay::onVrrIdle(bool idle) {
 }
 
 void RefreshRateOverlay::changeRenderRate(Fps renderFps) {
-    if (mFeatures.test(Features::RenderRate) && mRefreshRate &&
-        FlagManager::getInstance().misc1()) {
+    if (mFeatures.test(Features::RenderRate) && mRefreshRate) {
         mRenderFps = renderFps;
         const auto buffer = getOrCreateBuffers(*mRefreshRate, renderFps, mIsVrrIdle)[mFrame];
         createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();

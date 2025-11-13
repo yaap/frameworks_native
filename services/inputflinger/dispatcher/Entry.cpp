@@ -147,7 +147,7 @@ std::string KeyEntry::getDescription() const {
     if (!IS_DEBUGGABLE_BUILD) {
         return "KeyEvent";
     }
-    return StringPrintf("KeyEvent(deviceId=%d, eventTime=%" PRIu64 ", source=%s, displayId=%s, "
+    return StringPrintf("KeyEvent(deviceId=%d, eventTime=%" PRIu64 "ns, source=%s, displayId=%s, "
                         "action=%s, "
                         "flags=0x%08x, keyCode=%s(%d), scanCode=%d, metaState=0x%08x, "
                         "repeatCount=%d), policyFlags=0x%08x",
@@ -179,7 +179,7 @@ std::string TouchModeEntry::getDescription() const {
 MotionEntry::MotionEntry(int32_t id, std::shared_ptr<InjectionState> injectionState,
                          nsecs_t eventTime, int32_t deviceId, uint32_t source,
                          ui::LogicalDisplayId displayId, uint32_t policyFlags, int32_t action,
-                         int32_t actionButton, int32_t flags, int32_t metaState,
+                         int32_t actionButton, ftl::Flags<MotionFlag> flags, int32_t metaState,
                          int32_t buttonState, MotionClassification classification,
                          int32_t edgeFlags, float xPrecision, float yPrecision,
                          float xCursorPosition, float yCursorPosition, nsecs_t downTime,
@@ -211,15 +211,14 @@ std::string MotionEntry::getDescription() const {
         return "MotionEvent";
     }
     std::string msg;
-    msg += StringPrintf("MotionEvent(deviceId=%d, eventTime=%" PRIu64
-                        ", source=%s, displayId=%s, action=%s, actionButton=0x%08x, flags=0x%08x,"
-                        " metaState=0x%08x, "
+    msg += StringPrintf("MotionEvent(deviceId=%d, eventTime=%" PRIu64 "ns, source=%s, displayId=%s,"
+                        "action=%s, actionButton=0x%08x, flags=%s, metaState=0x%08x, "
                         "buttonState=0x%08x, "
                         "classification=%s, edgeFlags=0x%08x, xPrecision=%.1f, yPrecision=%.1f, "
                         "xCursorPosition=%0.1f, yCursorPosition=%0.1f, pointers=[",
                         deviceId, eventTime, inputEventSourceToString(source).c_str(),
                         displayId.toString().c_str(), MotionEvent::actionToString(action).c_str(),
-                        actionButton, flags, metaState, buttonState,
+                        actionButton, flags.string().c_str(), metaState, buttonState,
                         motionClassificationToString(classification), edgeFlags, xPrecision,
                         yPrecision, xCursorPosition, yCursorPosition);
 
@@ -290,19 +289,14 @@ DispatchEntry::DispatchEntry(std::shared_ptr<const EventEntry> eventEntry,
         rawTransform(rawTransform),
         globalScaleFactor(globalScaleFactor),
         deliveryTime(0),
-        resolvedFlags(0),
+        resolvedMotionFlags{},
         targetUid(targetUid),
         vsyncId(vsyncId),
         windowId(windowId) {
     switch (this->eventEntry->type) {
-        case EventEntry::Type::KEY: {
-            const KeyEntry& keyEntry = static_cast<const KeyEntry&>(*this->eventEntry);
-            resolvedFlags = keyEntry.flags;
-            break;
-        }
         case EventEntry::Type::MOTION: {
             const MotionEntry& motionEntry = static_cast<const MotionEntry&>(*this->eventEntry);
-            resolvedFlags = motionEntry.flags;
+            resolvedMotionFlags = motionEntry.flags;
             break;
         }
         default: {
@@ -321,10 +315,13 @@ uint32_t DispatchEntry::nextSeq() {
 }
 
 std::ostream& operator<<(std::ostream& out, const DispatchEntry& entry) {
+    out << "DispatchEntry{";
+    if (entry.eventEntry->type == EventEntry::Type::MOTION) {
+        out << "resolvedMotionFlags=" << entry.resolvedMotionFlags.string() << ", ";
+    }
     std::string transform;
     entry.transform.dump(transform, "transform");
-    out << "DispatchEntry{resolvedFlags=" << entry.resolvedFlags
-        << ", targetFlags=" << entry.targetFlags.string() << ", transform=" << transform
+    out << "targetFlags=" << entry.targetFlags.string() << ", transform=" << transform
         << "} original: " << entry.eventEntry->getDescription();
     return out;
 }

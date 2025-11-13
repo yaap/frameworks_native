@@ -124,7 +124,6 @@ cc_library_shared {
         "DebugUtils.cpp",
         "DependencyMonitor.cpp",
         "DeviceProductInfo.cpp",
-        "DisplayIdentification.cpp",
         "DynamicDisplayInfo.cpp",
         "Fence.cpp",
         "FenceTime.cpp",

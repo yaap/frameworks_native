@@ -206,11 +206,9 @@ public:
 
     // See IGraphicBufferProducer::setAutoPrerotation
     virtual status_t setAutoPrerotation(bool autoPrerotation);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
     // See IGraphicBufferProducer::setFrameRate
     status_t setFrameRate(float frameRate, int8_t compatibility,
                           int8_t changeFrameRateStrategy) override;
-#endif
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) override;

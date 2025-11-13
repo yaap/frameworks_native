@@ -27,7 +27,7 @@
 #include <log/log.h>
 #include <random>
 #include <stats_event.h>
-#include <statslog.h>
+#include <statslog_gpustats.h>
 #include <unistd.h>
 #include <utils/Timers.h>
 #include <utils/Trace.h>
@@ -110,7 +110,7 @@ GpuWork::~GpuWork() {
     {
         std::scoped_lock<std::mutex> lock(mMutex);
         if (mStatsdRegistered) {
-            AStatsManager_clearPullAtomCallback(android::util::GPU_WORK_PER_UID);
+            AStatsManager_clearPullAtomCallback(android::gpustats::GPU_WORK_PER_UID);
         }
     }
 
@@ -155,7 +155,7 @@ void GpuWork::initialize() {
 
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        AStatsManager_setPullAtomCallback(int32_t{android::util::GPU_WORK_PER_UID}, nullptr,
+        AStatsManager_setPullAtomCallback(int32_t{android::gpustats::GPU_WORK_PER_UID}, nullptr,
                                           GpuWork::pullAtomCallback, this);
         mStatsdRegistered = true;
     }
@@ -260,7 +260,7 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullAtomCallback(int32_t atomTag,
     ATRACE_CALL();
 
     GpuWork* gpuWork = reinterpret_cast<GpuWork*>(cookie);
-    if (atomTag == android::util::GPU_WORK_PER_UID) {
+    if (atomTag == android::gpustats::GPU_WORK_PER_UID) {
         return gpuWork->pullWorkAtoms(data);
     }
 
@@ -417,7 +417,7 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullWorkAtoms(AStatsEventList* dat
             }
 
             ALOGI("pullWorkAtoms: adding stats for GPU ID %" PRIu32 "; UID %" PRIu32, gpuId, uid);
-            android::util::addAStatsEvent(data, int32_t{android::util::GPU_WORK_PER_UID},
+            android::gpustats::addAStatsEvent(data, int32_t{android::gpustats::GPU_WORK_PER_UID},
                                           // uid
                                           bitcast_int32(uid),
                                           // gpu_id
@@ -479,7 +479,7 @@ void GpuWork::clearMapIfNeeded() {
     uint64_t numEntries = globalData.value().num_map_entries;
 
     // If the map is <=75% full, we do nothing.
-    if (numEntries <= (kMaxTrackedGpuIdUids / 4) * 3) {
+    if (numEntries <= (MAX_TRACKED_GPU_ID_UIDS / 4) * 3) {
         return;
     }
 
@@ -511,7 +511,7 @@ void GpuWork::clearMap() {
 
     base::Result<GpuIdUid> key = mGpuWorkMap.getFirstKey();
 
-    for (size_t i = 0; i < kMaxTrackedGpuIdUids; ++i) {
+    for (size_t i = 0; i < MAX_TRACKED_GPU_ID_UIDS; ++i) {
         if (!key.ok()) {
             break;
         }

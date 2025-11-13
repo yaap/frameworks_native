@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <ftl/flags.h>
 #include <gui/PidUid.h>
 #include <input/Input.h>
 #include <ui/Transform.h>
@@ -73,7 +74,7 @@ struct TracedMotionEvent {
     ui::LogicalDisplayId displayId = ui::LogicalDisplayId::INVALID;
     int32_t action;
     int32_t actionButton;
-    int32_t flags;
+    ftl::Flags<MotionFlag> flags;
     int32_t metaState;
     int32_t buttonState;
     MotionClassification classification;
@@ -107,7 +108,7 @@ struct TracedEventMetadata {
 struct WindowDispatchArgs {
     TracedEvent eventEntry;
     nsecs_t deliveryTime;
-    int32_t resolvedFlags;
+    ftl::Flags<MotionFlag> resolvedMotionFlags;
     gui::Uid targetUid = gui::Uid::INVALID;
     int64_t vsyncId;
     int32_t windowId;

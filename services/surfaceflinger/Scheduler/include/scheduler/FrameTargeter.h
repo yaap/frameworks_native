@@ -107,7 +107,6 @@ protected:
     // signaled by now (unless that frame missed).
     std::pair<bool /* wouldBackpressure */, PresentFence> expectedSignaledPresentFence(
             Period vsyncPeriod, Period minFramePeriod) const;
-    std::array<PresentFence, 2> mPresentFencesLegacy;
     ui::RingBuffer<PresentFence, 5> mPresentFences;
 
     FrameTime mLastSignaledFrameTime;

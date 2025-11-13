@@ -123,13 +123,6 @@ flag {
 }
 
 flag {
-  name: "enable_keyboard_classifier"
-  namespace: "input"
-  description: "Keyboard classifier that classifies all keyboards into alphabetic or non-alphabetic"
-  bug: "263559234"
-}
-
-flag {
   name: "show_pointers_for_partial_screenshare"
   namespace: "input"
   description: "Show touch and pointer indicators when mirroring a single task"
@@ -148,13 +141,6 @@ flag {
   namespace: "input"
   description: "Collect quality metrics on framework palm rejection."
   bug: "341717757"
-}
-
-flag {
-  name: "enable_touchpad_no_focus_change"
-  namespace: "input"
-  description: "Prevents touchpad gesture changing window focus."
-  bug: "364460018"
 }
 
 flag {
@@ -224,6 +210,13 @@ flag {
 }
 
 flag {
+  name: "scale_cursor_speed_with_dpi"
+  namespace: "lse_desktop_experience"
+  description: "Scale the cursor speed based on display density"
+  bug: "367662715"
+}
+
+flag {
   name: "use_cloned_screen_coordinates_as_raw"
   namespace: "input"
   description: "Use the cloned window's layer stack (screen) space as the raw coordinate space for input going to clones"
@@ -248,6 +241,16 @@ flag {
   namespace: "input"
   description: "Set to true to enable display topology validation"
   bug: "401219231"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "use_topology_aware_flag"
+  namespace: "input"
+  description: "Require apps to use topology-aware flag to receive cross-display gestures"
+  bug: "401220484"
   metadata {
     purpose: PURPOSE_BUGFIX
   }

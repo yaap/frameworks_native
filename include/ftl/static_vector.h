@@ -28,6 +28,11 @@
 
 namespace android::ftl {
 
+template <typename T>
+constexpr T* unconst(const T* __from) {
+  return const_cast<T*>(__from);
+}
+
 constexpr struct IteratorRangeTag {
 } kIteratorRange;
 
@@ -162,7 +167,7 @@ class StaticVector final : details::ArrayTraits<T>,
     static_assert(N >= M, "Insufficient capacity");
 
     // Same logic as swap<true>, though M need not be equal to N.
-    std::uninitialized_move(other.begin(), other.end(), begin());
+    std::uninitialized_move(other.begin(), other.end(), unconst(begin()));
     std::destroy(other.begin(), other.end());
     std::swap(size_, other.size_);
   }
@@ -412,7 +417,7 @@ void StaticVector<T, N>::swap(StaticVector& other) {
 
   // Move elements [min, max) and destroy their source for destructor side effects.
   const auto [first, last] = std::make_pair(from->begin() + min, from->begin() + max);
-  std::uninitialized_move(first, last, to->begin() + min);
+  std::uninitialized_move(first, last, unconst(to->begin() + min));
   std::destroy(first, last);
 
   std::swap(size_, other.size_);

@@ -646,8 +646,8 @@ TEST_F(OutputTest, layerFiltering) {
     mOutput->setLayerFilter({layerStack1, true});
 
     // It excludes layers with no layer stack, internal-only or not.
-    EXPECT_FALSE(mOutput->includesLayer({ui::INVALID_LAYER_STACK, false}));
-    EXPECT_FALSE(mOutput->includesLayer({ui::INVALID_LAYER_STACK, true}));
+    EXPECT_FALSE(mOutput->includesLayer({ui::UNASSIGNED_LAYER_STACK, false}));
+    EXPECT_FALSE(mOutput->includesLayer({ui::UNASSIGNED_LAYER_STACK, true}));
 
     // It includes layers on layerStack1, internal-only or not.
     EXPECT_TRUE(mOutput->includesLayer({layerStack1, false}));
@@ -685,10 +685,10 @@ TEST_F(OutputTest, layerFilteringWithCompositionState) {
     mOutput->setLayerFilter({layerStack1, true});
 
     // It excludes layers with no layer stack, internal-only or not.
-    layer.layerFEState.outputFilter = {ui::INVALID_LAYER_STACK, false};
+    layer.layerFEState.outputFilter = {ui::UNASSIGNED_LAYER_STACK, false};
     EXPECT_FALSE(mOutput->includesLayer(layerFE));
 
-    layer.layerFEState.outputFilter = {ui::INVALID_LAYER_STACK, true};
+    layer.layerFEState.outputFilter = {ui::UNASSIGNED_LAYER_STACK, true};
     EXPECT_FALSE(mOutput->includesLayer(layerFE));
 
     // It includes layers on layerStack1, internal-only or not.
@@ -1882,8 +1882,8 @@ TEST_F(OutputEnsureOutputLayerIfVisibleTest, coverageAccumulatesWithShadowsTest)
 
     mCoverageState.dirtyRegion = Region(Rect(0, 0, 500, 500));
     // half of the layer including the casting shadow is covered and opaque
-    mCoverageState.aboveCoveredLayers = Region(Rect(40, 40, 100, 260));
-    mCoverageState.aboveOpaqueLayers = Region(Rect(40, 40, 100, 260));
+    mCoverageState.aboveCoveredLayers = Region(Rect(30, 30, 100, 270));
+    mCoverageState.aboveOpaqueLayers = Region(Rect(30, 30, 100, 270));
 
     EXPECT_CALL(mOutput, ensureOutputLayer(Eq(0u), Eq(mLayer.layerFE)))
             .WillOnce(Return(&mLayer.outputLayer));
@@ -1891,16 +1891,16 @@ TEST_F(OutputEnsureOutputLayerIfVisibleTest, coverageAccumulatesWithShadowsTest)
     ensureOutputLayerIfVisible();
 
     const Region kExpectedDirtyRegion = Region(Rect(0, 0, 500, 500));
-    const Region kExpectedAboveCoveredRegion = Region(Rect(40, 40, 160, 260));
+    const Region kExpectedAboveCoveredRegion = Region(Rect(30, 30, 170, 270));
     // add starting opaque region to the opaque half of the casting layer bounds
     const Region kExpectedAboveOpaqueRegion =
-            Region(Rect(40, 40, 100, 260)).orSelf(Rect(100, 50, 150, 250));
-    const Region kExpectedLayerVisibleRegion = Region(Rect(100, 40, 160, 260));
+            Region(Rect(30, 30, 100, 270)).orSelf(Rect(100, 50, 150, 250));
+    const Region kExpectedLayerVisibleRegion = Region(Rect(100, 30, 170, 270));
     const Region kExpectedoutputSpaceLayerVisibleRegion = Region(Rect(100, 50, 150, 250));
-    const Region kExpectedLayerCoveredRegion = Region(Rect(40, 40, 100, 260));
-    const Region kExpectedLayerVisibleNonTransparentRegion = Region(Rect(100, 40, 160, 260));
+    const Region kExpectedLayerCoveredRegion = Region(Rect(30, 30, 100, 270));
+    const Region kExpectedLayerVisibleNonTransparentRegion = Region(Rect(100, 30, 170, 270));
     const Region kExpectedLayerShadowRegion =
-            Region(Rect(40, 40, 160, 260)).subtractSelf(Rect(50, 50, 150, 250));
+            Region(Rect(30, 30, 170, 270)).subtractSelf(Rect(50, 50, 150, 250));
 
     EXPECT_THAT(mCoverageState.dirtyRegion, RegionEq(kExpectedDirtyRegion));
     EXPECT_THAT(mCoverageState.aboveCoveredLayers, RegionEq(kExpectedAboveCoveredRegion));
@@ -1923,18 +1923,24 @@ TEST_F(OutputEnsureOutputLayerIfVisibleTest, shadowRegionOnlyTest) {
     mLayer.layerFEState.shadowSettings.length = 10.0f;
 
     mCoverageState.dirtyRegion = Region(Rect(0, 0, 500, 500));
-    // Casting layer is covered by an opaque region leaving only part of its shadow to be drawn
-    mCoverageState.aboveCoveredLayers = Region(Rect(40, 40, 150, 260));
-    mCoverageState.aboveOpaqueLayers = Region(Rect(40, 40, 150, 260));
+
+    // Casting layer is covered by an opaque region leaving only
+    // right part (x > 150) of its shadow to be drawn.
+    mCoverageState.aboveCoveredLayers = Region(Rect(30, 30, 150, 270));
+    mCoverageState.aboveOpaqueLayers = Region(Rect(30, 30, 150, 270));
 
     EXPECT_CALL(mOutput, ensureOutputLayer(Eq(0u), Eq(mLayer.layerFE)))
             .WillOnce(Return(&mLayer.outputLayer));
 
     ensureOutputLayerIfVisible();
 
-    const Region kExpectedLayerVisibleRegion = Region(Rect(150, 40, 160, 260));
+    // Bottom part of the layer + shadow.
+    // original layer : 50,  50, 150, 250
+    // layer + shadow : 30,  30, 170, 270
+    // visible portion: 150, 30, 170, 270
+    const Region kExpectedLayerVisibleRegion = Region(Rect(150, 30, 170, 270));
     const Region kExpectedLayerShadowRegion =
-            Region(Rect(40, 40, 160, 260)).subtractSelf(Rect(50, 50, 150, 250));
+            Region(Rect(30, 30, 170, 270)).subtractSelf(Rect(50, 50, 150, 250));
 
     EXPECT_THAT(mLayer.outputLayerState.visibleRegion, RegionEq(kExpectedLayerVisibleRegion));
     EXPECT_THAT(mLayer.outputLayerState.shadowRegion, RegionEq(kExpectedLayerShadowRegion));
@@ -1949,8 +1955,8 @@ TEST_F(OutputEnsureOutputLayerIfVisibleTest, takesNotSoEarlyOutifLayerWithShadow
 
     mCoverageState.dirtyRegion = Region(Rect(0, 0, 500, 500));
     // Casting layer and its shadows are covered by an opaque region
-    mCoverageState.aboveCoveredLayers = Region(Rect(40, 40, 160, 260));
-    mCoverageState.aboveOpaqueLayers = Region(Rect(40, 40, 160, 260));
+    mCoverageState.aboveCoveredLayers = Region(Rect(30, 30, 170, 270));
+    mCoverageState.aboveOpaqueLayers = Region(Rect(30, 30, 170, 270));
 
     ensureOutputLayerIfVisible();
 }
@@ -4324,11 +4330,7 @@ struct OutputComposeSurfacesTest_HandlesProtectedContent : public OutputComposeS
 
 TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifNoProtectedContentLayers) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer2.mLayerFEState.hasProtectedContent = false;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mRenderSurface, isProtected).WillOnce(Return(true));
@@ -4343,11 +4345,7 @@ TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifNoProtectedContentLa
 
 TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifNotEnabled) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
 
@@ -4370,11 +4368,7 @@ TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifNotEnabled) {
 
 TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifAlreadyEnabledEverywhere) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mRenderSurface, isProtected).WillOnce(Return(true));
@@ -4388,11 +4382,7 @@ TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifAlreadyEnabledEveryw
 
 TEST_F(OutputComposeSurfacesTest_HandlesProtectedContent, ifAlreadyEnabledInRenderSurface) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mRenderSurface, isProtected).WillOnce(Return(true));
@@ -5512,11 +5502,7 @@ struct OutputUpdateProtectedContentStateTest : public testing::Test {
 
 TEST_F(OutputUpdateProtectedContentStateTest, ifProtectedContentLayerComposeByHWC) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer1.mLayerFEState.hasProtectedContent = false;
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
@@ -5528,11 +5514,7 @@ TEST_F(OutputUpdateProtectedContentStateTest, ifProtectedContentLayerComposeByHW
 
 TEST_F(OutputUpdateProtectedContentStateTest, ifProtectedContentLayerComposeByClient) {
     SET_FLAG_FOR_TEST(flags::protected_if_client, true);
-    if (FlagManager::getInstance().display_protected()) {
-        mOutput.mState.isProtected = true;
-    } else {
-        mOutput.mState.isSecure = true;
-    }
+    mOutput.mState.isProtected = true;
     mLayer1.mLayerFEState.hasProtectedContent = false;
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));

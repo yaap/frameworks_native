@@ -89,7 +89,6 @@ cc_test {
     ],
     header_libs: ["bpf_headers"],
     shared_libs: [
-        "gpuservice_multiuser_flags_c_lib",
         "libbase",
         "libbinder",
         "libbpf_bcc",
@@ -98,7 +97,7 @@ cc_test {
         "liblog",
         "libprotobuf-cpp-lite",
         "libprotoutil",
-        "libstatslog",
+        "libstatslog_gpustats",
         "libstatspull",
         "libutils",
     ],

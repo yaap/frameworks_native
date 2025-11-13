@@ -28,7 +28,7 @@ struct ARpcServerTrusty* ARpcServerTrusty_newPerSession(struct AIBinder* (*)(con
                                                                              char*),
                                                         char*, void (*)(char*));
 void ARpcServerTrusty_delete(struct ARpcServerTrusty*);
-int ARpcServerTrusty_handleConnect(struct ARpcServerTrusty*, handle_t, const struct uuid*, void**);
+int ARpcServerTrusty_handleConnect(struct ARpcServerTrusty*, handle_t, const void*, size_t, void**);
 int ARpcServerTrusty_handleMessage(void*);
 void ARpcServerTrusty_handleDisconnect(void*);
 void ARpcServerTrusty_handleChannelCleanup(void*);

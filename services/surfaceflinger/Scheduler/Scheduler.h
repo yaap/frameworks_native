@@ -63,10 +63,6 @@ namespace android {
 class FenceTime;
 class TimeStats;
 
-namespace frametimeline {
-class TokenManager;
-} // namespace frametimeline
-
 namespace surfaceflinger {
 class Factory;
 } // namespace surfaceflinger
@@ -76,6 +72,7 @@ namespace scheduler {
 using GlobalSignals = RefreshRateSelector::GlobalSignals;
 
 class RefreshRateStats;
+class TokenManager;
 class VsyncConfiguration;
 class VsyncSchedule;
 
@@ -98,6 +95,8 @@ public:
     void setPacesetterDisplay(PhysicalDisplayId) REQUIRES(kMainThreadContext)
             EXCLUDES(mDisplayLock, mVsyncConfigLock);
 
+    PhysicalDisplayId getPacesetterDisplayId() const EXCLUDES(mDisplayLock);
+
     using RefreshRateSelectorPtr = std::shared_ptr<RefreshRateSelector>;
 
     using ConstVsyncSchedulePtr = std::shared_ptr<const VsyncSchedule>;
@@ -116,7 +115,7 @@ public:
 
     void run();
 
-    void initVsync(frametimeline::TokenManager&, std::chrono::nanoseconds workDuration);
+    void initVsync(TokenManager&, std::chrono::nanoseconds workDuration);
 
     using Impl::setDuration;
 
@@ -139,8 +138,7 @@ public:
         return std::move(future);
     }
 
-    void createEventThread(Cycle, frametimeline::TokenManager*,
-                           std::chrono::nanoseconds workDuration,
+    void createEventThread(Cycle, TokenManager*, std::chrono::nanoseconds workDuration,
                            std::chrono::nanoseconds readyDuration);
 
     sp<IDisplayEventConnection> createDisplayEventConnection(
@@ -151,6 +149,16 @@ public:
     void dispatchHotplug(PhysicalDisplayId, Hotplug);
 
     void dispatchHotplugError(int32_t errorCode);
+
+    // Returns true if the PhysicalDisplayId is the pacesetter.
+    bool updatePolicyContentRequirements(PhysicalDisplayId, const FrameRateMode&,
+                                         bool clearContentRequirements)
+            EXCLUDES(mPolicyLock, mDisplayLock);
+
+    // Returns true if the PhysicalDisplayId is the pacesetter.
+    bool onDisplayModeAndFrameRateOverridesChanged(PhysicalDisplayId, const FrameRateMode&,
+                                                   bool clearContentRequirements)
+            EXCLUDES(mPolicyLock, mDisplayLock);
 
     // Returns true if the PhysicalDisplayId is the pacesetter.
     bool onDisplayModeChanged(PhysicalDisplayId, const FrameRateMode&,
@@ -190,8 +198,9 @@ public:
     }
 
     void updatePhaseConfiguration(PhysicalDisplayId, Fps) EXCLUDES(mVsyncConfigLock);
-    void reloadPhaseConfiguration(Fps, Duration minSfDuration, Duration maxSfDuration,
-                                  Duration appDuration) EXCLUDES(mVsyncConfigLock);
+    void reloadPhaseConfiguration(const FrameRateMode&, Duration minSfDuration,
+                                  Duration maxSfDuration, Duration appDuration)
+            EXCLUDES(mVsyncConfigLock);
 
     VsyncConfigSet getCurrentVsyncConfigs() const EXCLUDES(mVsyncConfigLock) {
         std::scoped_lock lock{mVsyncConfigLock};
@@ -201,6 +210,12 @@ public:
     VsyncConfigSet getVsyncConfigsForRefreshRate(Fps refreshRate) const EXCLUDES(mVsyncConfigLock) {
         std::scoped_lock lock{mVsyncConfigLock};
         return mVsyncConfiguration->getConfigsForRefreshRate(refreshRate);
+    }
+
+    static nsecs_t getPresentationDeadline(Fps refreshRate, Duration sfVsyncOffset) {
+        // We add an additional 1ms to allow for processing time and
+        // differences between the ideal and actual refresh rate.
+        return refreshRate.getPeriodNsecs() - sfVsyncOffset.ns() + 1000000;
     }
 
     // Sets the render rate for the scheduler to run at.
@@ -234,7 +249,7 @@ public:
     void registerLayer(Layer*, FrameRateCompatibility);
     void recordLayerHistory(int32_t id, const LayerProps& layerProps, nsecs_t presentTime,
                             nsecs_t now, LayerHistory::LayerUpdateType) EXCLUDES(mDisplayLock);
-    void setModeChangePending(bool pending);
+    void setModeChangePending(PhysicalDisplayId, bool pending) EXCLUDES(mDisplayLock);
     void setDefaultFrameRateCompatibility(int32_t id, scheduler::FrameRateCompatibility);
     void setLayerProperties(int32_t id, const LayerProps&);
     void deregisterLayer(Layer*);
@@ -291,7 +306,7 @@ public:
     bool onCompositionPresented(nsecs_t presentTime);
 
     // Notifies the scheduler when the display size has changed. Called from SF's main thread
-    void onActiveDisplayAreaChanged(uint32_t displayArea);
+    void onPacesetterDisplaySizeChanged(ui::Size displaySize);
 
     // Stores the preferred refresh rate that an app should run at.
     // FrameRateOverride.refreshRateHz == 0 means no preference.
@@ -319,6 +334,9 @@ public:
     // Retrieves the overridden refresh rate for a given uid.
     std::optional<Fps> getFrameRateOverride(uid_t) const EXCLUDES(mDisplayLock);
 
+    std::pair<FrameRateMode, std::vector<FrameRateOverride>> getFrameRateOverrides()
+            EXCLUDES(mDisplayLock);
+
     Period getPacesetterVsyncPeriod() const EXCLUDES(mDisplayLock) {
         return pacesetterSelectorPtr()->getActiveMode().fps.getPeriod();
     }
@@ -335,7 +353,8 @@ public:
         return mLayerHistory.getLayerFramerate(now, id);
     }
 
-    void updateFrameRateOverrides(GlobalSignals, Fps displayRefreshRate) EXCLUDES(mPolicyLock);
+    // Returns true if frame rate overrides has changed.
+    bool updateFrameRateOverrides(GlobalSignals, Fps displayRefreshRate) EXCLUDES(mPolicyLock);
 
     // Returns true if the small dirty detection is enabled for the appId.
     bool supportSmallDirtyDetection(int32_t appId) {
@@ -374,7 +393,7 @@ private:
     }
 
     // Update feature state machine to given state when corresponding timer resets or expires.
-    void kernelIdleTimerCallback(TimerState) EXCLUDES(mDisplayLock);
+    void kernelIdleTimerCallback(PhysicalDisplayId, TimerState) EXCLUDES(mDisplayLock);
     void idleTimerCallback(TimerState);
     void touchTimerCallback(TimerState);
     void displayPowerTimerCallback(TimerState);
@@ -534,6 +553,7 @@ private:
         FrameTargeterPtr targeterPtr;
 
         hal::PowerMode powerMode = hal::PowerMode::OFF;
+        bool isModeChangePending = false;
     };
 
     using DisplayRef = std::reference_wrapper<Display>;
@@ -542,8 +562,8 @@ private:
     ui::PhysicalDisplayMap<PhysicalDisplayId, Display> mDisplays GUARDED_BY(mDisplayLock)
             GUARDED_BY(kMainThreadContext);
 
-    ftl::Optional<PhysicalDisplayId> mPacesetterDisplayId GUARDED_BY(mDisplayLock)
-            GUARDED_BY(kMainThreadContext);
+    // May be read from any thread, but must only be written from the main thread.
+    ftl::Optional<PhysicalDisplayId> mPacesetterDisplayId GUARDED_BY(mDisplayLock);
 
     ftl::Optional<DisplayRef> pacesetterDisplayLocked() REQUIRES(mDisplayLock) {
         return static_cast<const Scheduler*>(this)->pacesetterDisplayLocked().transform(

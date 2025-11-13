@@ -40,19 +40,10 @@ namespace android {
 std::tuple<sp<BufferItemConsumer>, sp<Surface>> BufferItemConsumer::create(
         uint64_t consumerUsage, int bufferCount, bool controlledByApp,
         bool isConsumerSurfaceFlinger) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     sp<BufferItemConsumer> bufferItemConsumer =
             sp<BufferItemConsumer>::make(consumerUsage, bufferCount, controlledByApp,
                                          isConsumerSurfaceFlinger);
     return {bufferItemConsumer, bufferItemConsumer->getSurface()};
-#else
-    sp<IGraphicBufferProducer> igbp;
-    sp<IGraphicBufferConsumer> igbc;
-    BufferQueue::createBufferQueue(&igbp, &igbc, isConsumerSurfaceFlinger);
-    sp<BufferItemConsumer> bufferItemConsumer =
-            sp<BufferItemConsumer>::make(igbc, consumerUsage, bufferCount, controlledByApp);
-    return {bufferItemConsumer, sp<Surface>::make(igbp, controlledByApp)};
-#endif
 }
 
 sp<BufferItemConsumer> BufferItemConsumer::create(const sp<IGraphicBufferConsumer>& consumer,
@@ -61,7 +52,6 @@ sp<BufferItemConsumer> BufferItemConsumer::create(const sp<IGraphicBufferConsume
     return sp<BufferItemConsumer>::make(consumer, consumerUsage, bufferCount, controlledByApp);
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 BufferItemConsumer::BufferItemConsumer(uint64_t consumerUsage, int bufferCount,
                                        bool controlledByApp, bool isConsumerSurfaceFlinger)
       : ConsumerBase(controlledByApp, isConsumerSurfaceFlinger) {
@@ -75,7 +65,6 @@ BufferItemConsumer::BufferItemConsumer(const sp<IGraphicBufferProducer>& produce
       : ConsumerBase(producer, consumer, controlledByApp) {
     initialize(consumerUsage, bufferCount);
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
 BufferItemConsumer::BufferItemConsumer(
         const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,

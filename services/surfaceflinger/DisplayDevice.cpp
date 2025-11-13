@@ -475,23 +475,28 @@ void DisplayDevice::onVrrIdle(bool idle) {
     }
 }
 
-void DisplayDevice::animateOverlay() {
+void DisplayDevice::animateRefreshRateOverlay() {
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->animate();
     }
-    if (mHdrSdrRatioOverlay) {
-        // hdr sdr ratio is designed to be on the top right of the screen,
-        // therefore, we need to re-calculate the display's width and height
-        if (mIsOrientationChanged) {
-            auto width = getWidth();
-            auto height = getHeight();
-            if (mOrientation == ui::ROTATION_90 || mOrientation == ui::ROTATION_270) {
-                std::swap(width, height);
-            }
-            mHdrSdrRatioOverlay->setViewport({width, height});
-        }
-        mHdrSdrRatioOverlay->animate();
+}
+
+void DisplayDevice::animateHdrSdrRatioOverlay() {
+    if (!mHdrSdrRatioOverlay) {
+        return;
     }
+
+    // hdr sdr ratio is designed to be on the top right of the screen,
+    // therefore, we need to re-calculate the display's width and height
+    if (mIsOrientationChanged) {
+        auto width = getWidth();
+        auto height = getHeight();
+        if (mOrientation == ui::ROTATION_90 || mOrientation == ui::ROTATION_270) {
+            std::swap(width, height);
+        }
+        mHdrSdrRatioOverlay->setViewport({width, height});
+    }
+    mHdrSdrRatioOverlay->animate();
 }
 
 void DisplayDevice::adjustRefreshRate(Fps pacesetterDisplayRefreshRate) {

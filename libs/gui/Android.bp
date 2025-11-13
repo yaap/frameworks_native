@@ -89,11 +89,13 @@ cc_library_headers {
 filegroup {
     name: "guiconstants_aidl",
     srcs: [
+        "android/gui/BorderSettings.aidl",
+        "android/gui/BoxShadowSettings.aidl",
         "android/gui/DropInputMode.aidl",
+        "android/gui/EarlyWakeupInfo.aidl",
         "android/gui/StalledTransactionInfo.aidl",
         "android/**/TouchOcclusionMode.aidl",
         "android/gui/TrustedOverlay.aidl",
-        "android/gui/BorderSettings.aidl",
     ],
 }
 
@@ -296,6 +298,11 @@ filegroup {
 cc_defaults {
     name: "libgui-defaults",
     defaults: ["libgui_bufferqueue-defaults"],
+    tidy: true,
+    tidy_flags: [
+        // Only check our headers
+        "--header-filter=^.*frameworks/native/libs/gui/.*.h$",
+    ],
     static_libs: [
         "libgui_aidl_static",
         "libgui_window_info_static",
@@ -348,6 +355,10 @@ cc_defaults {
         "libsurfaceflingerflags",
     ],
 
+    shared_libs: [
+        "libaconfig_storage_read_api_cc",
+    ],
+
     afdo: true,
 
     lto: {
@@ -394,17 +405,21 @@ filegroup {
     srcs: [
         "BatchBufferOps.cpp",
         "BufferItem.cpp",
+        "BufferItemConsumer.cpp",
         "BufferQueue.cpp",
         "BufferQueueConsumer.cpp",
         "BufferQueueCore.cpp",
         "BufferQueueProducer.cpp",
         "BufferQueueThreadState.cpp",
         "BufferSlot.cpp",
+        "ConsumerBase.cpp",
+        "FenceMonitor.cpp",
         "FrameRateUtils.cpp",
         "FrameTimestamps.cpp",
         "GLConsumerUtils.cpp",
         "HdrMetadata.cpp",
         "IGraphicBufferProducerFlattenables.cpp",
+        "Surface.cpp",
         "bufferqueue/1.0/Conversion.cpp",
         "bufferqueue/1.0/H2BProducerListener.cpp",
         "bufferqueue/1.0/WProducerListener.cpp",

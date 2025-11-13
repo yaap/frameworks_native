@@ -25,7 +25,6 @@
 #include <common/FlagManager.h>
 #include <ftl/flags.h>
 #include <gui/LayerState.h>
-#include <gui/TransactionState.h>
 #include <system/window.h>
 
 namespace android {
@@ -46,31 +45,41 @@ public:
     uint32_t parentId = UNASSIGNED_LAYER_ID;
     uint32_t relativeParentId = UNASSIGNED_LAYER_ID;
     uint32_t touchCropId = UNASSIGNED_LAYER_ID;
+    uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
 };
 
 struct QueuedTransactionState {
     QueuedTransactionState() = default;
 
-    QueuedTransactionState(TransactionState&& transactionState,
-                           std::vector<ResolvedComposerState>&& composerStates,
-                           std::vector<uint64_t>&& uncacheBufferIds, int64_t postTime,
-                           int originPid, int originUid)
-          : frameTimelineInfo(std::move(transactionState.mFrameTimelineInfo)),
-            states(composerStates),
-            displays(std::move(transactionState.mDisplayStates)),
-            flags(transactionState.mFlags),
-            applyToken(transactionState.mApplyToken),
-            inputWindowCommands(std::move(transactionState.mInputWindowCommands)),
-            desiredPresentTime(transactionState.mDesiredPresentTime),
-            isAutoTimestamp(transactionState.mIsAutoTimestamp),
+    QueuedTransactionState(const FrameTimelineInfo& frameTimelineInfo,
+                           std::vector<ResolvedComposerState>& composerStates,
+                           const Vector<DisplayState>& displayStates, uint32_t transactionFlags,
+                           const sp<IBinder>& applyToken,
+                           const InputWindowCommands& inputWindowCommands,
+                           int64_t desiredPresentTime, bool isAutoTimestamp,
+                           std::vector<uint64_t> uncacheBufferIds, int64_t postTime,
+                           bool hasListenerCallbacks,
+                           std::vector<ListenerCallbacks> listenerCallbacks, int originPid,
+                           int originUid, uint64_t transactionId,
+                           std::vector<uint64_t> mergedTransactionIds,
+                           std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos)
+          : frameTimelineInfo(frameTimelineInfo),
+            states(std::move(composerStates)),
+            displays(displayStates),
+            flags(transactionFlags),
+            applyToken(applyToken),
+            inputWindowCommands(inputWindowCommands),
+            desiredPresentTime(desiredPresentTime),
+            isAutoTimestamp(isAutoTimestamp),
             uncacheBufferIds(std::move(uncacheBufferIds)),
             postTime(postTime),
-            hasListenerCallbacks(transactionState.mHasListenerCallbacks),
-            listenerCallbacks(std::move(transactionState.mListenerCallbacks)),
+            hasListenerCallbacks(hasListenerCallbacks),
+            listenerCallbacks(std::move(listenerCallbacks)),
             originPid(originPid),
             originUid(originUid),
-            id(transactionState.getId()),
-            mergedTransactionIds(std::move(transactionState.mMergedTransactionIds)) {}
+            id(transactionId),
+            mergedTransactionIds(std::move(mergedTransactionIds)),
+            earlyWakeupInfos(std::move(earlyWakeupInfos)) {}
 
     // Invokes `void(const layer_state_t&)` visitor for matching layers.
     template <typename Visitor>
@@ -105,22 +114,15 @@ struct QueuedTransactionState {
 
         for (const auto& state : states) {
             const bool frameRateChanged = state.state.what & layer_state_t::eFrameRateChanged;
-            if (FlagManager::getInstance().vrr_bugfix_24q4()) {
-                const bool frameRateIsNoVote = frameRateChanged &&
-                        state.state.frameRateCompatibility == ANATIVEWINDOW_FRAME_RATE_NO_VOTE;
-                const bool frameRateCategoryChanged =
-                        state.state.what & layer_state_t::eFrameRateCategoryChanged;
-                const bool frameRateCategoryIsNoPreference = frameRateCategoryChanged &&
-                        state.state.frameRateCategory ==
-                                ANATIVEWINDOW_FRAME_RATE_CATEGORY_NO_PREFERENCE;
-                if (!frameRateIsNoVote && !frameRateCategoryIsNoPreference) {
-                    return true;
-                }
-            } else {
-                if (!frameRateChanged ||
-                    state.state.frameRateCompatibility != ANATIVEWINDOW_FRAME_RATE_NO_VOTE) {
-                    return true;
-                }
+            const bool frameRateIsNoVote = frameRateChanged &&
+                    state.state.frameRateCompatibility == ANATIVEWINDOW_FRAME_RATE_NO_VOTE;
+            const bool frameRateCategoryChanged =
+                    state.state.what & layer_state_t::eFrameRateCategoryChanged;
+            const bool frameRateCategoryIsNoPreference = frameRateCategoryChanged &&
+                    state.state.frameRateCategory ==
+                            ANATIVEWINDOW_FRAME_RATE_CATEGORY_NO_PREFERENCE;
+            if (!frameRateIsNoVote && !frameRateCategoryIsNoPreference) {
+                return true;
             }
         }
 
@@ -129,7 +131,7 @@ struct QueuedTransactionState {
 
     FrameTimelineInfo frameTimelineInfo;
     std::vector<ResolvedComposerState> states;
-    std::vector<DisplayState> displays;
+    Vector<DisplayState> displays;
     uint32_t flags;
     sp<IBinder> applyToken;
     InputWindowCommands inputWindowCommands;
@@ -144,6 +146,7 @@ struct QueuedTransactionState {
     uint64_t id;
     bool sentFenceTimeoutWarning = false;
     std::vector<uint64_t> mergedTransactionIds;
+    std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos;
     ftl::Flags<adpf::Workload> workloadHint;
 };
 

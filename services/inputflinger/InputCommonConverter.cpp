@@ -348,10 +348,10 @@ MotionEvent toMotionEvent(const NotifyMotionArgs& args, const ui::Transform* tra
 
     MotionEvent event;
     event.initialize(args.id, args.deviceId, args.source, args.displayId, *hmac, args.action,
-                     args.actionButton, args.flags, args.edgeFlags, args.metaState,
-                     args.buttonState, args.classification, *transform, args.xPrecision,
-                     args.yPrecision, args.xCursorPosition, args.yCursorPosition, *rawTransform,
-                     args.downTime, args.eventTime, args.getPointerCount(),
+                     args.actionButton, ftl::Flags<MotionFlag>(args.flags), args.edgeFlags,
+                     args.metaState, args.buttonState, args.classification, *transform,
+                     args.xPrecision, args.yPrecision, args.xCursorPosition, args.yCursorPosition,
+                     *rawTransform, args.downTime, args.eventTime, args.getPointerCount(),
                      args.pointerProperties.data(), args.pointerCoords.data());
     return event;
 }

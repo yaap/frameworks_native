@@ -29,6 +29,8 @@ typedef  int  uid_t;
 // ---------------------------------------------------------------------------
 namespace android {
 
+class BinderStatsSpscQueue;
+
 /**
  * Kernel binder thread state. All operations here refer to kernel binder. This
  * object is allocated per-thread.
@@ -180,8 +182,6 @@ public:
     [[nodiscard]] status_t addFrozenStateChangeCallback(int32_t handle, BpBinder* proxy);
     [[nodiscard]] status_t removeFrozenStateChangeCallback(int32_t handle, BpBinder* proxy);
 
-    LIBBINDER_EXPORTED static void shutdown();
-
     // Call this to disable switching threads to background scheduling when
     // receiving incoming IPC calls.  This is specifically here for the
     // Android system process, since it expects to have background apps calling
@@ -257,6 +257,9 @@ private:
             int32_t             mStrictModePolicy;
             int32_t             mLastTransactionBinderFlags;
             CallRestriction     mCallRestriction;
+#ifdef BINDER_WITH_OBSERVERS
+            std::shared_ptr<BinderStatsSpscQueue> mBinderStatsQueue;
+#endif
 };
 
 } // namespace android

@@ -76,6 +76,11 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool contentOpaque;
     bool layerOpaqueFlagSet;
     RoundedCornerState roundedCorner;
+    // roundedCorner of the parent but in local space.
+    RoundedCornerState parentRoundedCorner;
+    // geomLayerCrop of the parent but in local space.
+    FloatRect parentGeomLayerCrop;
+
     FloatRect transformedBounds;
     Rect transformedBoundsWithoutTransparentRegion;
     bool premultipliedAlpha;
@@ -109,7 +114,7 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     uint32_t touchCropId;
     gui::Uid uid = gui::Uid::INVALID;
     gui::Pid pid = gui::Pid::INVALID;
-    enum class Reachablilty : uint32_t {
+    enum class Reachability : uint32_t {
         // Can traverse the hierarchy from a root node and reach this snapshot
         Reachable,
         // Cannot traverse the hierarchy from a root node and reach this snapshot
@@ -135,7 +140,7 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
         // and input.
         ReachableByRelativeParent
     };
-    Reachablilty reachablilty;
+    Reachability reachability;
     // True when the surfaceDamage is recognized as a small area update.
     bool isSmallDirty = false;
 
@@ -149,7 +154,8 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool hasBlur() const;
     bool hasBufferOrSidebandStream() const;
     bool hasEffect() const;
-    bool hasOutline() const;
+    bool hasBoxShadowSettings() const;
+    bool hasBorderSettings() const;
     bool hasSomethingToDraw() const;
     bool isContentOpaque() const;
     bool isHiddenByPolicy() const;

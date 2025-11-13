@@ -51,6 +51,7 @@ public:
                                                 const PointerProperties* pointerProperties,
                                                 const PointerCoords* pointerCoords, int32_t flags,
                                                 int32_t buttonState);
+    std::string dump() const;
 
     void resetDevice(int32_t deviceId);
 

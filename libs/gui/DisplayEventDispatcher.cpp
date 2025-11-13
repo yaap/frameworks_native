@@ -27,10 +27,10 @@
 #include <utils/Timers.h>
 #include <utils/Trace.h>
 
-#include <com_android_graphics_libgui_flags.h>
+#include <com_android_graphics_surfaceflinger_flags.h>
 
 namespace android {
-using namespace com::android::graphics::libgui;
+using namespace com::android::graphics::surfaceflinger;
 
 // Number of events to read at a time from the DisplayEventDispatcher pipe.
 // The value should be large enough that we can quickly drain the pipe
@@ -177,7 +177,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     *outVsyncEventData = ev.vsync.vsyncData;
 
                     // Trace the RenderRate for this app
-                    if (ATRACE_ENABLED() && flags::trace_frame_rate_override()) {
+                    if (ATRACE_ENABLED()) {
                         const auto frameInterval = ev.vsync.vsyncData.frameInterval;
                         int fps = frameInterval > 0 ? 1e9f / frameInterval : 0;
                         ATRACE_INT("RenderRate", fps);
@@ -193,8 +193,22 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     }
                     break;
                 case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
+                    LOG_ALWAYS_FATAL_IF(flags::unify_refresh_rate_callbacks(),
+                                        "dispatchModeChanged should not be sent when"
+                                        " refresh rate callbacks are unified");
                     dispatchModeChanged(ev.header.timestamp, ev.header.displayId,
-                                        ev.modeChange.modeId, ev.modeChange.vsyncPeriod);
+                                        ev.modeChange.modeId, ev.modeChange.vsyncPeriod,
+                                        ev.modeChange.appVsyncOffset,
+                                        ev.modeChange.presentationDeadline);
+                    break;
+                case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
+                    dispatchModeChangedWithFrameRateOverrides(ev.header.timestamp,
+                                                              ev.header.displayId,
+                                                              ev.modeChange.modeId,
+                                                              ev.modeChange.vsyncPeriod,
+                                                              ev.modeChange.appVsyncOffset,
+                                                              ev.modeChange.presentationDeadline,
+                                                              std::move(mFrameRateOverrides));
                     break;
                 case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);
@@ -203,6 +217,9 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     mFrameRateOverrides.emplace_back(ev.frameRateOverride);
                     break;
                 case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
+                    LOG_ALWAYS_FATAL_IF(flags::unify_refresh_rate_callbacks(),
+                                        "dispatchFrameRateOverrides should not be sent when"
+                                        " refresh rate callbacks are unified");
                     dispatchFrameRateOverrides(ev.header.timestamp, ev.header.displayId,
                                                std::move(mFrameRateOverrides));
                     break;

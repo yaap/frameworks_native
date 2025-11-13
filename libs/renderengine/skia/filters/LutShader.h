@@ -23,12 +23,15 @@
 #include <gui/DisplayLuts.h>
 #include <ui/GraphicTypes.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 
 class LutShader {
 public:
+    LutShader(RuntimeEffectManager& effectManager);
     sk_sp<SkShader> lutShader(sk_sp<SkShader>& input, std::shared_ptr<gui::DisplayLuts> displayLuts,
                               ui::Dataspace srcDataspace, sk_sp<SkColorSpace> outColorSpace);
 
@@ -37,6 +40,7 @@ private:
                                       const int32_t offset, const int32_t length,
                                       const int32_t dimension, const int32_t size,
                                       const int32_t samplingKey, ui::Dataspace srcDataspace);
+    sk_sp<SkRuntimeEffect> mEffect;
     std::unique_ptr<SkRuntimeShaderBuilder> mBuilder;
 };
 

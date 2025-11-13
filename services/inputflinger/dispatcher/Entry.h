@@ -20,6 +20,7 @@
 #include "InputTargetFlags.h"
 #include "trace/EventTrackerInterface.h"
 
+#include <ftl/flags.h>
 #include <gui/InputApplication.h>
 #include <input/Input.h>
 #include <stdint.h>
@@ -159,7 +160,7 @@ struct MotionEntry : EventEntry {
     ui::LogicalDisplayId displayId;
     int32_t action;
     int32_t actionButton;
-    int32_t flags;
+    ftl::Flags<MotionFlag> flags;
     int32_t metaState;
     int32_t buttonState;
     MotionClassification classification;
@@ -177,10 +178,10 @@ struct MotionEntry : EventEntry {
 
     MotionEntry(int32_t id, std::shared_ptr<InjectionState> injectionState, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, ui::LogicalDisplayId displayId,
-                uint32_t policyFlags, int32_t action, int32_t actionButton, int32_t flags,
-                int32_t metaState, int32_t buttonState, MotionClassification classification,
-                int32_t edgeFlags, float xPrecision, float yPrecision, float xCursorPosition,
-                float yCursorPosition, nsecs_t downTime,
+                uint32_t policyFlags, int32_t action, int32_t actionButton,
+                ftl::Flags<MotionFlag> flags, int32_t metaState, int32_t buttonState,
+                MotionClassification classification, int32_t edgeFlags, float xPrecision,
+                float yPrecision, float xCursorPosition, float yCursorPosition, nsecs_t downTime,
                 const std::vector<PointerProperties>& pointerProperties,
                 const std::vector<PointerCoords>& pointerCoords);
     std::string getDescription() const override;
@@ -228,7 +229,8 @@ struct DispatchEntry {
     // An ANR will be triggered if a response for this entry is not received by timeoutTime
     nsecs_t timeoutTime;
 
-    int32_t resolvedFlags;
+    // These are only valid for EventEntry::Type::MOTION
+    ftl::Flags<MotionFlag> resolvedMotionFlags;
 
     // Information about the dispatch window used for tracing. We avoid holding a window handle
     // here because information in a window handle may be dynamically updated within the lifespan

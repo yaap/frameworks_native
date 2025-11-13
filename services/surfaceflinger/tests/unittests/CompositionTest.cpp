@@ -196,10 +196,9 @@ void CompositionTest::captureScreenComposition() {
     mFlinger.commit();
 
     const Rect sourceCrop(0, 0, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
-    constexpr bool regionSampling = false;
 
-    auto getLayerSnapshotsFn = mFlinger.getLayerSnapshotsForScreenshotsFn(mDisplay->getLayerStack(),
-                                                                          CaptureArgs::UNSET_UID);
+    auto layers =
+            mFlinger.getLayerSnapshotsForScreenshots(mDisplay->getLayerStack(), gui::Uid::INVALID);
 
     const uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN |
             GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE;
@@ -209,9 +208,9 @@ void CompositionTest::captureScreenComposition() {
                                                                       HAL_PIXEL_FORMAT_RGBA_8888, 1,
                                                                       usage);
 
-    auto future = mFlinger.renderScreenImpl(mDisplay, sourceCrop, ui::Dataspace::V0_SRGB,
-                                            getLayerSnapshotsFn, mCaptureScreenBuffer,
-                                            regionSampling, mDisplay->isSecure(),
+    auto future = mFlinger.renderScreenImpl(mDisplay, sourceCrop, ui::Dataspace::V0_SRGB, layers,
+                                            mCaptureScreenBuffer,
+                                            /* disableBlur */ false, mDisplay->isSecure(),
                                             /* seamlessTransition */ true);
     ASSERT_TRUE(future.valid());
     const auto fenceResult = future.get();

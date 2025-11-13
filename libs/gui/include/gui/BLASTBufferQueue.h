@@ -43,6 +43,7 @@ constexpr size_t kDequeueTimestampsMapSizeHint = 32;
 
 class BLASTBufferQueue;
 class BufferItemConsumer;
+class BufferReleaseReader;
 
 class BLASTBufferItemConsumer : public BufferItemConsumer {
 public:
@@ -60,26 +61,17 @@ public:
 
 protected:
     void onSidebandStreamChanged() override EXCLUDES(mMutex);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
     void onSetFrameRate(float frameRate, int8_t compatibility,
                         int8_t changeFrameRateStrategy) override;
-#endif
 
 private:
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     BLASTBufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
                             const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
                             int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
           : BufferItemConsumer(producer, consumer, consumerUsage, bufferCount, controlledByApp),
-#else
-    BLASTBufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
-          : BufferItemConsumer(consumer, consumerUsage, bufferCount, controlledByApp),
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
             mBLASTBufferQueue(std::move(bbq)),
             mCurrentlyConnected(false),
-            mPreviouslyConnected(false) {
-    }
+            mPreviouslyConnected(false) {}
 
     friend class sp<BLASTBufferItemConsumer>;
 
@@ -155,7 +147,7 @@ public:
 
     virtual ~BLASTBufferQueue();
 
-    void onFirstRef() override;
+    void onFirstRef() override final;
 
 private:
     // Not public to ensure construction via sp<>::make().
@@ -175,6 +167,7 @@ private:
     void createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
                            sp<IGraphicBufferConsumer>* outConsumer);
 
+    void initialize();
     void resizeFrameEventHistory(size_t newSize);
 
     status_t acquireNextBufferLocked(
@@ -284,7 +277,7 @@ private:
     std::function<void(SurfaceComposerClient::Transaction*)> mTransactionReadyCallback
             GUARDED_BY(mMutex);
     SurfaceComposerClient::Transaction* mSyncTransaction GUARDED_BY(mMutex);
-    std::vector<std::pair<uint64_t /* framenumber */, SurfaceComposerClient::Transaction>>
+    std::vector<std::tuple<uint64_t /* framenumber */, SurfaceComposerClient::Transaction>>
             mPendingTransactions GUARDED_BY(mMutex);
 
     std::queue<std::pair<uint64_t, FrameTimelineInfo>> mPendingFrameTimelines GUARDED_BY(mMutex);
@@ -344,45 +337,12 @@ private:
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
     // BufferReleaseChannel is used to communicate buffer releases from SurfaceFlinger to the
     // client.
-    std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint> mBufferReleaseConsumer;
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> mBufferReleaseProducer;
 
     void updateBufferReleaseProducer() REQUIRES(mMutex);
     void drainBufferReleaseConsumer();
 
-    // BufferReleaseReader is used to do blocking but interruptible reads from the buffer
-    // release channel. To implement this, BufferReleaseReader owns an epoll file descriptor that
-    // is configured to wake up when either the BufferReleaseReader::ConsumerEndpoint or an eventfd
-    // becomes readable. Interrupts are necessary because a free buffer may become available for
-    // reasons other than a buffer release from the producer.
-    class BufferReleaseReader {
-    public:
-        explicit BufferReleaseReader(BLASTBufferQueue&);
-
-        BufferReleaseReader(const BufferReleaseReader&) = delete;
-        BufferReleaseReader& operator=(const BufferReleaseReader&) = delete;
-
-        // Block until we can read a buffer release message.
-        //
-        // Returns:
-        // * OK if a ReleaseCallbackId and Fence were successfully read.
-        // * WOULD_BLOCK if the blocking read was interrupted by interruptBlockingRead.
-        // * TIMED_OUT if the blocking read timed out.
-        // * UNKNOWN_ERROR if something went wrong.
-        status_t readBlocking(ReleaseCallbackId& outId, sp<Fence>& outReleaseFence,
-                              uint32_t& outMaxAcquiredBufferCount, nsecs_t timeout);
-
-        void interruptBlockingRead();
-        void clearInterrupts();
-
-    private:
-        BLASTBufferQueue& mBbq;
-
-        android::base::unique_fd mEpollFd;
-        android::base::unique_fd mEventFd;
-    };
-
-    std::optional<BufferReleaseReader> mBufferReleaseReader;
+    std::shared_ptr<BufferReleaseReader> mBufferReleaseReader;
 #endif
 };
 

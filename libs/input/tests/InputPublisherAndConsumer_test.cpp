@@ -129,7 +129,7 @@ void verifyArgsEqualToEvent(const PublishMotionArgs& args, const MotionEvent& mo
     EXPECT_EQ(args.hmac, motionEvent.getHmac());
     EXPECT_EQ(args.action, motionEvent.getAction());
     EXPECT_EQ(args.downTime, motionEvent.getDownTime());
-    EXPECT_EQ(args.flags, motionEvent.getFlags());
+    EXPECT_EQ(args.flags, static_cast<int32_t>(motionEvent.getFlags().get()));
     EXPECT_EQ(args.edgeFlags, motionEvent.getEdgeFlags());
     EXPECT_EQ(args.metaState, motionEvent.getMetaState());
     EXPECT_EQ(args.buttonState, motionEvent.getButtonState());

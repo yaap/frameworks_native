@@ -314,6 +314,11 @@ SkiaRenderEngine::Contexts SkiaGLRenderEngine::createContexts() {
     return contexts;
 }
 
+bool SkiaGLRenderEngine::supportsForwardPixelKill() const {
+    // ARM gpu support this since 2013
+    constexpr std::string kArm = "ARM";
+    return GLExtensions::getInstance().getVendor() == kArm;
+}
 bool SkiaGLRenderEngine::supportsProtectedContentImpl() const {
     return mProtectedEGLContext != EGL_NO_CONTEXT;
 }

@@ -247,14 +247,6 @@ protected:
         bool hasButtonUnderPad;
         std::string uniqueDisplayId;
 
-        enum class GestureMode {
-            SINGLE_TOUCH,
-            MULTI_TOUCH,
-
-            ftl_last = MULTI_TOUCH
-        };
-        GestureMode gestureMode;
-
         bool wake;
 
         // The Universal Stylus Initiative (USI) protocol version supported by this device.
@@ -531,12 +523,6 @@ private:
     // in the number of pixels.Touches that are wider than this are translated
     // into freeform gestures.
     float mPointerGestureMaxSwipeWidth;
-
-    struct PointerDistanceHeapElement {
-        uint32_t currentPointerIndex : 8 {};
-        uint32_t lastPointerIndex : 8 {};
-        uint64_t distance : 48 {}; // squared distance
-    };
 
     enum class PointerUsage {
         NONE,
@@ -841,10 +827,10 @@ private:
     [[nodiscard]] NotifyMotionArgs dispatchMotion(
             nsecs_t when, nsecs_t readTime, uint32_t policyFlags, uint32_t source,
             ui::LogicalDisplayId displayId, int32_t action, int32_t actionButton, int32_t flags,
-            int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-            const PropertiesArray& properties, const CoordsArray& coords,
-            const IdToIndexArray& idToIndex, BitSet32 idBits, int32_t changedId, float xPrecision,
-            float yPrecision, nsecs_t downTime, MotionClassification classification) const;
+            int32_t metaState, int32_t buttonState, const PropertiesArray& properties,
+            const CoordsArray& coords, const IdToIndexArray& idToIndex, BitSet32 idBits,
+            int32_t changedId, float xPrecision, float yPrecision, nsecs_t downTime,
+            MotionClassification classification) const;
 
     // Returns if this touch device is a touch screen with an associated display.
     bool isTouchScreen();

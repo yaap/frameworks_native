@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTipcTrusty"
+#define LOG_TAG "libbinder.RpcTransportTipcTrusty"
 
 #include <inttypes.h>
 #include <trusty_ipc.h>

@@ -553,8 +553,8 @@ status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, int32_t 
                                 KeyEvent::getLabel(keyCode)));
     ALOGD_IF(debugTransportPublisher(),
              "channel '%s' publisher ~ %s: seq=%u, id=%d, deviceId=%d, source=%s, "
-             "action=%s, flags=0x%x, keyCode=%s, scanCode=%d, metaState=0x%x, repeatCount=%d,"
-             "downTime=%" PRId64 ", eventTime=%" PRId64,
+             "action=%s, flags=0x%x, keyCode=%s, scanCode=%d, metaState=0x%x, repeatCount=%d, "
+             "downTime=%" PRId64 "ns, eventTime=%" PRId64 "ns",
              mChannel->getName().c_str(), __func__, seq, eventId, deviceId,
              inputEventSourceToString(source).c_str(), KeyEvent::actionToString(action), flags,
              KeyEvent::getLabel(keyCode), scanCode, metaState, repeatCount, downTime, eventTime);
@@ -602,8 +602,8 @@ status_t InputPublisher::publishMotionEvent(
         ALOGD("channel '%s' publisher ~ %s: seq=%u, id=%d, deviceId=%d, source=%s, "
               "displayId=%s, "
               "action=%s, actionButton=0x%08x, flags=0x%x, edgeFlags=0x%x, "
-              "metaState=0x%x, buttonState=0x%x, classification=%s,"
-              "xPrecision=%f, yPrecision=%f, downTime=%" PRId64 ", eventTime=%" PRId64 ", "
+              "metaState=0x%x, buttonState=0x%x, classification=%s, "
+              "xPrecision=%f, yPrecision=%f, downTime=%" PRId64 "ns, eventTime=%" PRId64 "ns, "
               "pointerCount=%" PRIu32 "\n%s",
               mChannel->getName().c_str(), __func__, seq, eventId, deviceId,
               inputEventSourceToString(source).c_str(), displayId.toString().c_str(),

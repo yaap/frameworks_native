@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTipcAndroid"
+#define LOG_TAG "libbinder.RpcTransportTipcAndroid"
 
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportTipcAndroid.h>
@@ -190,6 +190,7 @@ private:
                 if (savedErrno == EMSGSIZE) {
                     // Buffer was too small, double it and retry
                     if (__builtin_mul_overflow(mReadBufferCapacity, 2, &mReadBufferCapacity)) {
+                        ALOGE("%s: read buffer mul_overflow", __FUNCTION__);
                         return NO_MEMORY;
                     }
                     mReadBuffer.reset(new (std::nothrow) uint8_t[mReadBufferCapacity]);

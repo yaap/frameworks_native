@@ -60,7 +60,15 @@ public:
     virtual void setDisplayViewports(const std::vector<DisplayViewport>& viewports) = 0;
     virtual std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId = ui::LogicalDisplayId::INVALID) = 0;
-    virtual vec2 getMouseCursorPosition(ui::LogicalDisplayId displayId) = 0;
+    /**
+     * Gets the current position of the mouse cursor on the specified display.
+     *
+     * Returns optional.empty if no cursor is available, or if existing cursor is not on
+     * supplied `displayId`.
+     *
+     * This method is inherently racy, and should only be used for test purposes.
+     */
+    virtual std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) = 0;
     virtual void setShowTouchesEnabled(bool enabled) = 0;
     virtual void setStylusPointerIconEnabled(bool enabled) = 0;
     /**
@@ -107,7 +115,7 @@ public:
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports) override;
     std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId) override;
-    vec2 getMouseCursorPosition(ui::LogicalDisplayId displayId) override;
+    std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) override;
     void setShowTouchesEnabled(bool enabled) override;
     void setStylusPointerIconEnabled(bool enabled) override;
     bool setPointerIcon(std::variant<std::unique_ptr<SpriteIcon>, PointerIconStyle> icon,

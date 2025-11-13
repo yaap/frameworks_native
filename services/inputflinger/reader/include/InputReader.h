@@ -52,7 +52,8 @@ struct StylusState;
 class InputReader : public InputReaderInterface {
 public:
     InputReader(std::shared_ptr<EventHubInterface> eventHub,
-                const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener);
+                const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener,
+                JNIEnv* env);
     virtual ~InputReader();
 
     void dump(std::string& dump) override;
@@ -177,6 +178,7 @@ protected:
     mutable std::mutex mLock;
 
 private:
+    JNIEnv* mJniEnv;
     std::unique_ptr<InputThread> mThread;
 
     std::condition_variable mReaderIsAliveCondition;

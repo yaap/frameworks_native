@@ -651,6 +651,102 @@ static void drawEdgeExtensionLayers(SkiaRenderEngine* renderengine, const Displa
     }
 }
 
+static void drawExtendedHDRFilteredImageLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
+                                               const std::shared_ptr<ExternalTexture>& dstTexture,
+                                               const std::shared_ptr<ExternalTexture>& srcTexture) {
+    const Rect& displayRect = display.physicalDisplay;
+    FloatRect rect(0, 0, displayRect.width(), displayRect.height());
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = rect,
+                            // The position transform doesn't matter when the reduced shader mode
+                            // in in effect. A matrix transform stage is always included.
+                            .positionTransform = mat4(),
+                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersCrop = rect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = true,
+                                                   .maxLuminanceNits = 0.f}},
+            .sourceDataspace = kExtendedHdrDataSpce,
+    };
+
+    for (auto roundedCornerRadius : {0.f, 50.f}) {
+        layer.geometry.roundedCornersRadius = {roundedCornerRadius, roundedCornerRadius};
+        for (auto alpha : {0.5f, 1.f}) {
+            layer.alpha = alpha;
+            std::vector<LayerSettings> layers;
+
+            for (auto layerWhitePoint : kLayerWhitePoints) {
+                layer.whitePointNits = layerWhitePoint;
+                layers.push_back(layer);
+            }
+            renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+        }
+    }
+}
+
+static void drawExtendedHDRFilteredImageShadowLayers(SkiaRenderEngine* renderengine,
+                                                     const DisplaySettings& display,
+                                                     const std::shared_ptr<ExternalTexture>& dstTexture,
+                                                     const std::shared_ptr<ExternalTexture>& srcTexture) {
+    const Rect& displayRect = display.physicalDisplay;
+    FloatRect rect(0, 0, displayRect.width(), displayRect.height());
+    FloatRect smallerRect(20, 20, displayRect.width()-20, displayRect.height()-20);
+
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = rect,
+                            // The position transform doesn't matter when the reduced shader mode
+                            // in in effect. A matrix transform stage is always included.
+                            .positionTransform = mat4(),
+                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersCrop = rect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = true,
+                                                   .maxLuminanceNits = 0.f}},
+            .sourceDataspace = kExtendedHdrDataSpce,
+    };
+
+    LayerSettings caster{
+            .geometry =
+                    Geometry{
+                            .boundaries = smallerRect,
+                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersCrop = smallerRect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer =srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = false,
+                                                   .maxLuminanceNits = 0.f}},
+            .alpha = 1,
+        .sourceDataspace = ui::Dataspace::V0_SRGB,
+    };
+
+    for (auto alpha : {0.5f, 1.f}) {
+        layer.alpha = alpha;
+
+        for (auto casterAlpha : {0.5f, 1.f}) {
+            caster.alpha = casterAlpha;
+
+            for (auto layerWhitePoint : kLayerWhitePoints) {
+                layer.whitePointNits = layerWhitePoint;
+
+                auto layers = std::vector<LayerSettings>{layer, caster};
+                renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+            }
+        }
+    }
+}
+
 //
 // The collection of shaders cached here were found by using perfetto to record shader compiles
 // during actions that involve RenderEngine, logging the layer settings, and the shader code
@@ -681,6 +777,16 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
                 .clip = displayRect,
                 .maxLuminance = 500,
                 .outputDataspace = kDestDataSpace,
+        };
+        DisplaySettings v0srgbDisplay{
+                .physicalDisplay = displayRect,
+                .clip = displayRect,
+                .maxLuminance = 1000,
+                .outputDataspace = ui::Dataspace::V0_SRGB,
+                .deviceHandlesColorTransform = true,
+                .targetLuminanceNits = 128.002f,
+                .dimmingStage = aidl::android::hardware::graphics::composer3::DimmingStage::GAMMA_OETF,
+                .renderIntent = aidl::android::hardware::graphics::composer3::RenderIntent::ENHANCE
         };
         DisplaySettings p3Display{
                 .physicalDisplay = displayRect,
@@ -841,8 +947,12 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
             drawExtendedHDRImageLayers(renderengine, p3Display, dstTexture, externalTexture);
             drawExtendedHDRImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
 
+            drawExtendedHDRFilteredImageLayers(renderengine, v0srgbDisplay, dstTexture, externalTexture);
+            drawExtendedHDRFilteredImageShadowLayers(renderengine, v0srgbDisplay, dstTexture, externalTexture);
+
             drawP3ImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
         }
+
 
         // draw one final layer synchronously to force GL submit
         LayerSettings layer{

@@ -32,6 +32,7 @@
 #pragma clang diagnostic pop
 
 #include <common/FlagManager.h>
+#include <common/test/FlagUtils.h>
 #include <gui/LayerMetadata.h>
 #include <log/log.h>
 #include <chrono>
@@ -74,11 +75,11 @@ struct HWComposerTest : testing::Test {
     Hwc2::mock::Composer* const mHal = new StrictMock<Hwc2::mock::Composer>();
     impl::HWComposer mHwc{std::unique_ptr<Hwc2::Composer>(mHal)};
 
-    void expectHotplugConnect(hal::HWDisplayId hwcDisplayId) {
-        constexpr uint8_t kPort = 255;
-        EXPECT_CALL(*mHal, getDisplayIdentificationData(hwcDisplayId, _, _))
-                .WillOnce(DoAll(SetArgPointee<1>(kPort),
-                                SetArgPointee<2>(getExternalEdid()), Return(HalError::NONE)));
+    void expectHotplugConnect(hal::HWDisplayId hwcDisplayId, uint8_t port = 255,
+                              const display::DisplayIdentificationData& data = getExternalEdid()) {
+        EXPECT_CALL(*mHal, getDisplayIdentificationData(hwcDisplayId, _, _, _))
+                .WillOnce(DoAll(SetArgPointee<1>(port), SetArgPointee<2>(data),
+                                Return(HalError::NONE)));
 
         EXPECT_CALL(*mHal, setClientTargetSlotCount(_));
         EXPECT_CALL(*mHal, setVsyncEnabled(hwcDisplayId, Hwc2::IComposerClient::Vsync::DISABLE));
@@ -474,6 +475,148 @@ TEST_F(HWComposerTest, onVsyncInvalid) {
     constexpr nsecs_t kTimestamp = 1;
     const auto displayIdOpt = mHwc.onVsync(kInvalidHwcDisplayId, kTimestamp);
     EXPECT_FALSE(displayIdOpt);
+}
+
+TEST_F(HWComposerTest, propagateHotplugReconnectStatus) {
+    constexpr hal::HWDisplayId kHwcDisplayId = 1;
+    constexpr uint8_t kPort = 0;
+    expectHotplugConnect(kHwcDisplayId, kPort, getExternalEdid());
+
+    const auto info1 = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info1);
+    EXPECT_EQ(display::HotplugStatus::Connected, info1->hotplugStatus);
+
+    // Emit another hotplug event on the same display, but with a different EDID. This should
+    // trigger a hotplug reconnect. Display identification data should not be fetched.
+    EXPECT_CALL(*mHal, getDisplayIdentificationData(kHwcDisplayId, _, _, _)).Times(0);
+    const auto info2 = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info2);
+
+    EXPECT_EQ(display::HotplugStatus::Reconnected, info2->hotplugStatus);
+    EXPECT_EQ(info1->id, info2->id);
+}
+
+TEST_F(HWComposerTest, displayIdConflictResolution) {
+    // Two different displays (connected to two different ports) produce the same EDID,
+    // which will result in the same EDID-based display ID.
+
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+
+    // First display is assigned a display ID with no issues.
+    constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
+    constexpr uint8_t kPort1 = 1;
+    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+
+    const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info1);
+
+    constexpr uint64_t kExpectedDisplayId1 = 4067182673952280501;
+    const auto physicalDisplayId1 = info1->id;
+    EXPECT_EQ(kExpectedDisplayId1, physicalDisplayId1.value);
+
+    // Second display's ID has to be modified due to conflict.
+    constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
+    constexpr uint8_t kPort2 = 2;
+    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+
+    const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info2);
+
+    // The resulting display's ID should be equal to the one it conflicted with, but with the 8 LSBs
+    // assigned as its port ID.
+    constexpr uint64_t kDisplayId1WithDisplayPort2 = (kExpectedDisplayId1 & ~0xFFULL) | kPort2;
+    const auto physicalDisplayId2 = info2->id;
+    EXPECT_NE(physicalDisplayId1, physicalDisplayId2);
+    EXPECT_EQ(kDisplayId1WithDisplayPort2, physicalDisplayId2.value);
+    EXPECT_EQ(info2->port, static_cast<uint8_t>(info2->id.value));
+}
+
+TEST_F(HWComposerTest, displayIdConflictResolutionWithInvertedPortBits) {
+    // Two different displays (connected to two different ports) produce the same EDID,
+    // which will result in the same EDID-based display ID.
+
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+
+    // First display is assigned a display ID with no issues.
+    constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
+    constexpr uint8_t kPort1 = 1;
+    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+
+    const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info1);
+
+    constexpr uint64_t kExpectedDisplayId1 = 4067182673952280501;
+    const auto physicalDisplayId1 = info1->id;
+    EXPECT_EQ(kExpectedDisplayId1, physicalDisplayId1.value);
+
+    // Second display's ID has to be modified due to conflict. However the 8 LSBs of the conflicting
+    // ID happen to be equal to its port ID (i.e. 181 in this case), so the resolution will invert
+    // the port ID.
+    constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
+    constexpr uint8_t kPort2 = 181;
+    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+
+    const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info2);
+
+    // The resulting display's ID should be equal to the one it conflicted with, but with the 8 LSBs
+    // assigned as its port ID.
+    constexpr uint64_t kDisplayId1WithInvertedDisplayPort2 =
+            (kExpectedDisplayId1 & ~0xFFULL) | static_cast<uint8_t>(~kPort2);
+    const auto physicalDisplayId2 = info2->id;
+    EXPECT_NE(physicalDisplayId1, physicalDisplayId2);
+    EXPECT_EQ(kDisplayId1WithInvertedDisplayPort2, physicalDisplayId2.value);
+    EXPECT_EQ(static_cast<uint8_t>(~info2->port), static_cast<uint8_t>(info2->id.value));
+}
+
+TEST_F(HWComposerTest, displayIdConflictResolutionFails) {
+    // Three different displays (connected to three different ports) produce the same EDID,
+    // which will result in the same EDID-based display ID.
+
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+
+    // First display is assigned a display ID with no issues.
+    constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
+    constexpr uint8_t kPort1 = 1;
+    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+
+    const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info1);
+
+    constexpr uint64_t kExpectedDisplayId1 = 4067182673952280501;
+    const auto physicalDisplayId1 = info1->id;
+    EXPECT_EQ(kExpectedDisplayId1, physicalDisplayId1.value);
+
+    // Second display's ID has to be modified due to conflict with the first display's ID. Use the
+    // port value 74, which is the inverted value of 181.
+    constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
+    constexpr uint8_t kPort2 = 74;
+    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+
+    const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
+    ASSERT_TRUE(info2);
+
+    // The resulting display's ID should be equal to the one it conflicted with, but with the 8 LSBs
+    // assigned as its port ID 74.
+    constexpr uint64_t kDisplayId1WithDisplayPort2 = (kExpectedDisplayId1 & ~0xFFULL) | kPort2;
+    const auto physicalDisplayId2 = info2->id;
+    EXPECT_NE(physicalDisplayId1, physicalDisplayId2);
+    EXPECT_EQ(kDisplayId1WithDisplayPort2, physicalDisplayId2.value);
+    EXPECT_EQ(info2->port, static_cast<uint8_t>(info2->id.value));
+
+    // Third display's ID has to be modified due to conflict. However the 8 LSBs of the conflicting
+    // ID happen to be equal to its port ID (i.e. 181 in this case), so the resolution will invert
+    // the port ID to 74 and use that.
+    constexpr hal::HWDisplayId kHwcDisplayId3 = 3;
+    constexpr uint8_t kPort3 = 181;
+    EXPECT_CALL(*mHal, getDisplayIdentificationData(kHwcDisplayId3, _, _, _))
+            .WillOnce(DoAll(SetArgPointee<1>(kPort3), SetArgPointee<2>(getExternalEdid()),
+                            Return(HalError::NONE)));
+
+    // Creation of the display should fail, since a display with an ID seeded with 74 in its 8 LSBs
+    // already exists.
+    const auto info3 = mHwc.onHotplug(kHwcDisplayId3, HWComposer::HotplugEvent::Connected);
+    ASSERT_FALSE(info3);
 }
 
 struct MockHWC2ComposerCallback final : StrictMock<HWC2::ComposerCallback> {

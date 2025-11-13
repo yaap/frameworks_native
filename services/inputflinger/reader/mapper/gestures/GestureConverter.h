@@ -106,7 +106,6 @@ private:
 
     const int32_t mDeviceId;
     InputReaderContext& mReaderContext;
-    const bool mEnableNoFocusChange;
     bool mEnableSystemGestures{true};
 
     bool mThreeFingerTapShortcutEnabled{false};

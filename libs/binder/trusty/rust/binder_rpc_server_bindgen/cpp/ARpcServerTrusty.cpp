@@ -72,9 +72,10 @@ void ARpcServerTrusty_delete(ARpcServerTrusty* rstr) {
     delete rstr;
 }
 
-int ARpcServerTrusty_handleConnect(ARpcServerTrusty* rstr, handle_t chan, const uuid* peer,
-                                   void** ctx_p) {
-    return RpcServerTrusty::handleConnectInternal(rstr->mRpcServer.get(), chan, peer, ctx_p);
+int ARpcServerTrusty_handleConnect(ARpcServerTrusty* rstr, handle_t chan, const void* clientId,
+                                   size_t clientIdLen, void** ctx_p) {
+    return RpcServerTrusty::handleConnectInternal(rstr->mRpcServer.get(), chan, clientId,
+                                                  clientIdLen, ctx_p);
 }
 
 int ARpcServerTrusty_handleMessage(void* ctx) {

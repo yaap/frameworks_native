@@ -27,7 +27,7 @@ cc_benchmark {
         "libinputflinger_base",
         "libinputreporter",
         "liblog",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libutils",
     ],
     static_libs: [

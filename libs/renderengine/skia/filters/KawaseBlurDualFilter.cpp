@@ -34,14 +34,17 @@
 #include <log/log.h>
 #include <utils/Trace.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 
-KawaseBlurDualFilter::KawaseBlurDualFilter() : BlurFilter() {
+KawaseBlurDualFilter::KawaseBlurDualFilter(RuntimeEffectManager& effectManager)
+      : BlurFilter(effectManager) {
     // A shader to sample each vertex of a square, plus the original fragment coordinate,
     // using a total of 5 samples.
-    SkString lowSampleBlurString(R"(
+    const SkString kLowSampleBlurString(R"(
         uniform shader child;
         uniform float in_blurOffset;
         uniform float in_crossFade;
@@ -66,7 +69,7 @@ KawaseBlurDualFilter::KawaseBlurDualFilter() : BlurFilter() {
 
     // A shader to sample each vertex of a unit regular heptagon, plus the original fragment
     // coordinate, using a total of 8 samples.
-    SkString highSampleBlurString(R"(
+    const SkString kHighSampleBlurString(R"(
         uniform shader child;
         uniform float in_blurOffset;
 
@@ -93,12 +96,18 @@ KawaseBlurDualFilter::KawaseBlurDualFilter() : BlurFilter() {
         }
     )");
 
-    auto [lowSampleBlurEffect, error] = SkRuntimeEffect::MakeForShader(lowSampleBlurString);
-    auto [highSampleBlurEffect, error2] = SkRuntimeEffect::MakeForShader(highSampleBlurString);
-    LOG_ALWAYS_FATAL_IF(!lowSampleBlurEffect, "RuntimeShader error: %s", error.c_str());
-    LOG_ALWAYS_FATAL_IF(!highSampleBlurEffect, "RuntimeShader error: %s", error2.c_str());
-    mLowSampleBlurEffect = std::move(lowSampleBlurEffect);
-    mHighSampleBlurEffect = std::move(highSampleBlurEffect);
+    mLowSampleBlurEffect =
+            effectManager
+                    .createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                         kKawaseBlurDualFilter_LowSampleBlurEffect,
+                                                 "KawaseBlurDualFilter_LowSampleBlurEffect",
+                                                 kLowSampleBlurString);
+    mHighSampleBlurEffect =
+            effectManager
+                    .createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                         kKawaseBlurDualFilter_HighSampleBlurEffect,
+                                                 "KawaseBlurDualFilter_HighSampleBlurEffect",
+                                                 kHighSampleBlurString);
 }
 
 void KawaseBlurDualFilter::blurInto(const sk_sp<SkSurface>& drawSurface,

@@ -20,10 +20,6 @@
 
 namespace android {
 
-void zeroMemory(uint8_t* data, size_t size) {
-    memset(data, 0, size);
-}
-
 std::string HexString(const void* bytes, size_t len) {
     LOG_ALWAYS_FATAL_IF(len > 0 && bytes == nullptr, "%p %zu", bytes, len);
 

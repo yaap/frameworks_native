@@ -25,6 +25,7 @@
 #include <utils/Errors.h>
 
 #include <scheduler/FrameRateMode.h>
+#include <scheduler/VsyncConfig.h>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -46,9 +47,9 @@ class EventThread;
 class EventThreadTest;
 class SurfaceFlinger;
 
-namespace frametimeline {
+namespace scheduler {
 class TokenManager;
-} // namespace frametimeline
+} // namespace scheduler
 
 using gui::ParcelableVsyncEventData;
 using gui::VsyncEventData;
@@ -113,8 +114,16 @@ public:
 
     virtual void onHotplugConnectionError(int32_t connectionError) = 0;
 
-    // called when SF changes the active mode and apps needs to be notified about the change
-    virtual void onModeChanged(const scheduler::FrameRateMode&) = 0;
+    // Called when apps need to be notified about the change in the active mode and
+    // frame rate overrides.
+    virtual void onModeAndFrameRateOverridesChanged(PhysicalDisplayId,
+                                                    const scheduler::FrameRateMode&,
+                                                    std::vector<FrameRateOverride>,
+                                                    scheduler::VsyncConfigSet) = 0;
+
+    // called when SF changes the active mode or updates the WorkDuration
+    // and apps needs to be notified about the change
+    virtual void onModeChanged(const scheduler::FrameRateMode&, scheduler::VsyncConfigSet) = 0;
 
     // called when SF rejects the mode change request
     virtual void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) = 0;
@@ -156,7 +165,7 @@ namespace impl {
 class EventThread : public android::EventThread {
 public:
     EventThread(const char* name, std::shared_ptr<scheduler::VsyncSchedule>,
-                frametimeline::TokenManager*, IEventThreadCallback& callback,
+                scheduler::TokenManager*, IEventThreadCallback& callback,
                 std::chrono::nanoseconds workDuration, std::chrono::nanoseconds readyDuration);
     ~EventThread();
 
@@ -177,7 +186,11 @@ public:
 
     void onHotplugConnectionError(int32_t connectionError) override;
 
-    void onModeChanged(const scheduler::FrameRateMode&) override;
+    void onModeAndFrameRateOverridesChanged(PhysicalDisplayId, const scheduler::FrameRateMode&,
+                                            std::vector<FrameRateOverride>,
+                                            scheduler::VsyncConfigSet) override;
+
+    void onModeChanged(const scheduler::FrameRateMode&, scheduler::VsyncConfigSet) override;
 
     void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) override;
 
@@ -225,6 +238,7 @@ private:
             std::shared_ptr<scheduler::VsyncSchedule>) EXCLUDES(mMutex);
 
     const char* const mThreadName;
+    std::string mEventThreadStateName;
     TracedOrdinal<int> mVsyncTracer;
     TracedOrdinal<std::chrono::nanoseconds> mWorkDuration GUARDED_BY(mMutex);
     std::chrono::nanoseconds mReadyDuration GUARDED_BY(mMutex);
@@ -232,7 +246,7 @@ private:
     TimePoint mLastVsyncCallbackTime GUARDED_BY(mMutex) = TimePoint::now();
     TimePoint mLastCommittedVsyncTime GUARDED_BY(mMutex) = TimePoint::now();
     scheduler::VSyncCallbackRegistration mVsyncRegistration GUARDED_BY(mMutex);
-    frametimeline::TokenManager* const mTokenManager;
+    scheduler::TokenManager* const mTokenManager;
 
     IEventThreadCallback& mCallback;
 
@@ -268,6 +282,8 @@ private:
     };
 
     State mState GUARDED_BY(mMutex) = State::Idle;
+
+    void updateState(State state) REQUIRES(mMutex);
 
     static const char* toCString(State);
 };

@@ -48,7 +48,8 @@ public:
     FuzzInputReader(std::shared_ptr<EventHubInterface> fuzzEventHub,
                     const sp<InputReaderPolicyInterface>& fuzzPolicy,
                     InputListenerInterface& fuzzListener) {
-        reader = std::make_unique<InputReader>(fuzzEventHub, fuzzPolicy, fuzzListener);
+        reader = std::make_unique<InputReader>(fuzzEventHub, fuzzPolicy, fuzzListener,
+                                               /*env=*/nullptr);
     }
 
     void dump(std::string& dump) { reader->dump(dump); }

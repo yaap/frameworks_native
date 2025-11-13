@@ -329,9 +329,6 @@ public:
     inline void setHasBattery(bool hasBattery) { mHasBattery = hasBattery; }
     inline bool hasBattery() const { return mHasBattery; }
 
-    inline void setButtonUnderPad(bool hasButton) { mHasButtonUnderPad = hasButton; }
-    inline bool hasButtonUnderPad() const { return mHasButtonUnderPad; }
-
     inline void setHasSensor(bool hasSensor) { mHasSensor = hasSensor; }
     inline bool hasSensor() const { return mHasSensor; }
 
@@ -371,7 +368,6 @@ private:
 
     bool mHasVibrator;
     bool mHasBattery;
-    bool mHasButtonUnderPad;
     bool mHasSensor;
 
     std::vector<MotionRange> mMotionRanges;

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcServer"
+#define LOG_TAG "libbinder.RpcServer"
 
 #include <inttypes.h>
 #include <netinet/tcp.h>
@@ -340,7 +340,7 @@ bool RpcServer::shutdown() {
     }
 
     while (mJoinThreadRunning || !mConnectingThreads.empty() || !mSessions.empty()) {
-        if (std::cv_status::timeout == mShutdownCv.wait_for(_l, std::chrono::seconds(1))) {
+        if (mShutdownCv.wait_for(_l, std::chrono::seconds(1)) == RpcCvStatus::timeout) {
             ALOGE("Waiting for RpcServer to shut down (1s w/o progress). Join thread running: %d, "
                   "Connecting threads: "
                   "%zu, Sessions: %zu. Is your server deadlocked?",
@@ -535,11 +535,7 @@ void RpcServer::establishConnection(
                 }
             }
 
-            if (!session->setForServer(server,
-                                       sp<RpcServer::EventListener>::fromExisting(
-                                               static_cast<RpcServer::EventListener*>(
-                                                       server.get())),
-                                       sessionId, sessionSpecificRoot)) {
+            if (!session->setForServer(server, server, sessionId, sessionSpecificRoot)) {
                 ALOGE("Failed to attach server to session");
                 return;
             }

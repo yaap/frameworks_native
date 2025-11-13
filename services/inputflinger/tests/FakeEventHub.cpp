@@ -92,10 +92,6 @@ void FakeEventHub::addConfigurationProperty(int32_t deviceId, const char* key, c
     getDevice(deviceId)->configuration.addProperty(key, value);
 }
 
-void FakeEventHub::addConfigurationMap(int32_t deviceId, const PropertyMap* configuration) {
-    getDevice(deviceId)->configuration.addAll(configuration);
-}
-
 void FakeEventHub::addAbsoluteAxis(int32_t deviceId, int axis, int32_t minValue, int32_t maxValue,
                                    int flat, int fuzz, int resolution) {
     Device* device = getDevice(deviceId);

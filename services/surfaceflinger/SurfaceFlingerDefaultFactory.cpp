@@ -30,7 +30,7 @@
 #include "SurfaceFlingerProperties.h"
 
 #include "DisplayHardware/ComposerHal.h"
-#include "FrameTimeline/FrameTimeline.h"
+#include "Scheduler/FrameTimeline.h"
 #include "Scheduler/Scheduler.h"
 #include "Scheduler/VsyncConfiguration.h"
 #include "Scheduler/VsyncController.h"
@@ -77,11 +77,7 @@ std::unique_ptr<compositionengine::CompositionEngine> DefaultFactory::createComp
     return compositionengine::impl::createCompositionEngine();
 }
 
-sp<Layer> DefaultFactory::createBufferStateLayer(const LayerCreationArgs& args) {
-    return sp<Layer>::make(args);
-}
-
-sp<Layer> DefaultFactory::createEffectLayer(const LayerCreationArgs& args) {
+sp<Layer> DefaultFactory::createLayer(const LayerCreationArgs& args) {
     return sp<Layer>::make(args);
 }
 
@@ -93,9 +89,9 @@ std::unique_ptr<FrameTracer> DefaultFactory::createFrameTracer() {
     return std::make_unique<FrameTracer>();
 }
 
-std::unique_ptr<frametimeline::FrameTimeline> DefaultFactory::createFrameTimeline(
+std::unique_ptr<scheduler::FrameTimeline> DefaultFactory::createFrameTimeline(
         std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid) {
-    return std::make_unique<frametimeline::impl::FrameTimeline>(timeStats, surfaceFlingerPid);
+    return std::make_unique<scheduler::impl::FrameTimeline>(timeStats, surfaceFlingerPid);
 }
 
 } // namespace android::surfaceflinger

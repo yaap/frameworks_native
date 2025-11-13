@@ -67,6 +67,7 @@ private:
     std::string getUpdatableDriverPath() override;
     FeatureOverrides getFeatureOverrides() override;
     void toggleAngleAsSystemDriver(bool enabled) override;
+    std::string getPersistGraphicsEgl() override;
     void addVulkanEngineName(const std::string& appPackageName, const uint64_t driverVersionCode,
                              const char *engineName) override;
 

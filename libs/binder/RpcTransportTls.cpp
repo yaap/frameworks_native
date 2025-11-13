@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTls"
+#define LOG_TAG "libbinder.RpcTransportTls"
 #include <log/log.h>
 
 #include <poll.h>

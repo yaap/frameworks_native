@@ -18,19 +18,15 @@
 
 #include <log/log.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 namespace {
 
-sk_sp<SkRuntimeEffect> makeEffect(const SkString& sksl) {
-    auto [effect, error] = SkRuntimeEffect::MakeForShader(sksl);
-    LOG_ALWAYS_FATAL_IF(!effect, "RuntimeShader error: %s", error.c_str());
-    return effect;
-}
-
 // Please refer to https://developer.android.com/media/platform/hdr-image-format#gain_map-generation
-static const SkString kGainmapShader = SkString(R"(
+static const SkString kGainmapShaderString = SkString(R"(
     uniform shader sdr;
     uniform shader hdr;
     uniform float mapMaxLog2;
@@ -56,7 +52,11 @@ static const SkString kGainmapShader = SkString(R"(
 
 const float INTERPOLATION_STRENGTH_VALUE = 0.7f;
 
-GainmapFactory::GainmapFactory() : mEffect(makeEffect(kGainmapShader)) {}
+GainmapFactory::GainmapFactory(RuntimeEffectManager& effectManager) {
+    mEffect =
+            effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::kGainmapEffect,
+                                                      "GainmapEffect", kGainmapShaderString);
+}
 
 sk_sp<SkShader> GainmapFactory::createSkShader(const sk_sp<SkShader>& sdr,
                                                const sk_sp<SkShader>& hdr, float hdrSdrRatio) {

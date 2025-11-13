@@ -197,7 +197,6 @@ TEST_F(FrameTargeterTest, recallsPastVsync) {
 }
 
 TEST_F(FrameTargeterTest, wouldBackpressureAfterTime) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
     VsyncId vsyncId{111};
     TimePoint frameBeginTime(1000ms);
     constexpr Fps kRefreshRate = 60_Hz;
@@ -221,31 +220,6 @@ TEST_F(FrameTargeterTest, wouldBackpressureAfterTime) {
     }
 }
 
-TEST_F(FrameTargeterTest, wouldBackpressureAfterTimeLegacy) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
-    VsyncId vsyncId{111};
-    TimePoint frameBeginTime(1000ms);
-    constexpr Fps kRefreshRate = 60_Hz;
-    constexpr Period kPeriod = kRefreshRate.getPeriod();
-    constexpr Duration kFrameDuration = 13ms;
-
-    { Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate); }
-    {
-        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
-
-        const auto [wouldBackpressure, presentFence] =
-                expectedSignaledPresentFence(kPeriod, kPeriod);
-        EXPECT_TRUE(wouldBackpressure);
-    }
-    {
-        frameBeginTime += kPeriod;
-        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
-        const auto [wouldBackpressure, presentFence] =
-                expectedSignaledPresentFence(kPeriod, kPeriod);
-        EXPECT_TRUE(wouldBackpressure);
-    }
-}
-
 TEST_F(FrameTargeterTest, recallsPastVsyncTwoVsyncsAhead) {
     VsyncId vsyncId{222};
     TimePoint frameBeginTime(2000ms);
@@ -264,8 +238,6 @@ TEST_F(FrameTargeterTest, recallsPastVsyncTwoVsyncsAhead) {
 }
 
 TEST_F(FrameTargeterTest, recallsPastVsyncFiveVsyncsAhead) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
-
     VsyncId vsyncId{222};
     TimePoint frameBeginTime(2000ms);
     constexpr Fps kRefreshRate = 120_Hz;

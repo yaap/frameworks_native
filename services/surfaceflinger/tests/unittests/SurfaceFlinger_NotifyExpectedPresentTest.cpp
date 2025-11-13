@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "gui/TransactionState.h"
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
@@ -45,15 +46,29 @@ protected:
     void setTransactionState() {
         ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
         TransactionInfo transaction;
-        mFlinger.setTransactionState(std::move(transaction));
+        mFlinger.setTransactionState(FrameTimelineInfo{}, transaction.mutableState,
+                                     transaction.flags, transaction.applyToken,
+                                     transaction.inputWindowCommands,
+                                     TimePoint::now().ns() + s2ns(1), transaction.isAutoTimestamp,
+                                     transaction.unCachedBuffers,
+                                     /*HasListenerCallbacks=*/false, transaction.callbacks,
+                                     transaction.id, transaction.mergedTransactionIds,
+                                     transaction.earlyWakeupInfos);
     }
 
-    struct TransactionInfo : public TransactionState {
-        TransactionInfo() {
-            mApplyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
-            mIsAutoTimestamp = false;
-            mId = static_cast<uint64_t>(-1);
-        }
+    struct TransactionInfo {
+        MutableTransactionState mutableState;
+        uint32_t flags = 0;
+        sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
+        InputWindowCommands inputWindowCommands;
+        int64_t desiredPresentTime = 0;
+        bool isAutoTimestamp = false;
+        FrameTimelineInfo frameTimelineInfo{};
+        std::vector<client_cache_t> unCachedBuffers;
+        uint64_t id = static_cast<uint64_t>(-1);
+        std::vector<uint64_t> mergedTransactionIds;
+        std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos;
+        std::vector<ListenerCallbacks> callbacks;
     };
 
     struct Compositor final : ICompositor {

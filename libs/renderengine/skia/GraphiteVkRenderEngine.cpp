@@ -22,15 +22,19 @@
 #include <include/gpu/GpuTypes.h>
 #include <include/gpu/graphite/BackendSemaphore.h>
 #include <include/gpu/graphite/Context.h>
+#include <include/gpu/graphite/PrecompileContext.h>
 #include <include/gpu/graphite/Recording.h>
 #include <include/gpu/graphite/vk/VulkanGraphiteTypes.h>
 
+#include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <log/log_main.h>
 #include <sync/sync.h>
 
 #include <memory>
 #include <vector>
+
+#include "compat/GraphitePipelineManager.h"
 
 namespace android::renderengine::skia {
 
@@ -53,6 +57,42 @@ std::unique_ptr<GraphiteVkRenderEngine> GraphiteVkRenderEngine::create(
     }
 }
 
+GraphiteVkRenderEngine::~GraphiteVkRenderEngine() {
+    // Ensure precompilation has finished accessing resources (e.g. context, RuntimeEffectManager).
+    // TODO(b/380159947): interrupt precompilation loop on destruction, instead of waiting for it to
+    // finish?
+    if (mPrecompilePipelinesTask.joinable()) {
+        mPrecompilePipelinesTask.join();
+    }
+}
+
+std::future<void> GraphiteVkRenderEngine::primeCache(PrimeCacheConfig config) {
+    std::future<void> ret = {};
+
+    // Note: for local debugging only! Graphite's precompilation should stay ENABLED, and this
+    // switch will be removed in the future without warning.
+    if (base::GetBoolProperty("debug.renderengine.graphite.precompile", true)) {
+        std::unique_ptr<graphite::PrecompileContext> precompileContext =
+                mContext->graphiteContext()->makePrecompileContext();
+        mPrecompilePipelinesTask =
+                std::thread(GraphitePipelineManager::PrecompilePipelines,
+                            std::move(precompileContext), std::ref(mRuntimeEffectManager));
+    } else {
+        ALOGW("Graphite's background shader / pipeline precompilation was disabled!");
+    }
+
+    // Note: for local debugging only! Legacy draw-based prewarming should stay DISABLED, and this
+    // switch will be removed  in the future without warning. Enabling this may regress boot time
+    // unnecessarily.
+    // TODO(b/380159947): remove this option, and force precompilation to always be enabled.
+    if (base::GetBoolProperty("debug.renderengine.graphite.prewarm", false)) {
+        ALOGW("Legacy draw-based shader / pipeline prewarming was enabled, and may delay boot!");
+        ret = SkiaVkRenderEngine::primeCache(config);
+    }
+
+    return ret;
+}
+
 // Graphite-specific function signature for fFinishedProc callback.
 static void unref_semaphore(void* semaphore, skgpu::CallbackResult result) {
     if (result != skgpu::CallbackResult::kSuccess) {
@@ -65,7 +105,7 @@ static void unref_semaphore(void* semaphore, skgpu::CallbackResult result) {
 
 std::unique_ptr<SkiaGpuContext> GraphiteVkRenderEngine::createContext(
         VulkanInterface& vulkanInterface) {
-    return SkiaGpuContext::MakeVulkan_Graphite(vulkanInterface.getGraphiteBackendContext());
+    return SkiaGpuContext::MakeVulkan_Graphite(vulkanInterface.createSkiaVulkanBackendContext());
 }
 
 void GraphiteVkRenderEngine::waitFence(SkiaGpuContext*, base::borrowed_fd fenceFd) {

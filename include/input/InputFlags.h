@@ -42,8 +42,26 @@ public:
 
     /**
      * Check if both connectedDisplaysCursor and associatedDisplayCursorBugfix is enabled.
+     * This setting can be overridden with the dev option similar to the
+     * connectedDisplaysCursorEnabled flag.
      */
     static bool connectedDisplaysCursorAndAssociatedDisplayCursorBugfixEnabled();
+
+    /**
+     * Check if display density based cursor scaling is enabled.
+     * This setting can be overridden with the dev option similar to the
+     * connectedDisplaysCursorEnabled flag.
+     */
+    static bool scaleCursorSpeedWithDisplayDensity();
+
+    /**
+     * This is a temporary fix that removes the SKIP_SCREENSHOT flag for the Mouse cursor. This is
+     * only intended to be temporarily used as workaround only when connected displays dev option
+     * is enabled.
+     *
+     * This will make mouse cursor visible on recordings and screenshots of secure windows.
+     */
+    static bool doNotUseSkipScreenshotFlagForMouseCursor();
 };
 
 } // namespace android

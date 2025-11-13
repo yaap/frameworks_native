@@ -156,7 +156,7 @@ cc_defaults {
         "libpowermanager",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
-        "libstatslog_surfaceflinger",
+        "libstatslog_surfaceflinger_bootstrap",
         "libsync",
         "libtracing_perfetto",
         "libui",

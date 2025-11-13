@@ -116,7 +116,7 @@ cc_test {
     static_libs: [
         "IBinderVendorDoubleLoadTest-cpp",
         "IBinderVendorDoubleLoadTest-ndk",
-        "libbinder_aidl_test_stub-ndk",
+        "servicemanager_aidl-ndk",
     ],
     // critical that libbinder/libbinder_ndk are shared for VTS
     shared_libs: [

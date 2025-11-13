@@ -38,7 +38,9 @@ struct RpcWireHeader;
  * a specific subset of logs to debug, this could be broken up like
  * IPCThreadState's.
  */
+// DO NOT ENABLE IN PRODUCTION
 #define SHOULD_LOG_RPC_DETAIL false
+// DO NOT ENABLE IN PRODUCTION
 
 #if SHOULD_LOG_RPC_DETAIL
 #define LOG_RPC_DETAIL(...) ALOGI(__VA_ARGS__)
@@ -46,12 +48,17 @@ struct RpcWireHeader;
 #define LOG_RPC_DETAIL(...) ALOGV(__VA_ARGS__) // for type checking
 #endif
 
+// DO NOT ENABLE IN PRODUCTION
 #define RPC_FLAKE_PRONE false
+// DO NOT ENABLE IN PRODUCTION
 
 #if RPC_FLAKE_PRONE
-void rpcMaybeWaitToFlake();
+LIBBINDER_INTERNAL_EXPORTED bool rpcMaybeFlake();
+LIBBINDER_INTERNAL_EXPORTED void rpcMaybeWaitToFlake();
+#define MAYBE_TRUE_IN_FLAKE_MODE rpcMaybeFlake()
 #define MAYBE_WAIT_IN_FLAKE_MODE rpcMaybeWaitToFlake()
 #else
+#define MAYBE_TRUE_IN_FLAKE_MODE false
 #define MAYBE_WAIT_IN_FLAKE_MODE do {} while (false)
 #endif
 
@@ -251,9 +258,9 @@ private:
         // CASE A - local binder we are serving
         //
 
-        // async transaction queue, _only_ for local binder
         struct AsyncTodo {
-            sp<IBinder> ref;
+            // any transaction, including async, can only be on local binders
+            sp<BBinder> ref;
             CommandData data;
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>> ancillaryFds;
             uint64_t asyncNumber = 0;

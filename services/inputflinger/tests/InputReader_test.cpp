@@ -611,14 +611,10 @@ protected:
     }
 
     void addDevice(int32_t eventHubId, const std::string& name,
-                   ftl::Flags<InputDeviceClass> classes, const PropertyMap* configuration,
-                   std::string sysfsRootPath = "") {
+                   ftl::Flags<InputDeviceClass> classes, std::string sysfsRootPath = "") {
         mFakeEventHub->addDevice(eventHubId, name, classes);
         mFakeEventHub->setSysfsRootPath(eventHubId, sysfsRootPath);
 
-        if (configuration) {
-            mFakeEventHub->addConfigurationMap(eventHubId, configuration);
-        }
         mReader->loopOnce();
         mReader->loopOnce();
         ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
@@ -639,22 +635,21 @@ protected:
     FakeInputMapper& addDeviceWithFakeInputMapper(int32_t deviceId, int32_t eventHubId,
                                                   const std::string& name,
                                                   ftl::Flags<InputDeviceClass> classes,
-                                                  uint32_t sources,
-                                                  const PropertyMap* configuration) {
+                                                  uint32_t sources) {
         std::shared_ptr<InputDevice> device = mReader->newDevice(deviceId, name);
         FakeInputMapper& mapper =
                 device->addMapper<FakeInputMapper>(eventHubId,
                                                    mFakePolicy->getReaderConfiguration(), sources);
         mReader->pushNextDevice(device);
-        addDevice(eventHubId, name, classes, configuration);
+        addDevice(eventHubId, name, classes);
         return mapper;
     }
 };
 
 TEST_F(InputReaderTest, PolicyGetInputDevices) {
-    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(2, "ignored", ftl::Flags<InputDeviceClass>(0),
-                                      nullptr)); // no classes so device will be ignored
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD));
+    // no classes so device will be ignored
+    ASSERT_NO_FATAL_FAILURE(addDevice(2, "ignored", ftl::Flags<InputDeviceClass>(0)));
 
     // Should also have received a notification describing the new input devices.
     const std::vector<InputDeviceInfo>& inputDevices = mFakePolicy->getInputDevices();
@@ -668,8 +663,7 @@ TEST_F(InputReaderTest, PolicyGetInputDevices) {
 
 TEST_F(InputReaderTest, GetSysfsRootPath) {
     constexpr std::string SYSFS_ROOT = "xyz";
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, nullptr, SYSFS_ROOT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, SYSFS_ROOT));
 
     // Should also have received a notification describing the new input device.
     ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
@@ -679,7 +673,7 @@ TEST_F(InputReaderTest, GetSysfsRootPath) {
 }
 
 TEST_F(InputReaderTest, InputDeviceRecreatedOnSysfsNodeChanged) {
-    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD));
     mFakeEventHub->setSysfsRootPath(1, "xyz");
 
     // Should also have received a notification describing the new input device.
@@ -716,10 +710,8 @@ TEST_F(InputReaderTest, GetMergedInputDevices) {
     // Push same device instance for next device to be added, so they'll have same identifier.
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[0], "fake1", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD));
 
     // Two devices will be merged to one input device as they have same identifier
     ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
@@ -741,13 +733,11 @@ TEST_F(InputReaderTest, GetMergedInputDevicesEnabled) {
     mReader->pushNextDevice(device);
     // Sensor device is initially disabled
     ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1",
-                                      InputDeviceClass::KEYBOARD | InputDeviceClass::SENSOR,
-                                      nullptr));
+                                      InputDeviceClass::KEYBOARD | InputDeviceClass::SENSOR));
     // Device is disabled because the only sub device is a sensor device and disabled initially.
     ASSERT_FALSE(mFakeEventHub->isDeviceEnabled(eventHubIds[0]));
     ASSERT_FALSE(device->isEnabled());
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD));
     // The merged device is enabled if any sub device is enabled
     ASSERT_TRUE(mFakeEventHub->isDeviceEnabled(eventHubIds[1]));
     ASSERT_TRUE(device->isEnabled());
@@ -762,7 +752,7 @@ TEST_F(InputReaderTest, WhenEnabledChanges_SendsDeviceResetNotification) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -792,9 +782,8 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setKeyCodeState(AKEYCODE_A, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getKeyCodeState(0,
@@ -824,9 +813,9 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToMappers) {
 TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "keyboard",
-                                                           InputDeviceClass::KEYBOARD,
-                                                           AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper =
+            addDeviceWithFakeInputMapper(deviceId, eventHubId, "keyboard",
+                                         InputDeviceClass::KEYBOARD, AINPUT_SOURCE_KEYBOARD);
     mapper.addKeyCodeMapping(AKEYCODE_Y, AKEYCODE_Z);
 
     ASSERT_EQ(AKEYCODE_UNKNOWN, mReader->getKeyCodeForKeyLocation(0, AKEYCODE_Y))
@@ -843,9 +832,9 @@ TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_ForwardsRequestsToMappers) {
 TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_NoKeyboardMapper) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "joystick",
-                                                           InputDeviceClass::JOYSTICK,
-                                                           AINPUT_SOURCE_GAMEPAD, nullptr);
+    FakeInputMapper& mapper =
+            addDeviceWithFakeInputMapper(deviceId, eventHubId, "joystick",
+                                         InputDeviceClass::JOYSTICK, AINPUT_SOURCE_GAMEPAD);
     mapper.addKeyCodeMapping(AKEYCODE_Y, AKEYCODE_Z);
 
     ASSERT_EQ(AKEYCODE_UNKNOWN, mReader->getKeyCodeForKeyLocation(deviceId, AKEYCODE_Y))
@@ -856,9 +845,8 @@ TEST_F(InputReaderTest, GetScanCodeState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setScanCodeState(KEY_A, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getScanCodeState(0,
@@ -889,9 +877,8 @@ TEST_F(InputReaderTest, GetSwitchState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setSwitchState(SW_LID, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getSwitchState(0,
@@ -922,9 +909,8 @@ TEST_F(InputReaderTest, MarkSupportedKeyCodes_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
 
     mapper.addSupportedKeyCode(AKEYCODE_A);
     mapper.addSupportedKeyCode(AKEYCODE_B);
@@ -969,9 +955,8 @@ TEST_F(InputReaderTest, LoopOnce_ForwardsRawEventsToMappers) {
     constexpr nsecs_t when = 0;
     constexpr int32_t eventHubId = 1;
     constexpr nsecs_t readTime = 2;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
 
     mFakeEventHub->enqueueEvent(when, readTime, eventHubId, EV_KEY, KEY_A, 1);
     mReader->loopOnce();
@@ -996,7 +981,7 @@ TEST_F(InputReaderTest, DeviceReset_RandomId) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1030,7 +1015,7 @@ TEST_F(InputReaderTest, DeviceReset_GenerateIdWithInputReaderSource) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(deviceId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(deviceId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1069,7 +1054,7 @@ TEST_F(InputReaderTest, Device_CanDispatchToDisplay) {
     // Add the device, and make sure all of the callbacks are triggered.
     // The device is added after the input port associations are processed since
     // we do not yet support dynamic device-to-display associations.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
     ASSERT_NO_FATAL_FAILURE(mapper.assertConfigureWasCalled());
 
@@ -1096,8 +1081,8 @@ TEST_F(InputReaderTest, WhenEnabledChanges_AllSubdevicesAreUpdated) {
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1141,8 +1126,8 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToSubdeviceMappers) {
                                                AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass));
 
     mapperDevice1.setKeyCodeState(AKEYCODE_A, AKEY_STATE_DOWN);
     mapperDevice2.setKeyCodeState(AKEYCODE_B, AKEY_STATE_DOWN);
@@ -1183,12 +1168,10 @@ TEST_F(InputReaderTest, GetLastUsedInputDeviceId) {
     constexpr int32_t SECOND_DEVICE_ID = FIRST_DEVICE_ID + 1;
     FakeInputMapper& firstMapper =
             addDeviceWithFakeInputMapper(FIRST_DEVICE_ID, FIRST_DEVICE_ID, "first",
-                                         InputDeviceClass::KEYBOARD, AINPUT_SOURCE_KEYBOARD,
-                                         /*configuration=*/nullptr);
+                                         InputDeviceClass::KEYBOARD, AINPUT_SOURCE_KEYBOARD);
     FakeInputMapper& secondMapper =
             addDeviceWithFakeInputMapper(SECOND_DEVICE_ID, SECOND_DEVICE_ID, "second",
-                                         InputDeviceClass::TOUCH_MT, AINPUT_SOURCE_STYLUS,
-                                         /*configuration=*/nullptr);
+                                         InputDeviceClass::TOUCH_MT, AINPUT_SOURCE_STYLUS);
 
     ASSERT_EQ(ReservedInputDeviceId::INVALID_INPUT_DEVICE_ID, mReader->getLastUsedInputDeviceId());
 
@@ -1276,7 +1259,7 @@ TEST_F(InputReaderTest, VibratorGetVibratorIds) {
                                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
     ASSERT_NO_FATAL_FAILURE(mapper.assertConfigureWasCalled());
 
     ASSERT_EQ(mapper.getVibratorIds().size(), 2U);
@@ -1340,7 +1323,7 @@ TEST_F(InputReaderTest, BatteryGetCapacity) {
             device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(controller.getBatteryCapacity(FakeEventHub::DEFAULT_BATTERY),
               FakeEventHub::BATTERY_CAPACITY);
@@ -1358,7 +1341,7 @@ TEST_F(InputReaderTest, BatteryGetStatus) {
             device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(controller.getBatteryStatus(FakeEventHub::DEFAULT_BATTERY),
               FakeEventHub::BATTERY_STATUS);
@@ -1375,7 +1358,7 @@ TEST_F(InputReaderTest, BatteryGetDevicePath) {
     device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(mReader->getBatteryDevicePath(deviceId), FakeEventHub::BATTERY_DEVPATH);
 }
@@ -1397,7 +1380,7 @@ TEST_F(InputReaderTest, LightGetColor) {
     mFakeEventHub->addRawLightInfo(/*rawId=*/1, std::move(info));
     mFakeEventHub->fakeLightBrightness(/*rawId=*/1, 0x55);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_TRUE(controller.setLightColor(/*lightId=*/1, LIGHT_BRIGHTNESS));
     ASSERT_EQ(controller.getLightColor(/*lightId=*/1), LIGHT_BRIGHTNESS);
@@ -1406,9 +1389,9 @@ TEST_F(InputReaderTest, LightGetColor) {
 }
 
 TEST_F(InputReaderTest, SetPowerWakeUp) {
-    ASSERT_NO_FATAL_FAILURE(addDevice(1, "1st", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(2, "2nd", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(3, "3rd", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "1st", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(2, "2nd", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(3, "3rd", InputDeviceClass::KEYBOARD));
 
     ASSERT_EQ(mFakeEventHub->fakeReadKernelWakeup(1), false);
 
@@ -1424,8 +1407,8 @@ TEST_F(InputReaderTest, MergeableInputDevices) {
 
     // By default, all of the default-created eventhub devices will have the same identifier
     // (implicitly vid 0, pid 0, etc.), which is why we expect them to be merged.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::JOYSTICK, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::JOYSTICK));
 
     // The two devices will be merged to one input device as they have same identifier, and none are
     // pointer devices.
@@ -1437,9 +1420,9 @@ TEST_F(InputReaderTest, MergeableDevicesWithTouch) {
 
     // By default, all of the default-created eventhub devices will have the same identifier
     // (implicitly vid 0, pid 0, etc.), which is why we expect them to be merged.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH_MT, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::GAMEPAD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::GAMEPAD));
 
     // The three devices will be merged to one input device as they have same identifier, and only
     // one is a pointer device.
@@ -1453,9 +1436,9 @@ TEST_F(InputReaderTest, UnmergeableTouchDevices) {
 
     // By default, all of the default-created eventhub devices will have the same identifier
     // (implicitly vid 0, pid 0, etc.), which is why they can potentially be merged.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "2nd", InputDeviceClass::CURSOR, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "2nd", InputDeviceClass::CURSOR));
 
     // The three devices will not be merged, as they have same identifier, but are all pointer
     // devices.
@@ -1470,10 +1453,10 @@ TEST_F(InputReaderTest, MergeableMixedDevices) {
 
     // By default, all of the default-created eventhub devices will have the same identifier
     // (implicitly vid 0, pid 0, etc.), which is why they can potentially be merged.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::DPAD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[3], "4th", InputDeviceClass::JOYSTICK, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::DPAD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[3], "4th", InputDeviceClass::JOYSTICK));
 
     // Non-touch devices can be merged with one of the touch devices, as they have same identifier,
     // but the two touch devices will not combine with each other. It is not specified which touch
@@ -1540,7 +1523,7 @@ protected:
                                                             EVENT_DID_NOT_HAPPEN_TIMEOUT);
 
         mReader = std::make_unique<InputReader>(std::make_shared<EventHub>(), mFakePolicy,
-                                                *mTestListener);
+                                                *mTestListener, /*env=*/nullptr);
         ASSERT_EQ(mReader->start(), OK);
 
         // Since this test is run on a real device, all the input devices connected

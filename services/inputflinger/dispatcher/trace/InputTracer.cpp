@@ -217,7 +217,7 @@ void InputTracer::traceEventDispatch(const DispatchEntry& dispatchEntry,
     // TODO(b/210460522): Pass HMAC into traceEventDispatch.
     const WindowDispatchArgs windowDispatchArgs{*tracedEventIt,
                                                 dispatchEntry.deliveryTime,
-                                                dispatchEntry.resolvedFlags,
+                                                dispatchEntry.resolvedMotionFlags,
                                                 dispatchEntry.targetUid,
                                                 vsyncId,
                                                 windowId,

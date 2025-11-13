@@ -91,6 +91,11 @@ public:
     // This must be called before the object is sent to another process. Not thread safe.
     LIBBINDER_EXPORTED void setInheritRt(bool inheritRt);
 
+    // Set default, overridden by setInheritRt. You must set this default early.
+    // Any binder objects sent out of the process before this is called will
+    // not use the updated value.
+    LIBBINDER_EXPORTED static void setGlobalInheritRt(bool enabled);
+
     LIBBINDER_EXPORTED pid_t getDebugPid();
 
     // Whether this binder has been sent to another process.
@@ -123,6 +128,8 @@ private:
     void removeRpcServerLink(const sp<RpcServerLink>& link);
     [[nodiscard]] status_t startRecordingTransactions(const Parcel& data);
     [[nodiscard]] status_t stopRecordingTransactions();
+
+    static std::atomic<bool> sGlobalInheritRt;
 
     std::atomic<Extras*> mExtras;
 

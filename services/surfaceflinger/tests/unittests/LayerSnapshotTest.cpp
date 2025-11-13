@@ -2189,4 +2189,138 @@ TEST_F(LayerSnapshotTest, shouldUpdatePictureProfilePriorityFromAppContentPriori
     }
 }
 
+// Test that child layers of the stop layer are hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that if a layer specifies itself as a stop layer, then it is hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesSelf) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(122, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 13, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that siblings z-ordered above a stop layer are hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesSiblings) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 121);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that children z-ordered below the stop layer aren't hidden.
+TEST_F(LayerSnapshotTest, stopLayer_doesntHideZOrderedBelowChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setZ(121, -1);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that relative children are hidden by the stop layer.
+TEST_F(LayerSnapshotTest, stopLayer_hidesRelativeChild) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    reparentRelativeLayer(111, 12);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that detached children aren't hidden by the stop layer.
+TEST_F(LayerSnapshotTest, stopLayer_doesntHideDetachedChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    reparentRelativeLayer(121, 11);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that stop layers work on hierarchies with a single root layer.
+TEST_F(LayerSnapshotTest, stopLayer_singleRoot) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 11);
+
+    LayerHierarchy root = mHierarchyBuilder.getPartialHierarchy(1, /*childrenOnly=*/false);
+    LayerSnapshotBuilder::Args args{.root = root,
+                                    .layerLifecycleManager = mLifecycleManager,
+                                    .includeMetadata = false,
+                                    .displays = mFrontEndDisplayInfos,
+                                    .displayChanges = false,
+                                    .globalShadowSettings = globalShadowSettings,
+                                    .supportsBlur = true,
+                                    .supportedLayerGenericMetadata = {},
+                                    .genericLayerMetadataKeyMap = {}};
+    mSnapshotBuilder.update(args);
+
+    std::vector<uint32_t> expectedVisibleLayers = {1};
+    std::vector<uint32_t> actualVisibleLayers;
+    mSnapshotBuilder.forEachVisibleSnapshot([&actualVisibleLayers](const LayerSnapshot& snapshot) {
+        actualVisibleLayers.push_back(snapshot.path.id);
+    });
+    EXPECT_EQ(expectedVisibleLayers, actualVisibleLayers);
+}
+
+// Test two stop layers where there's no interaction between the two stop layers.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_parentAfterChild) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 13);
+    setStopLayer(11, 111);
+
+    std::vector<uint32_t> expected = {1, 11, 12, 121, 122, 1221, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the hierarchy containing the second stop layer is hidden.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childHidden) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 12);
+    setStopLayer(12, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the stop layer specified lower in the hierarchy overrides
+// the stop layer specified higher in the hierarchy.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childStopLayerOverridden) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 121);
+    setStopLayer(12, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the stop layer specified higher in the hierarchy applies because
+// it appears before the stop layer applied lower in the hierarchy.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childApplied) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 13);
+    setStopLayer(11, 111);
+
+    std::vector<uint32_t> expected = {1, 11, 12, 121, 122, 1221, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that the stop layer works on mirrored hierarchies.
+TEST_F(LayerSnapshotTest, stopLayer_mirrorHierarchy) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    createDisplayMirrorLayer(3, ui::LayerStack::fromValue(0), 121);
+    setLayerStack(3, 1);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 122, 1221, 13, 2, 3, 1, 11, 111, 12};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
 } // namespace android::surfaceflinger::frontend

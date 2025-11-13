@@ -34,8 +34,7 @@
 #include <input/PrintTools.h>
 #include <linux/input-event-codes.h>
 #include <log/log_main.h>
-#include <stats_pull_atom_callback.h>
-#include <statslog.h>
+#include <statslog_inputflinger.h>
 #include "InputReaderBase.h"
 #include "TouchCursorInputMapperCommon.h"
 #include "TouchpadInputMapper.h"
@@ -107,7 +106,7 @@ int32_t linuxBusToInputDeviceBusEnum(int32_t linuxBus, bool isUsiStylus) {
     if (isUsiStylus) {
         // This is a stylus connected over the Universal Stylus Initiative (USI) protocol.
         // For metrics purposes, we treat this protocol as a separate bus.
-        return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USI;
+        return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USI;
     }
 
     // When adding cases to this switch, also add them to the copy of this method in
@@ -115,11 +114,11 @@ int32_t linuxBusToInputDeviceBusEnum(int32_t linuxBus, bool isUsiStylus) {
     // TODO(b/286394420): deduplicate this method with the one in InputDeviceMetricsCollector.cpp.
     switch (linuxBus) {
         case BUS_USB:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USB;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USB;
         case BUS_BLUETOOTH:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__BLUETOOTH;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__BLUETOOTH;
         default:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__OTHER;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__OTHER;
     }
 }
 
@@ -181,16 +180,19 @@ public:
 
 private:
     MetricsAccumulator() {
-        AStatsManager_setPullAtomCallback(android::util::TOUCHPAD_USAGE, /*metadata=*/nullptr,
+        AStatsManager_setPullAtomCallback(android::inputflinger::stats::TOUCHPAD_USAGE,
+                                          /*metadata=*/nullptr,
                                           MetricsAccumulator::pullAtomCallback, /*cookie=*/nullptr);
     }
 
-    ~MetricsAccumulator() { AStatsManager_clearPullAtomCallback(android::util::TOUCHPAD_USAGE); }
+    ~MetricsAccumulator() {
+        AStatsManager_clearPullAtomCallback(android::inputflinger::stats::TOUCHPAD_USAGE);
+    }
 
     static AStatsManager_PullAtomCallbackReturn pullAtomCallback(int32_t atomTag,
                                                                  AStatsEventList* outEventList,
                                                                  void* cookie) {
-        LOG_ALWAYS_FATAL_IF(atomTag != android::util::TOUCHPAD_USAGE);
+        LOG_ALWAYS_FATAL_IF(atomTag != android::inputflinger::stats::TOUCHPAD_USAGE);
         MetricsAccumulator& accumulator = MetricsAccumulator::getInstance();
         accumulator.produceAtomsAndReset(*outEventList);
         return AStatsManager_PULL_SUCCESS;
@@ -205,9 +207,10 @@ private:
     void produceAtomsLocked(AStatsEventList& outEventList) const REQUIRES(mLock) {
         for (auto& [id, counters] : mCounters) {
             auto [busId, vendorId, productId, versionId] = id;
-            addAStatsEvent(&outEventList, android::util::TOUCHPAD_USAGE, vendorId, productId,
-                           versionId, linuxBusToInputDeviceBusEnum(busId, /*isUsi=*/false),
-                           counters.fingers, counters.palms, counters.twoFingerSwipeGestures,
+            addAStatsEvent(&outEventList, android::inputflinger::stats::TOUCHPAD_USAGE, vendorId,
+                           productId, versionId,
+                           linuxBusToInputDeviceBusEnum(busId, /*isUsi=*/false), counters.fingers,
+                           counters.palms, counters.twoFingerSwipeGestures,
                            counters.threeFingerSwipeGestures, counters.fourFingerSwipeGestures,
                            counters.pinchGestures);
         }

@@ -73,7 +73,7 @@ public:
         outProto.set_device_id(event.deviceId);
         outProto.set_display_id(event.displayId.val());
         outProto.set_classification(static_cast<int32_t>(event.classification));
-        outProto.set_flags(event.flags);
+        outProto.set_flags(event.flags.get());
         outProto.set_policy_flags(event.policyFlags);
         outProto.set_button_state(event.buttonState);
         outProto.set_action_button(event.actionButton);
@@ -137,7 +137,7 @@ public:
         std::visit([&](auto entry) { outProto.set_event_id(entry.id); }, args.eventEntry);
         outProto.set_vsync_id(args.vsyncId);
         outProto.set_window_id(args.windowId);
-        outProto.set_resolved_flags(args.resolvedFlags);
+        outProto.set_resolved_flags(args.resolvedMotionFlags.get());
 
         if (isRedacted) {
             return;

@@ -18,6 +18,7 @@
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
 #include <ftl/fake_guard.h>
+#include <ui/ScreenPartStatus.h>
 
 #include "DisplayHardware/DisplayMode.h"
 
@@ -241,8 +242,6 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
         ASSERT_TRUE(hwcDisplayId);
         const auto port = Case::Display::PORT::value;
         ASSERT_TRUE(port);
-        mFlinger.getHwComposer().allocatePhysicalDisplay(*hwcDisplayId, *displayId, *port,
-                                                         std::nullopt);
         DisplayModePtr activeMode = DisplayMode::Builder(Case::Display::HWC_ACTIVE_CONFIG_ID)
                                             .setResolution(Case::Display::RESOLUTION)
                                             .setVsyncPeriod(DEFAULT_VSYNC_PERIOD)
@@ -263,6 +262,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
 
         const auto it = mFlinger.mutablePhysicalDisplays()
                                 .emplace_or_replace(*displayId, displayToken, *displayId, *port,
+                                                    android::ScreenPartStatus::UNSUPPORTED,
                                                     *kConnectionTypeOpt, makeModes(activeMode),
                                                     std::move(colorModes), std::nullopt)
                                 .first;

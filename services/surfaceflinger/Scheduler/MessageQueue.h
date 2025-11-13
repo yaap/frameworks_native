@@ -66,7 +66,7 @@ public:
     virtual ~MessageQueue() = default;
 
     virtual void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>,
-                                   frametimeline::TokenManager&,
+                                   scheduler::TokenManager&,
                                    std::chrono::nanoseconds workDuration) = 0;
     virtual void destroyVsync() = 0;
     virtual void setDuration(std::chrono::nanoseconds workDuration) = 0;
@@ -118,7 +118,7 @@ private:
     const sp<Handler> mHandler;
 
     struct Vsync {
-        frametimeline::TokenManager* tokenManager = nullptr;
+        scheduler::TokenManager* tokenManager = nullptr;
 
         mutable std::mutex mutex;
         std::unique_ptr<scheduler::VSyncCallbackRegistration> registration GUARDED_BY(mutex);
@@ -139,7 +139,7 @@ private:
 public:
     explicit MessageQueue(ICompositor&);
 
-    void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>, frametimeline::TokenManager&,
+    void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>, scheduler::TokenManager&,
                            std::chrono::nanoseconds workDuration) override;
     void destroyVsync() override;
     void setDuration(std::chrono::nanoseconds workDuration) override;

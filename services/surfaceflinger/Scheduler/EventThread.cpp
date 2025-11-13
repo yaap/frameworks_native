@@ -45,7 +45,8 @@
 #include <common/FlagManager.h>
 #include <scheduler/FrameRateMode.h>
 #include <scheduler/VsyncConfig.h>
-#include "FrameTimeline/FrameTimeline.h"
+#include "FrameTimeline.h"
+#include "Scheduler.h"
 #include "VSyncDispatch.h"
 
 #include "EventThread.h"
@@ -95,9 +96,18 @@ std::string toString(const DisplayEventReceiver::Event& event) {
                                 "}",
                                 to_string(event.header.displayId).c_str(), event.vsync.count,
                                 event.vsync.vsyncData.preferredExpectedPresentationTime());
+        case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
+            return StringPrintf("ModeAndFrameRateOverridesChanged{displayId=%s, modeId=%u, "
+                                "appVsyncOffset=%" PRId64 ", presentationDeadline=%" PRId64 "}",
+                                to_string(event.header.displayId).c_str(), event.modeChange.modeId,
+                                event.modeChange.appVsyncOffset,
+                                event.modeChange.presentationDeadline);
         case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
-            return StringPrintf("ModeChanged{displayId=%s, modeId=%u}",
-                                to_string(event.header.displayId).c_str(), event.modeChange.modeId);
+            return StringPrintf("ModeChanged{displayId=%s, modeId=%u, appVsyncOffset=%" PRId64
+                                ", presentationDeadline=%" PRId64 "}",
+                                to_string(event.header.displayId).c_str(), event.modeChange.modeId,
+                                event.modeChange.appVsyncOffset,
+                                event.modeChange.presentationDeadline);
         case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
             return StringPrintf("HdcpLevelsChange{displayId=%s, connectedLevel=%d, maxLevel=%d}",
                                 to_string(event.header.displayId).c_str(),
@@ -153,12 +163,17 @@ DisplayEventReceiver::Event makeVSync(PhysicalDisplayId displayId, nsecs_t times
     return event;
 }
 
-DisplayEventReceiver::Event makeModeChanged(const scheduler::FrameRateMode& mode) {
+DisplayEventReceiver::Event makeModeChanged(
+        const scheduler::FrameRateMode& mode, scheduler::VsyncConfigSet config,
+        DisplayEventType eventType = DisplayEventType::DISPLAY_EVENT_MODE_CHANGE) {
     DisplayEventReceiver::Event event;
-    event.header = {DisplayEventType::DISPLAY_EVENT_MODE_CHANGE,
-                    mode.modePtr->getPhysicalDisplayId(), systemTime()};
+    event.header = {eventType, mode.modePtr->getPhysicalDisplayId(), systemTime()};
     event.modeChange.modeId = ftl::to_underlying(mode.modePtr->getId());
     event.modeChange.vsyncPeriod = mode.fps.getPeriodNsecs();
+    event.modeChange.appVsyncOffset = config.late.appOffset;
+    event.modeChange.presentationDeadline =
+            scheduler::Scheduler::getPresentationDeadline(mode.fps,
+                                                          Duration::fromNs(config.late.sfOffset));
     return event;
 }
 
@@ -283,6 +298,13 @@ status_t EventThreadConnection::postEvent(const DisplayEventReceiver::Event& eve
         return toStatus(size);
     }
 
+    if (FlagManager::getInstance().unify_refresh_rate_callbacks()) {
+        mPendingEvents.emplace_back(event);
+        const auto size = DisplayEventReceiver::sendEvents(&mChannel, mPendingEvents.data(),
+                                                           mPendingEvents.size());
+        mPendingEvents.clear();
+        return toStatus(size);
+    }
     auto size = DisplayEventReceiver::sendEvents(&mChannel, &event, 1);
     return toStatus(size);
 }
@@ -294,10 +316,11 @@ EventThread::~EventThread() = default;
 namespace impl {
 
 EventThread::EventThread(const char* name, std::shared_ptr<scheduler::VsyncSchedule> vsyncSchedule,
-                         android::frametimeline::TokenManager* tokenManager,
+                         android::scheduler::TokenManager* tokenManager,
                          IEventThreadCallback& callback, std::chrono::nanoseconds workDuration,
                          std::chrono::nanoseconds readyDuration)
       : mThreadName(name),
+        mEventThreadStateName(base::StringPrintf("EventThreadState-%s", name)),
         mVsyncTracer(base::StringPrintf("VSYNC-%s", name), 0),
         mWorkDuration(base::StringPrintf("VsyncWorkDuration-%s", name), workDuration),
         mReadyDuration(readyDuration),
@@ -328,7 +351,7 @@ EventThread::EventThread(const char* name, std::shared_ptr<scheduler::VsyncSched
 EventThread::~EventThread() {
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        mState = State::Quit;
+        updateState(State::Quit);
         mCondition.notify_all();
     }
     mThread.join();
@@ -351,8 +374,7 @@ sp<EventThreadConnection> EventThread::createEventConnection(
     auto connection = sp<EventThreadConnection>::make(const_cast<EventThread*>(this),
                                                       IPCThreadState::self()->getCallingUid(),
                                                       eventRegistration);
-    if (FlagManager::getInstance().misc1() &&
-        !FlagManager::getInstance().disable_sched_fifo_sf_sched()) {
+    if (!FlagManager::getInstance().disable_sched_fifo_sf_sched()) {
         const int policy = SCHED_FIFO;
         connection->setMinSchedulerPolicy(policy, sched_get_priority_min(policy));
     }
@@ -439,6 +461,8 @@ void EventThread::enableSyntheticVsync(bool enable) {
         return;
     }
 
+    ALOGD("%s synthetic vsync", enable ? "Enabling" : "Disabling");
+
     mVSyncState->synthetic = enable;
     mCondition.notify_all();
 }
@@ -478,10 +502,27 @@ void EventThread::onHotplugConnectionError(int32_t errorCode) {
     mCondition.notify_all();
 }
 
-void EventThread::onModeChanged(const scheduler::FrameRateMode& mode) {
+void EventThread::onModeAndFrameRateOverridesChanged(PhysicalDisplayId displayId,
+                                                     const scheduler::FrameRateMode& mode,
+                                                     std::vector<FrameRateOverride> overrides,
+                                                     scheduler::VsyncConfigSet config) {
     std::lock_guard<std::mutex> lock(mMutex);
 
-    mPendingEvents.push_back(makeModeChanged(mode));
+    for (auto frameRateOverride : overrides) {
+        mPendingEvents.push_back(makeFrameRateOverrideEvent(displayId, frameRateOverride));
+    }
+    mPendingEvents.push_back(
+            makeModeChanged(mode, config,
+                            DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE));
+
+    mCondition.notify_all();
+}
+
+void EventThread::onModeChanged(const scheduler::FrameRateMode& mode,
+                                scheduler::VsyncConfigSet config) {
+    std::lock_guard<std::mutex> lock(mMutex);
+
+    mPendingEvents.push_back(makeModeChanged(mode, config));
     mCondition.notify_all();
 }
 
@@ -564,17 +605,17 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
             const bool vsyncOmitted =
                     FlagManager::getInstance().no_vsyncs_on_screen_off() && mVSyncState->omitted;
             if (vsyncOmitted) {
-                mState = State::Idle;
+                updateState(State::Idle);
                 SFTRACE_INT("VsyncPendingScreenOn", 1);
             } else {
-                mState = mVSyncState->synthetic ? State::SyntheticVSync : State::VSync;
+                updateState(mVSyncState->synthetic ? State::SyntheticVSync : State::VSync);
                 if (FlagManager::getInstance().no_vsyncs_on_screen_off()) {
                     SFTRACE_INT("VsyncPendingScreenOn", 0);
                 }
             }
         } else {
             ALOGW_IF(!mVSyncState, "Ignoring VSYNC request while display is disconnected");
-            mState = State::Idle;
+            updateState(State::Idle);
         }
 
         if (mState == State::VSync) {
@@ -641,10 +682,11 @@ bool EventThread::shouldConsumeEvent(const DisplayEventReceiver::Event& event,
         case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
             return true;
 
-        case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE: {
+        case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
+            [[fallthrough]];
+        case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
             return connection->mEventRegistration.test(
                     gui::ISurfaceComposer::EventRegistration::modeChanged);
-        }
 
         case DisplayEventType::DISPLAY_EVENT_MODE_REJECTION:
             return true;
@@ -820,6 +862,16 @@ void EventThread::dump(std::string& result) const {
     result += '\n';
 }
 
+void EventThread::updateState(State state) {
+    if (state == mState) {
+        return;
+    }
+    mState = state;
+
+    SFTRACE_ASYNC_FOR_TRACK_END(mEventThreadStateName.c_str(), 0);
+    SFTRACE_ASYNC_FOR_TRACK_BEGIN(mEventThreadStateName.c_str(), toCString(mState), 0);
+}
+
 const char* EventThread::toCString(State state) {
     switch (state) {
         case State::Idle:
@@ -854,6 +906,16 @@ scheduler::VSyncCallbackRegistration EventThread::onNewVsyncScheduleInternal(
                                      .readyDuration = mReadyDuration.count(),
                                      .lastVsync = mLastVsyncCallbackTime.ns(),
                                      .committedVsyncOpt = mLastCommittedVsyncTime.ns()});
+    }
+
+    // Hotplug disconnect causes mVSyncState to get nuked when the pacesetter display is
+    // disconnected. Without mVSyncState, all vsync events are ignored, and thus the apps freeze
+    // their transactions. The only way to revive the 'mVSyncState' right now is a new Hotplug
+    // connect event. We should also revive 'mVSyncState' here so that when a new pacesetter is
+    // selected, it can have a new vsync state.
+    if (FlagManager::getInstance().pacesetter_selection() && !mVSyncState) {
+        SFTRACE_FORMAT_INSTANT("OnNewVsyncScheduleInternalNewState");
+        mVSyncState.emplace();
     }
     return oldRegistration;
 }

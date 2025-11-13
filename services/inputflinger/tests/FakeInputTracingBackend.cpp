@@ -42,7 +42,7 @@ MotionEvent toInputEvent(const trace::TracedMotionEvent& e,
                          const std::array<uint8_t, 32>& hmac) {
     MotionEvent traced;
     traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action, e.actionButton,
-                      dispatchArgs.resolvedFlags, e.edgeFlags, e.metaState, e.buttonState,
+                      dispatchArgs.resolvedMotionFlags, e.edgeFlags, e.metaState, e.buttonState,
                       e.classification, dispatchArgs.transform, e.xPrecision, e.yPrecision,
                       e.xCursorPosition, e.yCursorPosition, dispatchArgs.rawTransform, e.downTime,
                       e.eventTime, e.pointerProperties.size(), e.pointerProperties.data(),
@@ -53,9 +53,9 @@ MotionEvent toInputEvent(const trace::TracedMotionEvent& e,
 KeyEvent toInputEvent(const trace::TracedKeyEvent& e, const trace::WindowDispatchArgs& dispatchArgs,
                       const std::array<uint8_t, 32>& hmac) {
     KeyEvent traced;
-    traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action,
-                      dispatchArgs.resolvedFlags, e.keyCode, e.scanCode, e.metaState,
-                      dispatchArgs.resolvedKeyRepeatCount, e.downTime, e.eventTime);
+    traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action, e.flags, e.keyCode,
+                      e.scanCode, e.metaState, dispatchArgs.resolvedKeyRepeatCount, e.downTime,
+                      e.eventTime);
     return traced;
 }
 

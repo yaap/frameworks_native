@@ -35,7 +35,6 @@ namespace android {
 
 static const mat4 mtxIdentity;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 SurfaceTexture::SurfaceTexture(uint32_t tex, uint32_t texTarget, bool useFenceSync,
                                bool isControlledByApp)
       : ConsumerBase(isControlledByApp),
@@ -76,7 +75,6 @@ SurfaceTexture::SurfaceTexture(uint32_t texTarget, bool useFenceSync, bool isCon
         mOpMode(OpMode::detached) {
     initialize();
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
 SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
                                uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
@@ -558,7 +556,6 @@ void SurfaceTexture::FrameAvailableListenerProxy::onFrameAvailable(const BufferI
     }
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
 void SurfaceTexture::onSetFrameRate(float frameRate, int8_t compatibility,
                                     int8_t changeFrameRateStrategy) {
     SFT_LOGV("onSetFrameRate: %.2f", frameRate);
@@ -572,7 +569,6 @@ void SurfaceTexture::onSetFrameRate(float frameRate, int8_t compatibility,
         listener->onSetFrameRate(frameRate, compatibility, changeFrameRateStrategy);
     }
 }
-#endif
 
 void SurfaceTexture::initialize() {
     SFT_LOGV("SurfaceTexture");

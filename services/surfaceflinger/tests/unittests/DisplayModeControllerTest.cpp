@@ -30,6 +30,7 @@
 #include <ftl/fake_guard.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <ui/ScreenPartStatus.h>
 
 #define EXPECT_DISPLAY_MODE_REQUEST(expected, requestOpt)                               \
     ASSERT_TRUE(requestOpt);                                                            \
@@ -58,7 +59,7 @@ public:
                 });
 
         constexpr uint8_t kPort = 111;
-        EXPECT_CALL(*mComposerHal, getDisplayIdentificationData(kHwcDisplayId, _, _))
+        EXPECT_CALL(*mComposerHal, getDisplayIdentificationData(kHwcDisplayId, _, _, _))
                 .WillOnce(DoAll(SetArgPointee<1>(kPort), SetArgPointee<2>(getInternalEdid()),
                                 Return(hal::Error::NONE)));
 
@@ -72,7 +73,9 @@ public:
         ASSERT_TRUE(infoOpt);
 
         mDisplayId = infoOpt->id;
-        mDisplaySnapshotOpt.emplace(mDisplayId, infoOpt->port, ui::DisplayConnectionType::Internal,
+        mDisplaySnapshotOpt.emplace(mDisplayId, infoOpt->port,
+                                    android::ScreenPartStatus::UNSUPPORTED,
+                                    ui::DisplayConnectionType::Internal,
                                     makeModes(kMode60, kMode90, kMode120), ui::ColorModes{},
                                     std::nullopt);
 

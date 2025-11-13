@@ -285,8 +285,6 @@ TEST_F(GestureConverterTest, DragWithButton) {
 }
 
 TEST_F(GestureConverterTest, Scroll) {
-    input_flags::enable_touchpad_no_focus_change(true);
-
     const nsecs_t downTime = 12345;
     InputDeviceContext deviceContext(*mDevice, EVENTHUB_ID);
     GestureConverter converter(*mReader->getContext(), deviceContext, DEVICE_ID);
@@ -308,8 +306,8 @@ TEST_F(GestureConverterTest, Scroll) {
     ASSERT_THAT(args,
                 Each(VariantWith<NotifyMotionArgs>(
                         AllOf(WithMotionClassification(MotionClassification::TWO_FINGER_SWIPE),
-                              WithFlags(AMOTION_EVENT_FLAG_IS_GENERATED_GESTURE |
-                                        AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE),
+                              WithFlags({MotionFlag::IS_GENERATED_GESTURE,
+                                         MotionFlag::NO_FOCUS_CHANGE}),
                               WithToolType(ToolType::FINGER),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT)))));
 
@@ -321,8 +319,8 @@ TEST_F(GestureConverterTest, Scroll) {
                               WithGestureScrollDistance(0, 5, EPSILON),
                               WithMotionClassification(MotionClassification::TWO_FINGER_SWIPE),
                               WithToolType(ToolType::FINGER),
-                              WithFlags(AMOTION_EVENT_FLAG_IS_GENERATED_GESTURE |
-                                        AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE),
+                              WithFlags({MotionFlag::IS_GENERATED_GESTURE,
+                                         MotionFlag::NO_FOCUS_CHANGE}),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT)))));
 
     Gesture flingGesture(kGestureFling, ARBITRARY_GESTURE_TIME, ARBITRARY_GESTURE_TIME, 1, 1,
@@ -335,8 +333,8 @@ TEST_F(GestureConverterTest, Scroll) {
                                           WithGestureScrollDistance(0, 0, EPSILON),
                                           WithMotionClassification(
                                                   MotionClassification::TWO_FINGER_SWIPE),
-                                          WithFlags(AMOTION_EVENT_FLAG_IS_GENERATED_GESTURE |
-                                                    AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags({MotionFlag::IS_GENERATED_GESTURE,
+                                                     MotionFlag::NO_FOCUS_CHANGE}))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
                                           WithCoords(0, 0),
@@ -957,8 +955,6 @@ TEST_F(GestureConverterTest, DisablingSystemGestures_EndsOngoingMultiFingerSwipe
 }
 
 TEST_F(GestureConverterTest, Pinch_Inwards) {
-    input_flags::enable_touchpad_no_focus_change(true);
-
     InputDeviceContext deviceContext(*mDevice, EVENTHUB_ID);
     GestureConverter converter(*mReader->getContext(), deviceContext, DEVICE_ID);
     converter.setDisplayId(ui::LogicalDisplayId::DEFAULT);
@@ -982,7 +978,7 @@ TEST_F(GestureConverterTest, Pinch_Inwards) {
                               WithGesturePinchScaleFactor(1.0f, EPSILON),
                               WithToolType(ToolType::FINGER),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT),
-                              WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE)))));
+                              WithFlags(MotionFlag::NO_FOCUS_CHANGE)))));
 
     Gesture updateGesture(kGesturePinch, ARBITRARY_GESTURE_TIME, ARBITRARY_GESTURE_TIME,
                           /* dz= */ 0.8, GESTURES_ZOOM_UPDATE);
@@ -995,7 +991,7 @@ TEST_F(GestureConverterTest, Pinch_Inwards) {
                               WithPointerCoords(0, -80, 0), WithPointerCoords(1, 80, 0),
                               WithPointerCount(2u), WithToolType(ToolType::FINGER),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT),
-                              WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE)))));
+                              WithFlags(MotionFlag::NO_FOCUS_CHANGE)))));
 
     Gesture endGesture(kGesturePinch, ARBITRARY_GESTURE_TIME, ARBITRARY_GESTURE_TIME, /* dz= */ 1,
                        GESTURES_ZOOM_END);
@@ -1008,13 +1004,13 @@ TEST_F(GestureConverterTest, Pinch_Inwards) {
                                           WithMotionClassification(MotionClassification::PINCH),
                                           WithGesturePinchScaleFactor(1.0f, EPSILON),
                                           WithPointerCount(2u),
-                                          WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags(MotionFlag::NO_FOCUS_CHANGE))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_UP),
                                           WithMotionClassification(MotionClassification::PINCH),
                                           WithGesturePinchScaleFactor(1.0f, EPSILON),
                                           WithPointerCount(1u),
-                                          WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags(MotionFlag::NO_FOCUS_CHANGE))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
                                           WithCoords(0, 0),
@@ -1026,8 +1022,6 @@ TEST_F(GestureConverterTest, Pinch_Inwards) {
 }
 
 TEST_F(GestureConverterTest, Pinch_Outwards) {
-    input_flags::enable_touchpad_no_focus_change(true);
-
     InputDeviceContext deviceContext(*mDevice, EVENTHUB_ID);
     GestureConverter converter(*mReader->getContext(), deviceContext, DEVICE_ID);
     converter.setDisplayId(ui::LogicalDisplayId::DEFAULT);
@@ -1051,7 +1045,7 @@ TEST_F(GestureConverterTest, Pinch_Outwards) {
                               WithGesturePinchScaleFactor(1.0f, EPSILON),
                               WithToolType(ToolType::FINGER),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT),
-                              WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE)))));
+                              WithFlags(MotionFlag::NO_FOCUS_CHANGE)))));
 
     Gesture updateGesture(kGesturePinch, ARBITRARY_GESTURE_TIME, ARBITRARY_GESTURE_TIME,
                           /* dz= */ 1.1, GESTURES_ZOOM_UPDATE);
@@ -1064,7 +1058,7 @@ TEST_F(GestureConverterTest, Pinch_Outwards) {
                               WithPointerCoords(0, -110, 0), WithPointerCoords(1, 110, 0),
                               WithPointerCount(2u), WithToolType(ToolType::FINGER),
                               WithDisplayId(ui::LogicalDisplayId::DEFAULT),
-                              WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE)))));
+                              WithFlags(MotionFlag::NO_FOCUS_CHANGE)))));
 
     Gesture endGesture(kGesturePinch, ARBITRARY_GESTURE_TIME, ARBITRARY_GESTURE_TIME, /* dz= */ 1,
                        GESTURES_ZOOM_END);
@@ -1077,13 +1071,13 @@ TEST_F(GestureConverterTest, Pinch_Outwards) {
                                           WithMotionClassification(MotionClassification::PINCH),
                                           WithGesturePinchScaleFactor(1.0f, EPSILON),
                                           WithPointerCount(2u),
-                                          WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags(MotionFlag::NO_FOCUS_CHANGE))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_UP),
                                           WithMotionClassification(MotionClassification::PINCH),
                                           WithGesturePinchScaleFactor(1.0f, EPSILON),
                                           WithPointerCount(1u),
-                                          WithFlags(AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags(MotionFlag::NO_FOCUS_CHANGE))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
                                           WithCoords(0, 0),
@@ -1179,8 +1173,6 @@ TEST_F(GestureConverterTest, ResetWithButtonPressed) {
 }
 
 TEST_F(GestureConverterTest, ResetDuringScroll) {
-    input_flags::enable_touchpad_no_focus_change(true);
-
     InputDeviceContext deviceContext(*mDevice, EVENTHUB_ID);
     GestureConverter converter(*mReader->getContext(), deviceContext, DEVICE_ID);
     converter.setDisplayId(ui::LogicalDisplayId::DEFAULT);
@@ -1196,8 +1188,8 @@ TEST_F(GestureConverterTest, ResetDuringScroll) {
                                           WithGestureScrollDistance(0, 0, EPSILON),
                                           WithMotionClassification(
                                                   MotionClassification::TWO_FINGER_SWIPE),
-                                          WithFlags(AMOTION_EVENT_FLAG_IS_GENERATED_GESTURE |
-                                                    AMOTION_EVENT_FLAG_NO_FOCUS_CHANGE))),
+                                          WithFlags({MotionFlag::IS_GENERATED_GESTURE,
+                                                     MotionFlag::NO_FOCUS_CHANGE}))),
                             VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
                                           WithCoords(0, 0),

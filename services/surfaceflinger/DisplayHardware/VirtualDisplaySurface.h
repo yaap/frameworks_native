@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <optional>
 #include <string>
 
 #include <compositionengine/DisplaySurface.h>
@@ -24,8 +23,6 @@
 #include <gui/ConsumerBase.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <ui/DisplayId.h>
-
-#include <ui/DisplayIdentification.h>
 
 namespace android {
 
@@ -95,6 +92,8 @@ public:
     // any client composition prediction.
     virtual bool supportsCompositionStrategyPrediction() const override { return false; };
 
+    void onFirstRef() override;
+
 private:
     enum Source : size_t {
         SOURCE_SINK = 0,
@@ -103,6 +102,8 @@ private:
         ftl_first = SOURCE_SINK,
         ftl_last = SOURCE_SCRATCH,
     };
+
+    void initializeConsumer();
 
     virtual ~VirtualDisplaySurface();
 

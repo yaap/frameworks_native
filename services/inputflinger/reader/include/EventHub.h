@@ -669,7 +669,6 @@ private:
         };
         std::map<int /*axis*/, AxisState> absState;
 
-        std::string configurationFile;
         std::shared_ptr<PropertyMap> configuration;
         std::unique_ptr<VirtualKeyMap> virtualKeyMap;
         KeyMap keyMap;
@@ -782,6 +781,8 @@ private:
     void addDeviceInotify();
 
     void handleSysfsNodeChangeNotificationsLocked() REQUIRES(mLock);
+
+    void handleDeviceChangesLocked(std::vector<RawEvent>& events, nsecs_t now) REQUIRES(mLock);
 
     // Protect all internal state.
     mutable std::mutex mLock;

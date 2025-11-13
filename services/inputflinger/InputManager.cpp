@@ -125,15 +125,15 @@ std::shared_ptr<IInputFlingerRust> createInputFlingerRust() {
 InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
                            InputDispatcherPolicyInterface& dispatcherPolicy,
                            PointerChoreographerPolicyInterface& choreographerPolicy,
-                           InputFilterPolicyInterface& inputFilterPolicy) {
+                           InputFilterPolicyInterface& inputFilterPolicy, JNIEnv* env) {
     mInputFlingerRust = createInputFlingerRust();
 
-    mDispatcher = createInputDispatcher(dispatcherPolicy);
+    mDispatcher = createInputDispatcher(dispatcherPolicy, env);
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputDispatcher", *mDispatcher));
 
     mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
-                                                 inputFilterPolicy);
+                                                 inputFilterPolicy, env);
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
 
@@ -156,7 +156,7 @@ InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("UnwantedInteractionBlocker", *mBlocker));
 
-    mReader = createInputReader(readerPolicy, *mTracingStages.back());
+    mReader = createInputReader(readerPolicy, *mTracingStages.back(), env);
 }
 
 InputManager::~InputManager() {

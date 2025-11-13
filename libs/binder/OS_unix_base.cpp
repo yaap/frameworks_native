@@ -101,7 +101,7 @@ ssize_t sendMessageOnSocket(const RpcTransportFd& socket, iovec* iovs, int niovs
         memcpy(CMSG_DATA(cmsg), fds, fdsByteSize);
 
         msg.msg_controllen = CMSG_SPACE(fdsByteSize);
-        return TEMP_FAILURE_RETRY(sendmsg(socket.fd.get(), &msg, MSG_NOSIGNAL | MSG_CMSG_CLOEXEC));
+        return TEMP_FAILURE_RETRY(sendmsg(socket.fd.get(), &msg, MSG_NOSIGNAL));
     }
 
     msghdr msg{
@@ -125,7 +125,8 @@ ssize_t receiveMessageFromSocket(const RpcTransportFd& socket, iovec* iovs, int 
                 .msg_control = msgControlBuf,
                 .msg_controllen = sizeof(msgControlBuf),
         };
-        ssize_t processSize = TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, MSG_NOSIGNAL));
+        ssize_t processSize =
+                TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, MSG_NOSIGNAL | MSG_CMSG_CLOEXEC));
         if (processSize < 0) {
             return -1;
         }

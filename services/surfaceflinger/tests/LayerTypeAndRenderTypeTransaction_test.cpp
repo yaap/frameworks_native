@@ -749,6 +749,163 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBorderSettings) {
     }
 }
 
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBoxShadowSettings) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 64;
+    const uint32_t parentSize = size * 3;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, size, size));
+
+    Transaction()
+            .setCrop(parent, Rect(0, 0, parentSize, parentSize))
+            .reparent(child, parent)
+            .setPosition(child, size, size)
+            .setCornerRadius(child, 20.0f)
+            .apply(true);
+
+    {
+        gui::BoxShadowSettings settings;
+        gui::BoxShadowSettings::BoxShadowParams boxShadow;
+        boxShadow.blurRadius = 20.0f;
+        boxShadow.spreadRadius = 20.0f;
+        boxShadow.color = 0xff000000;
+        boxShadow.offsetX = 0;
+        boxShadow.offsetY = 0;
+        settings.boxShadows.push_back(boxShadow);
+
+        Transaction().setBoxShadowSettings(child, settings).apply(true);
+
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                               "testdata/SetBoxShadowSettings_LargeBlur.png");
+    }
+
+    {
+        gui::BoxShadowSettings settings;
+        gui::BoxShadowSettings::BoxShadowParams boxShadow;
+        boxShadow.blurRadius = 5.0f;
+        boxShadow.spreadRadius = 20.0f;
+        boxShadow.color = 0xff0088ff;
+        boxShadow.offsetX = 20;
+        boxShadow.offsetY = -20;
+        settings.boxShadows.push_back(boxShadow);
+
+        Transaction().setBoxShadowSettings(child, settings).apply(true);
+
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                               "testdata/SetBoxShadowSettings_SmallBlur.png");
+    }
+
+    {
+        gui::BoxShadowSettings settings;
+        gui::BoxShadowSettings::BoxShadowParams boxShadow;
+        boxShadow.blurRadius = 5.0f;
+        boxShadow.spreadRadius = 10.0f;
+        boxShadow.color = 0xffff8888;
+        boxShadow.offsetX = 20;
+        boxShadow.offsetY = -20;
+        settings.boxShadows.push_back(boxShadow);
+
+        boxShadow.blurRadius = 5.0f;
+        boxShadow.spreadRadius = 10.0f;
+        boxShadow.color = 0xff8888ff;
+        boxShadow.offsetX = -20;
+        boxShadow.offsetY = 20;
+        settings.boxShadows.push_back(boxShadow);
+
+        Transaction().setBoxShadowSettings(child, settings).apply(true);
+
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                               "testdata/SetBoxShadowSettings_Multiple.png");
+    }
+
+    {
+        gui::BoxShadowSettings settings;
+        gui::BoxShadowSettings::BoxShadowParams boxShadow;
+        boxShadow.blurRadius = 5.0f;
+        boxShadow.spreadRadius = 20.0f;
+        boxShadow.color = 0xff8888ff;
+        boxShadow.offsetX = 20;
+        boxShadow.offsetY = -20;
+        settings.boxShadows.push_back(boxShadow);
+
+        Transaction().setBoxShadowSettings(child, settings).setAlpha(child, 0.2f).apply(true);
+
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                               "testdata/SetBoxShadowSettings_LayerAlpha.png");
+    }
+
+    {
+        gui::BoxShadowSettings settings;
+        gui::BoxShadowSettings::BoxShadowParams boxShadow;
+        boxShadow.blurRadius = 5.0f;
+        boxShadow.spreadRadius = 5.0f;
+        boxShadow.color = 0xff8888ff;
+        boxShadow.offsetX = 10;
+        boxShadow.offsetY = 10;
+        settings.boxShadows.push_back(boxShadow);
+
+        Transaction()
+                .setBoxShadowSettings(child, settings)
+                .setCornerRadius(child, 0)
+                .setAlpha(child, 1.0)
+                .apply(true);
+
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                               "testdata/SetBoxShadowSettings_Square.png");
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, CropElevationShadowByParent) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 64;
+    const uint32_t parentSize = size * 3;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::BLUE, size, size));
+
+    SurfaceComposerClient::getDefault()->setGlobalShadowSettings({1, 0, 0, 0.5f}, {0, 1, 0, 0.5f},
+                                                                 0, 250.0f, 800.0f);
+
+    // Global shadow settings are committed after snapshot updates so we have to perform a commit
+    // before enabling layer shadows.
+    Transaction().apply(true);
+
+    ui::Size resolution = mRenderPathHarness.getRotatedResolution();
+    int x = resolution.width / 2;
+    int y = 500;
+
+    Transaction()
+            .setPosition(parent, x, y)
+            .setCrop(parent, Rect(0, 0, parentSize / 2, parentSize))
+            .reparent(child, parent)
+            .setPosition(child, size, size)
+            .setCrop(child, Rect(0, 0, size, size))
+            .setPosition(child, size, size)
+            .setCornerRadius(child, 20.0f)
+            .setShadowRadius(child, 20.0f)
+            .apply(true);
+
+    auto shot = getScreenCapture();
+
+    shot->expectBufferMatchesImageFromFile(Rect(x, y, x + parentSize, y + parentSize),
+                                           "testdata/CropElevationShadowByParent.png");
+}
+
 TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBackgroundBlurRadiusSimple) {
     if (!deviceSupportsBlurs()) GTEST_SKIP();
     if (!deviceUsesSkiaRenderEngine()) GTEST_SKIP();
@@ -995,6 +1152,70 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBufferFormat) {
         shot->expectColor(crop, Color::RED);
     }
 }
+
+class RotatedVirtualDisplayTest
+      : public LayerTypeTransactionHarness,
+        public ::testing::WithParamInterface<std::tuple<uint32_t, RenderPath, ui::Rotation>> {
+public:
+    RotatedVirtualDisplayTest()
+          : LayerTypeTransactionHarness(std::get<0>(GetParam())),
+            mRenderPathHarness(this, std::get<1>(GetParam()), std::get<2>(GetParam())) {}
+
+    std::unique_ptr<ScreenCapture> getScreenCapture() {
+        return mRenderPathHarness.getScreenCapture();
+    }
+
+protected:
+    LayerRenderPathTestHarness mRenderPathHarness;
+};
+
+INSTANTIATE_TEST_CASE_P(RotatedVirtualDisplayTests, RotatedVirtualDisplayTest,
+                        ::testing::Combine(::testing::Values(static_cast<uint32_t>(
+                                                   ISurfaceComposerClient::eFXSurfaceBufferState)),
+                                           ::testing::Values(RenderPath::VIRTUAL_DISPLAY),
+                                           ::testing::Values(ui::Rotation::Rotation0,
+                                                             ui::Rotation::Rotation90,
+                                                             ui::Rotation::Rotation180,
+                                                             ui::Rotation::Rotation270)));
+
+TEST_P(RotatedVirtualDisplayTest, ElevationShadowHasCorrectOrientation) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 64;
+    const uint32_t parentSize = size * 3;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, size, size));
+
+    SurfaceComposerClient::getDefault()->setGlobalShadowSettings({1, 0, 0, 1.0f}, {0, 1, 0, 1.0f},
+                                                                 0, 500.0f, 800.0f);
+
+    // Global shadow settings are committed after snapshot updates so we have to perform a commit
+    // before enabling layer shadows.
+    Transaction().apply(true);
+
+    ui::Size resolution = mRenderPathHarness.getRotatedResolution();
+    int x = resolution.width / 2;
+    int y = 500;
+    Transaction()
+            .setPosition(parent, x, y)
+            .setCrop(parent, Rect(0, 0, parentSize, parentSize))
+            .reparent(child, parent)
+            .setCrop(child, Rect(0, 0, size, size))
+            .setPosition(child, size, size)
+            .setCornerRadius(child, 20.0f)
+            .setShadowRadius(child, 20.0f)
+            .apply(true);
+
+    auto shot = getScreenCapture();
+
+    shot->expectBufferMatchesImageFromFile(mRenderPathHarness.rotateRect(
+                                                   Rect(x, y, x + parentSize, y + parentSize)),
+                                           "testdata/Shadow_" +
+                                                   mRenderPathHarness.getRotationName() + ".png");
+}
+
 } // namespace android
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues

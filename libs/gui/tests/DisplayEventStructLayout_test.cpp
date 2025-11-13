@@ -64,6 +64,8 @@ TEST(DisplayEventStructLayoutTest, TestEventAlignment) {
 
     CHECK_OFFSET(DisplayEventReceiver::Event::ModeChange, modeId, 0);
     CHECK_OFFSET(DisplayEventReceiver::Event::ModeChange, vsyncPeriod, 8);
+    CHECK_OFFSET(DisplayEventReceiver::Event::ModeChange, appVsyncOffset, 16);
+    CHECK_OFFSET(DisplayEventReceiver::Event::ModeChange, presentationDeadline, 24);
 
     CHECK_OFFSET(DisplayEventReceiver::Event::FrameRateOverride, uid, 0);
     CHECK_OFFSET(DisplayEventReceiver::Event::FrameRateOverride, frameRateHz, 8);

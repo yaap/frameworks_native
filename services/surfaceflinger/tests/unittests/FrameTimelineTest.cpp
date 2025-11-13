@@ -23,7 +23,7 @@
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
-#include <FrameTimeline/FrameTimeline.h>
+#include <Scheduler/FrameTimeline.h>
 #include <gtest/gtest.h>
 #include <log/log.h>
 #include <perfetto/trace/trace.pb.h>
@@ -46,7 +46,7 @@ using ProtoJankType = perfetto::protos::FrameTimelineEvent_JankType;
 using ProtoJankSeverityType = perfetto::protos::FrameTimelineEvent_JankSeverityType;
 using ProtoPredictionType = perfetto::protos::FrameTimelineEvent_PredictionType;
 
-namespace android::frametimeline {
+namespace android::scheduler {
 
 static const std::string sLayerNameOne = "layer1";
 static const std::string sLayerNameTwo = "layer2";
@@ -1273,9 +1273,6 @@ TEST_F(FrameTimelineTest, traceDisplayFrameNoSkipped) {
 }
 
 TEST_F(FrameTimelineTest, traceDisplayFrameSkipped) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::add_sf_skipped_frames_to_trace,
-                      true);
-
     // setup 2 display frames
     // DF 1: [22,40] -> [5, 40]
     // DF  : [36, 70] (Skipped one, added by the trace)
@@ -2873,4 +2870,4 @@ TEST_F(FrameTimelineTest, surfaceFrameRenderRateUsingAppFrameRate) {
 
     EXPECT_EQ(surfaceFrame->getRenderRate().getPeriodNsecs(), 30);
 }
-} // namespace android::frametimeline
+} // namespace android::scheduler

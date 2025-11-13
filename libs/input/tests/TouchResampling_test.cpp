@@ -40,6 +40,7 @@ struct InputEventEntry {
     std::chrono::nanoseconds eventTime;
     std::vector<Pointer> pointers;
     int32_t action;
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
 };
 
 } // namespace
@@ -65,9 +66,10 @@ protected:
 
     status_t publishSimpleMotionEventWithCoords(int32_t action, nsecs_t eventTime,
                                                 const std::vector<PointerProperties>& properties,
-                                                const std::vector<PointerCoords>& coords);
+                                                const std::vector<PointerCoords>& coords,
+                                                ui::LogicalDisplayId displayId);
     void publishSimpleMotionEvent(int32_t action, nsecs_t eventTime,
-                                  const std::vector<Pointer>& pointers);
+                                  const std::vector<Pointer>& pointers, ui::LogicalDisplayId);
     void publishInputEventEntries(const std::vector<InputEventEntry>& entries);
     void consumeInputEventEntries(const std::vector<InputEventEntry>& entries,
                                   std::chrono::nanoseconds frameTime);
@@ -76,7 +78,7 @@ protected:
 
 status_t TouchResamplingTest::publishSimpleMotionEventWithCoords(
         int32_t action, nsecs_t eventTime, const std::vector<PointerProperties>& properties,
-        const std::vector<PointerCoords>& coords) {
+        const std::vector<PointerCoords>& coords, ui::LogicalDisplayId displayId) {
     const ui::Transform identityTransform;
     const nsecs_t downTime = 0;
 
@@ -84,8 +86,8 @@ status_t TouchResamplingTest::publishSimpleMotionEventWithCoords(
         ADD_FAILURE() << "Downtime should be equal to 0 (hardcoded for convenience)";
     }
     return mPublisher->publishMotionEvent(mSeq++, InputEvent::nextId(), /*deviceId=*/1,
-                                          AINPUT_SOURCE_TOUCHSCREEN, ui::LogicalDisplayId::DEFAULT,
-                                          INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/0,
+                                          AINPUT_SOURCE_TOUCHSCREEN, displayId, INVALID_HMAC,
+                                          action, /*actionButton=*/0, /*flags=*/0,
                                           /*edgeFlags=*/0, AMETA_NONE, /*buttonState=*/0,
                                           MotionClassification::NONE, identityTransform,
                                           /*xPrecision=*/0, /*yPrecision=*/0,
@@ -96,7 +98,8 @@ status_t TouchResamplingTest::publishSimpleMotionEventWithCoords(
 }
 
 void TouchResamplingTest::publishSimpleMotionEvent(int32_t action, nsecs_t eventTime,
-                                                   const std::vector<Pointer>& pointers) {
+                                                   const std::vector<Pointer>& pointers,
+                                                   ui::LogicalDisplayId displayId) {
     std::vector<PointerProperties> properties;
     std::vector<PointerCoords> coords;
 
@@ -112,7 +115,8 @@ void TouchResamplingTest::publishSimpleMotionEvent(int32_t action, nsecs_t event
         coords.back().setAxisValue(AMOTION_EVENT_AXIS_Y, pointer.y);
     }
 
-    status_t result = publishSimpleMotionEventWithCoords(action, eventTime, properties, coords);
+    status_t result =
+            publishSimpleMotionEventWithCoords(action, eventTime, properties, coords, displayId);
     ASSERT_EQ(OK, result);
 }
 
@@ -122,7 +126,8 @@ void TouchResamplingTest::publishSimpleMotionEvent(int32_t action, nsecs_t event
  */
 void TouchResamplingTest::publishInputEventEntries(const std::vector<InputEventEntry>& entries) {
     for (const InputEventEntry& entry : entries) {
-        publishSimpleMotionEvent(entry.action, entry.eventTime.count(), entry.pointers);
+        publishSimpleMotionEvent(entry.action, entry.eventTime.count(), entry.pointers,
+                                 entry.displayId);
     }
 }
 
@@ -178,6 +183,7 @@ void TouchResamplingTest::consumeInputEventEntries(const std::vector<InputEventE
         ASSERT_EQ(entry.action, motionEvent->getAction());
         ASSERT_EQ(entry.eventTime.count(), motionEvent->getHistoricalEventTime(i));
         ASSERT_EQ(entry.pointers.size(), motionEvent->getPointerCount());
+        ASSERT_EQ(entry.displayId, motionEvent->getDisplayId());
 
         for (size_t p = 0; p < motionEvent->getPointerCount(); p++) {
             SCOPED_TRACE(p);
@@ -693,6 +699,47 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
              * Use that value for resampling here: (600 - 700) / (90 - 70) * 5 + 600
              */
             {95ms, {{1, 575, 575, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+}
+
+TEST_F(TouchResamplingTest, EventsOnDifferentDisplaysAreNotResampled) {
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN should be separate, because the first consume event will only return
+    // InputEvent with a single action.
+    entries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    expectedEntries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+
+    // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y, but on
+    // different displays.
+    entries = {
+            //      id  x   y
+            {10ms, {{0, 20, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId::DEFAULT},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId(1)},
+    };
+    publishInputEventEntries(entries);
+
+    // They are not resampled and sent as two separate events.
+    frameTime = 35ms;
+    expectedEntries = {
+            //      id  x   y
+            {10ms, {{0, 20, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId::DEFAULT},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+    expectedEntries = {
+            //      id  x   y
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId(1)},
     };
     consumeInputEventEntries(expectedEntries, frameTime);
 }

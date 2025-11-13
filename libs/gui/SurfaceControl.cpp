@@ -147,6 +147,9 @@ sp<Surface> SurfaceControl::generateSurfaceLocked()
     // This surface is always consumed by SurfaceFlinger, so the
     // producerControlledByApp value doesn't matter; using false.
     mSurfaceData = mBbq->getSurface(true);
+    if (Surface::IsCursorPlaneCompatibilitySupported()) {
+        mSurfaceData->setIsForCursor(flags & ISurfaceComposerClient::eCursorWindow);
+    }
 
     return mSurfaceData;
 }

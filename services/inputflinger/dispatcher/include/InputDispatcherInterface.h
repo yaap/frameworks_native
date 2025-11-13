@@ -174,14 +174,15 @@ public:
             const std::string& name) = 0;
 
     /**
-     * Creates an input channel to be used to monitor all input events on a display.
+     * Creates an input channel to be used to monitor all non-pointer input events going to focused
+     * windows on a display.
      *
      * Each monitor must target a specific display and will only receive input events sent to that
      * display.
      *
      * This method may be called on any thread (usually by the input manager).
      */
-    virtual base::Result<std::unique_ptr<InputChannel>> createInputMonitor(
+    virtual base::Result<std::unique_ptr<InputChannel>> createFocusInputMonitor(
             ui::LogicalDisplayId displayId, const std::string& name, gui::Pid pid) = 0;
 
     /* Removes input channels that will no longer receive input events.

@@ -118,13 +118,13 @@ void initializeMotionEvent(MotionEvent& event, const InputMessage& msg) {
                           0, 0, 1});
     event.initialize(msg.body.motion.eventId, msg.body.motion.deviceId, msg.body.motion.source,
                      ui::LogicalDisplayId{msg.body.motion.displayId}, msg.body.motion.hmac,
-                     msg.body.motion.action, msg.body.motion.actionButton, msg.body.motion.flags,
-                     msg.body.motion.edgeFlags, msg.body.motion.metaState,
-                     msg.body.motion.buttonState, msg.body.motion.classification, transform,
-                     msg.body.motion.xPrecision, msg.body.motion.yPrecision,
-                     msg.body.motion.xCursorPosition, msg.body.motion.yCursorPosition,
-                     displayTransform, msg.body.motion.downTime, msg.body.motion.eventTime,
-                     pointerCount, pointerProperties, pointerCoords);
+                     msg.body.motion.action, msg.body.motion.actionButton,
+                     ftl::Flags<MotionFlag>(msg.body.motion.flags), msg.body.motion.edgeFlags,
+                     msg.body.motion.metaState, msg.body.motion.buttonState,
+                     msg.body.motion.classification, transform, msg.body.motion.xPrecision,
+                     msg.body.motion.yPrecision, msg.body.motion.xCursorPosition,
+                     msg.body.motion.yCursorPosition, displayTransform, msg.body.motion.downTime,
+                     msg.body.motion.eventTime, pointerCount, pointerProperties, pointerCoords);
 }
 
 void addSample(MotionEvent& event, const InputMessage& msg) {
@@ -658,6 +658,11 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
         }
     }
 
+    if (current->displayId != other->displayId) {
+        ALOGD_IF(debugResampling(), "Not resampled, the other is on a different display");
+        return;
+    }
+
     // Resample touch coordinates.
     History oldLastResample;
     oldLastResample.initializeFrom(touchState.lastResample);
@@ -840,9 +845,11 @@ bool InputConsumer::canAddSample(const Batch& batch, const InputMessage* msg) {
     const InputMessage& head = batch.samples[0];
     uint32_t pointerCount = msg->body.motion.pointerCount;
     if (head.body.motion.pointerCount != pointerCount ||
-        head.body.motion.action != msg->body.motion.action) {
+        head.body.motion.action != msg->body.motion.action ||
+        head.body.motion.displayId != msg->body.motion.displayId) {
         return false;
     }
+
     for (size_t i = 0; i < pointerCount; i++) {
         if (head.body.motion.pointers[i].properties != msg->body.motion.pointers[i].properties) {
             return false;

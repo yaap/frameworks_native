@@ -1333,8 +1333,8 @@ TEST_P(LayerRenderTypeTransactionTest, DISABLED_SetFenceBasic_BufferState) {
     TransactionUtils::fillGraphicBufferColor(buffer, Rect(0, 0, 32, 32), Color::RED);
 
     sp<Fence> fence;
-    if (getBuffer(nullptr, &fence) != NO_ERROR) {
-        GTEST_SUCCEED() << "test not supported";
+    if (status_t err = getBuffer(nullptr, &fence) != NO_ERROR) {
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 

@@ -23,11 +23,13 @@
 #include "log/log.h"
 #include <memory>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 
-static const SkString stretchShader = SkString(R"(
+static const SkString kStretchShaderString = SkString(R"(
     uniform shader uContentTexture;
 
     // multiplier to apply to scale effect
@@ -189,6 +191,12 @@ static const SkString stretchShader = SkString(R"(
 
 const float INTERPOLATION_STRENGTH_VALUE = 0.7f;
 
+StretchShaderFactory::StretchShaderFactory(RuntimeEffectManager& effectManager) {
+    mEffect =
+            effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::kStretchEffect,
+                                                      "StretchEffect", kStretchShaderString);
+}
+
 sk_sp<SkShader> StretchShaderFactory::createSkShader(const sk_sp<SkShader>& inputShader,
                                                      const StretchEffect& stretchEffect) {
     if (!stretchEffect.hasEffect()) {
@@ -216,9 +224,7 @@ sk_sp<SkShader> StretchShaderFactory::createSkShader(const sk_sp<SkShader>& inpu
     float normalizedScrollY = srcBounds.top / viewportHeight;
 
     if (mBuilder == nullptr) {
-        const static SkRuntimeEffect::Result instance =
-            SkRuntimeEffect::MakeForShader(stretchShader);
-        mBuilder = std::make_unique<SkRuntimeShaderBuilder>(instance.effect);
+        mBuilder = std::make_unique<SkRuntimeShaderBuilder>(mEffect);
     }
 
     mBuilder->child("uContentTexture") = inputShader;

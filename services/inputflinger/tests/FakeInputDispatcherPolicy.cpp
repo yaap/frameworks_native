@@ -411,10 +411,14 @@ void FakeInputDispatcherPolicy::interceptMotionBeforeQueueing(ui::LogicalDisplay
                                                               int32_t, nsecs_t, uint32_t&) {}
 
 std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
-FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent&,
+FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent& event,
                                                          uint32_t) {
-    if (std::holds_alternative<inputdispatcher::KeyEntry::InterceptKeyResult>(
-                mInterceptKeyBeforeDispatchingResult)) {
+    if (inputdispatcher::KeyEntry::InterceptKeyResult* result =
+                std::get_if<inputdispatcher::KeyEntry::InterceptKeyResult>(
+                        &mInterceptKeyBeforeDispatchingResult)) {
+        if (*result == inputdispatcher::KeyEntry::InterceptKeyResult::SKIP) {
+            mKeysConsumedByPolicy.emplace(event);
+        }
         return mInterceptKeyBeforeDispatchingResult;
     }
 
@@ -428,6 +432,15 @@ FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, con
     // Clear intercept state so we could dispatch the event in next wake.
     mInterceptKeyBeforeDispatchingResult = nsecs_t(0);
     return delay;
+}
+
+void FakeInputDispatcherPolicy::assertKeyConsumedByPolicy(
+        const ::testing::Matcher<KeyEvent>& matcher) {
+    ASSERT_THAT(*mKeysConsumedByPolicy.popWithTimeout(100ms), matcher);
+}
+
+void FakeInputDispatcherPolicy::assertNoKeysConsumedByPolicy() {
+    ASSERT_TRUE(mKeysConsumedByPolicy.empty());
 }
 
 std::optional<KeyEvent> FakeInputDispatcherPolicy::dispatchUnhandledKey(const sp<IBinder>&,

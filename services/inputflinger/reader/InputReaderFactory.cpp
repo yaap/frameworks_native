@@ -21,8 +21,9 @@
 namespace android {
 
 std::unique_ptr<InputReaderInterface> createInputReader(
-        const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener) {
-    return std::make_unique<InputReader>(std::make_unique<EventHub>(), policy, listener);
+        const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener,
+        JNIEnv* env) {
+    return std::make_unique<InputReader>(std::make_unique<EventHub>(), policy, listener, env);
 }
 
 } // namespace android

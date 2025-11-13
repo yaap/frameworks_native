@@ -375,6 +375,33 @@ TEST_F(OutputLayerDisplayFrameTest, outlineExpandsDisplayFrame_onlyIfForcingClie
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
+TEST_F(OutputLayerDisplayFrameTest, boxShadowExpandsDisplayFrame) {
+    gui::BoxShadowSettings::BoxShadowParams boxShadow;
+    boxShadow.blurRadius = 4;
+    boxShadow.spreadRadius = 1;
+    boxShadow.offsetX = 3;
+    boxShadow.offsetY = 2;
+    mLayerFEState.boxShadowSettings.boxShadows.push_back(boxShadow);
+    mLayerFEState.forceClientComposition = true;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    // See LayerFECompositionState::outsetRectForShadow for how to calculate expected value.
+    EXPECT_THAT(calculateOutputDisplayFrame(), Rect(93, 92, 213, 212));
+}
+
+TEST_F(OutputLayerDisplayFrameTest, boxShadowExpandsDisplayFrame_onlyIfForcingClientComposition) {
+    gui::BoxShadowSettings::BoxShadowParams boxShadow;
+    boxShadow.blurRadius = 5;
+    boxShadow.offsetX = 3;
+    boxShadow.offsetY = 2;
+    mLayerFEState.boxShadowSettings.boxShadows.push_back(boxShadow);
+    mLayerFEState.forceClientComposition = false;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    Rect expected{mLayerFEState.geomLayerBounds};
+    EXPECT_THAT(calculateOutputDisplayFrame(), expected);
+}
+
 /*
  * OutputLayer::calculateOutputRelativeBufferTransform()
  */

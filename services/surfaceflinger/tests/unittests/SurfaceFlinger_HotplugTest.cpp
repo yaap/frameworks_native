@@ -295,7 +295,7 @@ TEST_F(HotplugTest, rejectsHotplugOnActivePortsDuplicate) {
     // We expect display identification to be fetched correctly, since EDID and
     // port are available and successfully retrieved from HAL.
     EXPECT_CALL(*mComposer,
-                getDisplayIdentificationData(DuplicatePortDisplay::HWC_DISPLAY_ID, _, _))
+                getDisplayIdentificationData(DuplicatePortDisplay::HWC_DISPLAY_ID, _, _, _))
             .WillOnce(DoAll(SetArgPointee<1>(*DuplicatePortDisplay::PORT::value),
                             SetArgPointee<2>(getExternalEedid()), Return(Error::NONE)));
 

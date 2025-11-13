@@ -35,7 +35,7 @@ namespace android::inputdispatcher::trace::impl {
 template <typename Backend>
 class ThreadedBackend : public InputTracingBackendInterface {
 public:
-    ThreadedBackend(Backend&& innerBackend);
+    ThreadedBackend(Backend&& innerBackend, JNIEnv* env);
     ~ThreadedBackend() override;
 
     void traceKeyEvent(const TracedKeyEvent&, const TracedEventMetadata&) override;

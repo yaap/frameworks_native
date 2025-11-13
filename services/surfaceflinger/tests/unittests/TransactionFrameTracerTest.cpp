@@ -35,7 +35,7 @@ using testing::_;
 using testing::Mock;
 using testing::Return;
 
-using PresentState = frametimeline::SurfaceFrame::PresentState;
+using PresentState = scheduler::SurfaceFrame::PresentState;
 
 class TransactionFrameTracerTest : public testing::Test {
 public:

@@ -88,7 +88,7 @@ cc_defaults {
         "libinput",
         "libjsoncpp",
         "liblog",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
         "libutils",

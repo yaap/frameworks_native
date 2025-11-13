@@ -37,11 +37,11 @@ struct Visitor : V... {
 // --- ThreadedBackend ---
 
 template <typename Backend>
-ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend)
+ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend, JNIEnv* env)
       : mBackend(std::move(innerBackend)),
         mTracerThread(
                 "InputTracer", [this]() { threadLoop(); },
-                [this]() { mThreadWakeCondition.notify_all(); }, /*isInCriticalPath=*/false) {}
+                [this]() { mThreadWakeCondition.notify_all(); }, /*isInCriticalPath=*/false, env) {}
 
 template <typename Backend>
 ThreadedBackend<Backend>::~ThreadedBackend() {

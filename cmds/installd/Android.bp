@@ -7,6 +7,20 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aconfig_declarations {
+    name: "installd_flags",
+    package: "android.installd.flags",
+    container: "system",
+    srcs: [
+        "installd_flags.aconfig",
+    ],
+}
+
+cc_aconfig_library {
+    name: "installd_flags_c_lib",
+    aconfig_declarations: "installd_flags",
+}
+
 cc_defaults {
     name: "installd_defaults",
 
@@ -50,6 +64,7 @@ cc_defaults {
         "server_configurable_flags",
     ],
     static_libs: [
+        "installd_flags_c_lib",
         "libasync_safe",
         "libext2_uuid",
     ],

@@ -302,7 +302,7 @@ TEST_F(DisplaySetConfigurationTest, configuresPhysicalDisplay) {
     EXPECT_FALSE(mDisplay->isValid());
 
     const auto& filter = mDisplay->getState().layerFilter;
-    EXPECT_EQ(ui::INVALID_LAYER_STACK, filter.layerStack);
+    EXPECT_EQ(ui::UNASSIGNED_LAYER_STACK, filter.layerStack);
     EXPECT_FALSE(filter.toInternalDisplay);
 }
 
@@ -322,7 +322,7 @@ TEST_F(DisplaySetConfigurationTest, configuresHalVirtualDisplay) {
     EXPECT_FALSE(mDisplay->isValid());
 
     const auto& filter = mDisplay->getState().layerFilter;
-    EXPECT_EQ(ui::INVALID_LAYER_STACK, filter.layerStack);
+    EXPECT_EQ(ui::UNASSIGNED_LAYER_STACK, filter.layerStack);
     EXPECT_FALSE(filter.toInternalDisplay);
 }
 
@@ -342,7 +342,7 @@ TEST_F(DisplaySetConfigurationTest, configuresGpuVirtualDisplay) {
     EXPECT_FALSE(mDisplay->isValid());
 
     const auto& filter = mDisplay->getState().layerFilter;
-    EXPECT_EQ(ui::INVALID_LAYER_STACK, filter.layerStack);
+    EXPECT_EQ(ui::UNASSIGNED_LAYER_STACK, filter.layerStack);
     EXPECT_FALSE(filter.toInternalDisplay);
 }
 
@@ -689,8 +689,6 @@ using DisplayGetSkipColorTransformTest = DisplayWithLayersTestCommon;
 using aidl::android::hardware::graphics::composer3::DisplayCapability;
 
 TEST_F(DisplayGetSkipColorTransformTest, checksCapabilityIfGpuDisplay) {
-    EXPECT_CALL(mHwComposer, hasCapability(Capability::SKIP_CLIENT_COLOR_TRANSFORM))
-            .WillOnce(Return(true));
     auto args = getDisplayCreationArgsForGpuVirtualDisplay();
     auto gpuDisplay{impl::createDisplay(mCompositionEngine, args)};
     EXPECT_TRUE(gpuDisplay->getSkipColorTransform());

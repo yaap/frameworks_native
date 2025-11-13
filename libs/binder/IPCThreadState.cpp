@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "IPCThreadState"
+#define LOG_TAG "libbinder.IPCThreadState"
 
 #include <binder/IPCThreadState.h>
 
@@ -23,6 +23,7 @@
 #include <binder/TextOutput.h>
 
 #include <utils/CallStack.h>
+#include <utils/SystemClock.h>
 
 #include <atomic>
 #include <errno.h>
@@ -37,6 +38,9 @@
 
 #include "Utils.h"
 #include "binder_module.h"
+#include "BinderObserver.h"
+#include "BinderStatsSpscQueue.h"
+#include "BinderStatsUtils.h"
 
 #if (defined(__ANDROID__) || defined(__Fuchsia__)) && !defined(BINDER_WITH_KERNEL_IPC)
 #error Android and Fuchsia are expected to have BINDER_WITH_KERNEL_IPC
@@ -62,7 +66,6 @@
 #define LOG_ONEWAY(...) ALOG(LOG_DEBUG, "ipc", __VA_ARGS__)
 
 #endif
-
 // ---------------------------------------------------------------------------
 
 namespace android {
@@ -334,7 +337,6 @@ static pthread_mutex_t gTLSMutex = PTHREAD_MUTEX_INITIALIZER;
 LIBBINDER_IGNORE_END()
 static std::atomic<bool> gHaveTLS(false);
 static pthread_key_t gTLS = 0;
-static std::atomic<bool> gShutdown = false;
 static std::atomic<bool> gDisableBackgroundScheduling = false;
 
 IPCThreadState* IPCThreadState::self()
@@ -345,12 +347,6 @@ restart:
         IPCThreadState* st = (IPCThreadState*)pthread_getspecific(k);
         if (st) return st;
         return new IPCThreadState;
-    }
-
-    // Racey, heuristic test for simultaneous shutdown.
-    if (gShutdown.load(std::memory_order_relaxed)) {
-        ALOGW("Calling IPCThreadState::self() during shutdown is dangerous, expect a crash.\n");
-        return nullptr;
     }
 
     pthread_mutex_lock(&gTLSMutex);
@@ -378,21 +374,24 @@ IPCThreadState* IPCThreadState::selfOrNull()
     return nullptr;
 }
 
-void IPCThreadState::shutdown()
-{
-    gShutdown.store(true, std::memory_order_relaxed);
-
-    if (gHaveTLS.load(std::memory_order_acquire)) {
-        // XXX Need to wait for all thread pool threads to exit!
-        IPCThreadState* st = (IPCThreadState*)pthread_getspecific(gTLS);
-        if (st) {
-            delete st;
-            pthread_setspecific(gTLS, nullptr);
-        }
-        pthread_key_delete(gTLS);
-        gHaveTLS.store(false, std::memory_order_release);
-    }
-}
+// This code used to be responsible for deleting the TLS, but we keep it
+// forever, since binder threads would often race process destruction.
+// b/77934844. Keeping a few lines here for visibility of the history.
+// IPCThreadState is actually stored in threadDestructor.
+//
+// void IPCThreadState::shutdown()
+// {
+//     if (gHaveTLS.load(std::memory_order_acquire)) {
+//         // XXX Need to wait for all thread pool threads to exit!
+//         IPCThreadState* st = (IPCThreadState*)pthread_getspecific(gTLS);
+//         if (st) {
+//             delete st;
+//             pthread_setspecific(gTLS, nullptr);
+//         }
+//         pthread_key_delete(gTLS);
+//         gHaveTLS.store(false, std::memory_order_release);
+//     }
+// }
 
 void IPCThreadState::disableBackgroundScheduling(bool disable)
 {
@@ -626,8 +625,7 @@ void IPCThreadState::clearCaller()
     mCallingUid = getuid();
 }
 
-void IPCThreadState::flushCommands()
-{
+void IPCThreadState::flushCommands() {
     if (mProcess->mDriverFD < 0)
         return;
 
@@ -1055,10 +1053,17 @@ IPCThreadState::IPCThreadState()
     mHasExplicitIdentity = false;
     mIn.setDataCapacity(256);
     mOut.setDataCapacity(256);
+#ifdef BINDER_WITH_OBSERVERS
+    mBinderStatsQueue = std::make_shared<BinderStatsSpscQueue>();
+    ProcessState::self()->mBinderObserver->registerQueue(mBinderStatsQueue);
+#endif
 }
 
 IPCThreadState::~IPCThreadState()
 {
+#ifdef BINDER_WITH_OBSERVERS
+    ProcessState::self()->mBinderObserver->deregisterQueue(mBinderStatsQueue);
+#endif
 }
 
 status_t IPCThreadState::sendReply(const Parcel& reply, uint32_t flags)
@@ -1331,7 +1336,7 @@ status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
     return NO_ERROR;
 }
 
-sp<BBinder> the_context_object;
+[[clang::no_destroy]] sp<BBinder> the_context_object;
 
 void IPCThreadState::setTheContextObject(const sp<BBinder>& obj)
 {
@@ -1481,13 +1486,22 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                 std::string message = logStream.str();
                 ALOGI("%s", message.c_str());
             }
+#ifdef BINDER_WITH_OBSERVERS
+            int64_t startTimeNanos = uptimeNanos();
+            String16 interfaceDescriptor;
+            // TODO (b/299356196): collect aidl method name. Ensure this is performant.
+#endif
             if (tr.target.ptr) {
                 // We only have a weak reference on the target object, so we must first try to
                 // safely acquire a strong reference before doing anything else with it.
-                if (reinterpret_cast<RefBase::weakref_type*>(
-                        tr.target.ptr)->attemptIncStrong(this)) {
-                    error = reinterpret_cast<BBinder*>(tr.cookie)->transact(tr.code, buffer,
-                            &reply, tr.flags);
+                if (reinterpret_cast<RefBase::weakref_type*>(tr.target.ptr)
+                            ->attemptIncStrong(this)) {
+                    error = reinterpret_cast<BBinder*>(tr.cookie)->transact(tr.code, buffer, &reply,
+                                                                            tr.flags);
+#ifdef BINDER_WITH_OBSERVERS
+                    interfaceDescriptor =
+                            reinterpret_cast<BBinder*>(tr.cookie)->getInterfaceDescriptor();
+#endif
                     reinterpret_cast<BBinder*>(tr.cookie)->decStrong(this);
                 } else {
                     error = UNKNOWN_TRANSACTION;
@@ -1495,8 +1509,13 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
 
             } else {
                 error = the_context_object->transact(tr.code, buffer, &reply, tr.flags);
+#ifdef BINDER_WITH_OBSERVERS
+                interfaceDescriptor = the_context_object->getInterfaceDescriptor();
+#endif
             }
-
+#ifdef BINDER_WITH_OBSERVERS
+            int64_t endTimeNanos = uptimeNanos();
+#endif
             //ALOGI("<<<< TRANSACT from pid %d restore pid %d sid %s uid %d\n",
             //     mCallingPid, origPid, (origSid ? origSid : "<N/A>"), origUid);
 
@@ -1540,7 +1559,17 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                 }
                 LOG_ONEWAY("NOT sending reply to %d!", mCallingPid);
             }
-
+#ifdef BINDER_WITH_OBSERVERS
+            BinderCallData observerData = {
+                    .interfaceDescriptor = interfaceDescriptor,
+                    .transactionCode = tr.code,
+                    .startTimeNanos = startTimeNanos,
+                    .endTimeNanos = endTimeNanos,
+                    .senderUid = tr.sender_euid,
+            };
+            ProcessState::self()->mBinderObserver->addStatMaybeFlush(mBinderStatsQueue,
+                                                                     observerData);
+#endif
             mServingStackPointer = origServingStackPointer;
             mCallingPid = origPid;
             mCallingSid = origSid;

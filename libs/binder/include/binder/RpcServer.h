@@ -25,13 +25,11 @@
 #include <utils/RefBase.h>
 
 #include <bitset>
-#include <mutex>
-#include <thread>
 
 namespace android {
 
 class FdTrigger;
-class RpcServerTrusty;
+class RpcServerTrusty; // TODO(b/387305736) remove. Move functionality into RpcServer.
 class RpcSocketAddress;
 
 /**
@@ -249,8 +247,9 @@ public:
     LIBBINDER_EXPORTED ~RpcServer();
 
 private:
-    friend RpcServerTrusty;
+    friend RpcServerTrusty; // TODO(b/387305736): remove. Move functionality into RpcServer.
     friend sp<RpcServer>;
+    friend wp<EventListener>;
     explicit RpcServer(std::unique_ptr<RpcTransportCtx> ctx);
 
     void onSessionAllIncomingThreadsEnded(const sp<RpcSession>& session) override;

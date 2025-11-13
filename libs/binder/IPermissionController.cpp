@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "PermissionController"
+#define LOG_TAG "libbinder.PermissionController"
 
 #include <binder/IPermissionController.h>
 

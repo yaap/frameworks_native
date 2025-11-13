@@ -17,6 +17,7 @@
 #pragma once
 
 #include <android/gui/BorderSettings.h>
+#include <android/gui/BoxShadowSettings.h>
 #include <gui/DisplayLuts.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
@@ -92,6 +93,10 @@ struct Geometry {
 
     // Rectangle within which corners will be rounded.
     FloatRect roundedCornersCrop = FloatRect();
+
+    // Crop geometry in local space, used for cropping outset rendering, e.g. shadows.
+    vec2 otherRoundedCornersRadius = vec2(0.0f, 0.0f);
+    FloatRect otherCrop = FloatRect();
 };
 
 // Descriptor of the source pixels for this layer.
@@ -134,7 +139,10 @@ struct LayerSettings {
 
     gui::BorderSettings borderSettings;
 
+    gui::BoxShadowSettings boxShadowSettings;
+
     int backgroundBlurRadius = 0;
+    float backgroundBlurScale = 1.0f;
 
     std::vector<BlurRegion> blurRegions;
 
@@ -194,6 +202,7 @@ static inline bool operator==(const LayerSettings& lhs, const LayerSettings& rhs
             lhs.disableBlending == rhs.disableBlending &&
             lhs.skipContentDraw == rhs.skipContentDraw && lhs.shadow == rhs.shadow &&
             lhs.backgroundBlurRadius == rhs.backgroundBlurRadius &&
+            lhs.backgroundBlurScale == rhs.backgroundBlurScale &&
             lhs.blurRegionTransform == rhs.blurRegionTransform &&
             lhs.stretchEffect == rhs.stretchEffect &&
             lhs.edgeExtensionEffect == rhs.edgeExtensionEffect &&
@@ -225,6 +234,12 @@ static inline void PrintTo(const Geometry& settings, ::std::ostream* os) {
     *os << "\n    .roundedCornersRadiusY = " << settings.roundedCornersRadius.y;
     *os << "\n    .roundedCornersCrop = ";
     PrintTo(settings.roundedCornersCrop, os);
+
+    *os << "\n    .otherRoundedCornersRadiusX = " << settings.otherRoundedCornersRadius.x;
+    *os << "\n    .otherRoundedCornersRadiusY = " << settings.otherRoundedCornersRadius.y;
+    *os << "\n    .otherCrop = ";
+    PrintTo(settings.otherCrop, os);
+
     *os << "\n}";
 }
 
@@ -290,6 +305,7 @@ static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os) {
         PrintTo(settings.shadow, os);
     }
     *os << "\n    .backgroundBlurRadius = " << settings.backgroundBlurRadius;
+    *os << "\n    .backgroundBlurScale = " << settings.backgroundBlurScale;
     if (settings.blurRegions.size()) {
         *os << "\n    .blurRegions =";
         for (auto blurRegion : settings.blurRegions) {

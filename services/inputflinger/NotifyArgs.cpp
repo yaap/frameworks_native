@@ -61,7 +61,7 @@ NotifyMotionArgs::NotifyMotionArgs(
         int32_t id, nsecs_t eventTime, nsecs_t readTime, int32_t deviceId, uint32_t source,
         ui::LogicalDisplayId displayId, uint32_t policyFlags, int32_t action, int32_t actionButton,
         int32_t flags, int32_t metaState, int32_t buttonState, MotionClassification classification,
-        int32_t edgeFlags, uint32_t pointerCount, const PointerProperties* pointerProperties,
+        uint32_t pointerCount, const PointerProperties* pointerProperties,
         const PointerCoords* pointerCoords, float xPrecision, float yPrecision,
         float xCursorPosition, float yCursorPosition, nsecs_t downTime,
         const std::vector<TouchVideoFrame>& videoFrames)
@@ -77,7 +77,7 @@ NotifyMotionArgs::NotifyMotionArgs(
         metaState(metaState),
         buttonState(buttonState),
         classification(classification),
-        edgeFlags(edgeFlags),
+        edgeFlags(AMOTION_EVENT_EDGE_FLAG_NONE),
         xPrecision(xPrecision),
         yPrecision(yPrecision),
         xCursorPosition(xCursorPosition),
@@ -133,8 +133,9 @@ std::string NotifyMotionArgs::dump() const {
         }
         coords += "}";
     }
-    return StringPrintf("NotifyMotionArgs(id=%" PRId32 ", eventTime=%" PRId64 ", deviceId=%" PRId32
-                        ", source=%s, action=%s, pointerCount=%zu pointers=%s, flags=0x%08x)",
+    return StringPrintf("NotifyMotionArgs(id=%" PRId32 ", eventTime=%" PRId64 "ns, "
+                        "deviceId=%" PRId32 ", source=%s, action=%s, pointerCount=%zu, "
+                        "pointers=%s, flags=0x%08x)",
                         id, eventTime, deviceId, inputEventSourceToString(source).c_str(),
                         MotionEvent::actionToString(action).c_str(), getPointerCount(),
                         coords.c_str(), flags);

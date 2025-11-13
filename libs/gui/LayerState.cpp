@@ -90,6 +90,7 @@ layer_state_t::layer_state_t()
         cornerRadius(0.0f),
         clientDrawnCornerRadius(0.0f),
         backgroundBlurRadius(0),
+        backgroundBlurScale{1.0f},
         color(0),
         bufferTransform(0),
         transformToDisplayInverse(false),
@@ -166,6 +167,7 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeFloat, cornerRadius);
     SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadius);
     SAFE_PARCEL(output.writeUint32, backgroundBlurRadius);
+    SAFE_PARCEL(output.writeFloat, backgroundBlurScale);
     SAFE_PARCEL(output.writeParcelable, metadata);
     SAFE_PARCEL(output.writeFloat, bgColor.r);
     SAFE_PARCEL(output.writeFloat, bgColor.g);
@@ -181,6 +183,7 @@ status_t layer_state_t::write(Parcel& output) const
     }
     SAFE_PARCEL(output.writeFloat, shadowRadius);
     SAFE_PARCEL(output.writeParcelable, borderSettings);
+    SAFE_PARCEL(output.writeParcelable, boxShadowSettings);
     SAFE_PARCEL(output.writeInt32, frameRateSelectionPriority);
     SAFE_PARCEL(output.writeFloat, frameRate);
     SAFE_PARCEL(output.writeByte, frameRateCompatibility);
@@ -304,6 +307,7 @@ status_t layer_state_t::read(const Parcel& input)
     SAFE_PARCEL(input.readFloat, &cornerRadius);
     SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadius);
     SAFE_PARCEL(input.readUint32, &backgroundBlurRadius);
+    SAFE_PARCEL(input.readFloat, &backgroundBlurScale);
     SAFE_PARCEL(input.readParcelable, &metadata);
 
     SAFE_PARCEL(input.readFloat, &tmpFloat);
@@ -330,6 +334,7 @@ status_t layer_state_t::read(const Parcel& input)
     }
     SAFE_PARCEL(input.readFloat, &shadowRadius);
     SAFE_PARCEL(input.readParcelable, &borderSettings);
+    SAFE_PARCEL(input.readParcelable, &boxShadowSettings);
 
     SAFE_PARCEL(input.readInt32, &frameRateSelectionPriority);
     SAFE_PARCEL(input.readFloat, &frameRate);
@@ -635,6 +640,10 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eBackgroundBlurRadiusChanged;
         backgroundBlurRadius = other.backgroundBlurRadius;
     }
+    if (other.what & eBackgroundBlurScaleChanged) {
+        what |= eBackgroundBlurScaleChanged;
+        backgroundBlurScale = other.backgroundBlurScale;
+    }
     if (other.what & eBlurRegionsChanged) {
         what |= eBlurRegionsChanged;
         blurRegions = other.blurRegions;
@@ -733,6 +742,10 @@ void layer_state_t::merge(const layer_state_t& other) {
     if (other.what & eBorderSettingsChanged) {
         what |= eBorderSettingsChanged;
         borderSettings = other.borderSettings;
+    }
+    if (other.what & eBoxShadowSettingsChanged) {
+        what |= eBoxShadowSettingsChanged;
+        boxShadowSettings = other.boxShadowSettings;
     }
     if (other.what & eLutsChanged) {
         what |= eLutsChanged;
@@ -854,6 +867,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eCornerRadiusChanged, other, cornerRadius);
     CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadius);
     CHECK_DIFF(diff, eBackgroundBlurRadiusChanged, other, backgroundBlurRadius);
+    CHECK_DIFF(diff, eBackgroundBlurScaleChanged, other, backgroundBlurScale);
     if (other.what & eBlurRegionsChanged) diff |= eBlurRegionsChanged;
     if (other.what & eRelativeLayerChanged) {
         diff |= eRelativeLayerChanged;
@@ -889,6 +903,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     if (other.what & eMetadataChanged) diff |= eMetadataChanged;
     CHECK_DIFF(diff, eShadowRadiusChanged, other, shadowRadius);
     CHECK_DIFF(diff, eBorderSettingsChanged, other, borderSettings);
+    CHECK_DIFF(diff, eBoxShadowSettingsChanged, other, boxShadowSettings);
     CHECK_DIFF(diff, eDefaultFrameRateCompatibilityChanged, other, defaultFrameRateCompatibility);
     CHECK_DIFF(diff, eFrameRateSelectionPriority, other, frameRateSelectionPriority);
     CHECK_DIFF3(diff, eFrameRateChanged, other, frameRate, frameRateCompatibility,
@@ -912,6 +927,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     if (other.what & eLutsChanged) diff |= eLutsChanged;
     CHECK_DIFF(diff, ePictureProfileHandleChanged, other, pictureProfileHandle);
     CHECK_DIFF(diff, eAppContentPriorityChanged, other, appContentPriority);
+    if (other.what & eStopLayerChanged) diff |= eStopLayerChanged;
 
     return diff;
 }

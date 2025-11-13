@@ -55,7 +55,7 @@ static void unref_semaphore(void* semaphore) {
 
 std::unique_ptr<SkiaGpuContext> GaneshVkRenderEngine::createContext(
         VulkanInterface& vulkanInterface) {
-    return SkiaGpuContext::MakeVulkan_Ganesh(vulkanInterface.getGaneshBackendContext(),
+    return SkiaGpuContext::MakeVulkan_Ganesh(vulkanInterface.createSkiaVulkanBackendContext(),
                                              mSkSLCacheMonitor);
 }
 

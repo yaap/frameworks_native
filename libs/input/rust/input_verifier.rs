@@ -393,6 +393,11 @@ impl InputVerifier {
         self.hovering_pointer_ids_by_device.remove(&device_id);
     }
 
+    /// Dump the current state of the verifier
+    pub fn dump(&self) -> String {
+        format!("{:?}", self.touching_pointer_ids_by_device)
+    }
+
     fn ensure_touching_pointers_match(
         &self,
         device_id: DeviceId,

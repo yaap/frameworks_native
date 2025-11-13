@@ -70,7 +70,7 @@ cc_defaults {
         "libkll",
         "liblog",
         "libprotobuf-cpp-lite",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
         "libutils",

@@ -35,7 +35,7 @@ using testing::_;
 using testing::Mock;
 using testing::Return;
 
-using PresentState = frametimeline::SurfaceFrame::PresentState;
+using PresentState = scheduler::SurfaceFrame::PresentState;
 
 class TransactionSurfaceFrameTest : public testing::Test {
 public:
@@ -407,7 +407,7 @@ public:
 
     void MultipleCommitsBeforeLatch() {
         sp<Layer> layer = createLayer();
-        std::vector<std::shared_ptr<frametimeline::SurfaceFrame>> surfaceFrames;
+        std::vector<std::shared_ptr<scheduler::SurfaceFrame>> surfaceFrames;
         for (int i = 0; i < 10; i += 2) {
             sp<Fence> fence(sp<Fence>::make());
             BufferData bufferData;

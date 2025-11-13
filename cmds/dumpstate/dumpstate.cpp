@@ -35,6 +35,7 @@
 #include <android/hidl/manager/1.0/IServiceManager.h>
 #include <android/os/IIncidentCompanion.h>
 #include <android_app_admin_flags.h>
+#include <android_os.h>
 #include <android_tracing.h>
 #include <binder/IServiceManager.h>
 #include <cutils/multiuser.h>
@@ -48,6 +49,7 @@
 #include <dumputils/dump_utils.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <gui/SurfaceComposerClient.h>
 #include <hardware_legacy/power.h>
 #include <hidl/ServiceManagement.h>
 #include <inttypes.h>
@@ -113,10 +115,12 @@ using android::Dumpsys;
 using android::INVALID_OPERATION;
 using android::IServiceManager;
 using android::OK;
+using android::PhysicalDisplayId;
 using android::sp;
 using android::status_t;
 using android::String16;
 using android::String8;
+using android::SurfaceComposerClient;
 using android::TIMED_OUT;
 using android::UNKNOWN_ERROR;
 using android::Vector;
@@ -211,6 +215,11 @@ static const std::string SHUTDOWN_CHECKPOINTS_FILE_PREFIX = "checkpoints-";
 
 // File path to default screenshot image, that used when failed to capture the real screenshot.
 static const std::string DEFAULT_SCREENSHOT_PATH = "/system/etc/default_screenshot.png";
+
+// File path of the persistent ring buffer perfetto trace. This always exists when persistent ring
+// buffer trace feature is enabled.
+static const std::string PREV_BOOT_TRACE_PATH =
+    std::string(SYSTEM_TRACE_DIR) + "/prev_boot_dump.trace";
 
 // TODO: temporary variables and functions used during C++ refactoring
 
@@ -798,6 +807,9 @@ android::binder::Status Dumpstate::ConsentCallback::onReportApproved() {
                                                     ds.options_->screenshot_fd.get());
     if (copy_succeeded) {
         android::os::UnlinkAndLogOnError(ds.screenshot_path_);
+        for (auto& [_, path] : ds.screenshot_path_by_display_id_) {
+            android::os::UnlinkAndLogOnError(path);
+        }
     } else {
         MYLOGE("Failed to copy screenshot to a permanent file.\n");
         copy_succeeded = android::os::CopyFileToFd(DEFAULT_SCREENSHOT_PATH,
@@ -883,6 +895,12 @@ static const std::set<std::string> PROBLEMATIC_FILE_EXTENSIONS = {
 
 status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
                                       std::chrono::milliseconds timeout = 0ms) {
+    return AddZipEntryFromFd(zip_writer_, entry_name, fd, timeout);
+}
+
+status_t Dumpstate::AddZipEntryFromFd(const std::unique_ptr<ZipWriter>& zip_writer,
+                                      const std::string& entry_name, int fd,
+                                      std::chrono::milliseconds timeout = 0ms) {
     std::string valid_name = entry_name;
 
     // Rename extension if necessary.
@@ -899,21 +917,20 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
     // Logging statement  below is useful to time how long each entry takes, but it's too verbose.
     // MYLOGD("Adding zip entry %s\n", entry_name.c_str());
     size_t flags = ZipWriter::kCompress | ZipWriter::kDefaultCompression;
-    int32_t err = zip_writer_->StartEntryWithTime(valid_name.c_str(), flags,
-                                                  get_mtime(fd, ds.now_));
+    int32_t err = zip_writer->StartEntryWithTime(valid_name.c_str(), flags, get_mtime(fd, ds.now_));
     if (err != 0) {
-        MYLOGE("zip_writer_->StartEntryWithTime(%s): %s\n", valid_name.c_str(),
+        MYLOGE("zip_writer->StartEntryWithTime(%s): %s\n", valid_name.c_str(),
                ZipWriter::ErrorCodeString(err));
         return UNKNOWN_ERROR;
     }
     bool finished_entry = false;
-    auto finish_entry = [this, &finished_entry] {
+    auto finish_entry = [&zip_writer, &finished_entry] {
         if (!finished_entry) {
             // This should only be called when we're going to return an earlier error,
             // which would've been logged. This may imply the file is already corrupt
             // and any further logging from FinishEntry is more likely to mislead than
             // not.
-            this->zip_writer_->FinishEntry();
+            zip_writer->FinishEntry();
         }
     };
     auto scope_guard = android::base::make_scope_guard(finish_entry);
@@ -950,17 +967,17 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
             MYLOGE("read(%s): %s\n", entry_name.c_str(), strerror(errno));
             return -errno;
         }
-        err = zip_writer_->WriteBytes(buffer.data(), bytes_read);
+        err = zip_writer->WriteBytes(buffer.data(), bytes_read);
         if (err) {
-            MYLOGE("zip_writer_->WriteBytes(): %s\n", ZipWriter::ErrorCodeString(err));
+            MYLOGE("zip_writer->WriteBytes(): %s\n", ZipWriter::ErrorCodeString(err));
             return UNKNOWN_ERROR;
         }
     }
 
-    err = zip_writer_->FinishEntry();
+    err = zip_writer->FinishEntry();
     finished_entry = true;
     if (err != 0) {
-        MYLOGE("zip_writer_->FinishEntry(): %s\n", ZipWriter::ErrorCodeString(err));
+        MYLOGE("zip_writer->FinishEntry(): %s\n", ZipWriter::ErrorCodeString(err));
         return UNKNOWN_ERROR;
     }
 
@@ -968,6 +985,11 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
 }
 
 bool Dumpstate::AddZipEntry(const std::string& entry_name, const std::string& entry_path) {
+    return AddZipEntry(zip_writer_, entry_name, entry_path);
+}
+
+bool Dumpstate::AddZipEntry(const std::unique_ptr<ZipWriter>& zip_writer,
+                            const std::string& entry_name, const std::string& entry_path) {
     android::base::unique_fd fd(
         TEMP_FAILURE_RETRY(open(entry_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC)));
     if (fd == -1) {
@@ -975,7 +997,7 @@ bool Dumpstate::AddZipEntry(const std::string& entry_name, const std::string& en
         return false;
     }
 
-    return (AddZipEntryFromFd(entry_name, fd.get()) == OK);
+    return (AddZipEntryFromFd(zip_writer, entry_name, fd.get()) == OK);
 }
 
 /* adds a file to the existing zipped bugreport */
@@ -1129,6 +1151,9 @@ static void MaybeAddSystemTraceToZip() {
     // tracing was happening.
     size_t traces_found = android::os::ForEachTrace([&](const std::string& trace_path) {
         ds.AddZipEntry(ZIP_ROOT_DIR + trace_path, trace_path);
+        if (trace_path == PREV_BOOT_TRACE_PATH) {
+            return;
+        }
         android::os::UnlinkAndLogOnError(trace_path);
     });
 
@@ -1752,6 +1777,7 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
     DumpFile("ZONEINFO", "/proc/zoneinfo");
     DumpFile("PAGETYPEINFO", "/proc/pagetypeinfo");
     DumpFile("BUDDYINFO", "/proc/buddyinfo");
+    DumpFile("MGLRU", "/sys/kernel/mm/lru_gen/enabled");
     DumpExternalFragmentationInfo();
 
     DumpFile("KERNEL CPUFREQ", "/sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state");
@@ -2764,17 +2790,18 @@ void Dumpstate::DumpstateBoard(int out_fd) {
 
 static void ShowUsage() {
     fprintf(stderr,
-            "usage: dumpstate [-h] [-b soundfile] [-e soundfile] [-o directory] [-p] "
+            "usage: dumpstate [-h] [-b soundfile] [-e soundfile] [-o directory] [-p] [-m] "
             "[-s] [-S] [-q] [-P] [-R] [-L] [-V version]\n"
             "  -h: display this help message\n"
             "  -b: play sound file instead of vibrate, at beginning of job\n"
             "  -e: play sound file instead of vibrate, at end of job\n"
             "  -o: write to custom directory (only in limited mode)\n"
             "  -p: capture screenshot to filename.png\n"
+            "  -m: capture screenshots of all displays to filename.zip\n"
             "  -s: write zipped file to control socket (for init)\n"
             "  -S: write file location to control socket (for init)\n"
             "  -q: disable vibrate\n"
-            "  -P: send broadcast when started and do progress updates\n"
+            "  -P: send broadcast when started and finished and do progress updates\n"
             "  -R: take bugreport in remote mode (shouldn't be used with -P)\n"
             "  -w: start binder service and make it wait for a call to startBugreport\n"
             "  -L: output limited information that is safe for submission in feedback reports\n"
@@ -2898,7 +2925,20 @@ static bool PrepareToWriteToFile() {
     }
 
     if (ds.options_->do_screenshot) {
-        ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
+        if (android::os::bugreport_multi_display_screenshot_enabled() &&
+            ds.options_->multi_display_screenshot) {
+            ds.screenshot_path_ =
+                ds.GetPath(ds.CalledByApi() ? "-screenshots-zip.tmp" : "-screenshots.zip");
+
+            std::vector<PhysicalDisplayId> ids = SurfaceComposerClient::getPhysicalDisplayIds();
+            for (PhysicalDisplayId display_id : ids) {
+                std::string id = android::to_string(display_id);
+                std::string path = ds.GetPath("-" + id + ".png");
+                ds.screenshot_path_by_display_id_.insert(std::make_pair(id, path));
+            }
+        } else {
+            ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
+        }
     }
     ds.tmp_path_ = ds.GetPath(".tmp");
     ds.log_path_ = ds.GetPath("-dumpstate_log-" + std::to_string(ds.pid_) + ".txt");
@@ -3033,15 +3073,14 @@ static void SetOptionsFromMode(Dumpstate::BugreportMode mode, Dumpstate::DumpOpt
 static void LogDumpOptions(const Dumpstate::DumpOptions& options) {
     MYLOGI(
         "do_vibrate: %d stream_to_socket: %d progress_updates_to_socket: %d do_screenshot: %d "
-        "is_remote_mode: %d show_header_only: %d telephony_only: %d "
+        "multi_display_screenshot: %d is_remote_mode: %d show_header_only: %d telephony_only: %d "
         "wifi_only: %d do_progress_updates: %d fd: %d bugreport_mode: %s "
         "limited_only: %d args: %s\n",
         options.do_vibrate, options.stream_to_socket, options.progress_updates_to_socket,
-        options.do_screenshot, options.is_remote_mode, options.show_header_only,
-        options.telephony_only, options.wifi_only,
+        options.do_screenshot, options.multi_display_screenshot, options.is_remote_mode,
+        options.show_header_only, options.telephony_only, options.wifi_only,
         options.do_progress_updates, options.bugreport_fd.get(),
-        options.bugreport_mode_string.c_str(),
-        options.limited_only, options.args.c_str());
+        options.bugreport_mode_string.c_str(), options.limited_only, options.args.c_str());
 }
 
 void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
@@ -3052,6 +3091,8 @@ void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
                                         bool skip_user_consent) {
     this->use_predumped_ui_data = bugreport_flags & BugreportFlag::BUGREPORT_USE_PREDUMPED_UI_DATA;
     this->is_consent_deferred = bugreport_flags & BugreportFlag::BUGREPORT_FLAG_DEFER_CONSENT;
+    this->multi_display_screenshot =
+        bugreport_flags & BugreportFlag::BUGREPORT_FLAG_CAPTURE_MULTI_DISPLAY_SCREENSHOT;
     this->skip_user_consent = skip_user_consent;
     // Duplicate the fds because the passed in fds don't outlive the binder transaction.
     bugreport_fd.reset(fcntl(bugreport_fd_in.get(), F_DUPFD_CLOEXEC, 0));
@@ -3063,7 +3104,7 @@ void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
 Dumpstate::RunStatus Dumpstate::DumpOptions::Initialize(int argc, char* argv[]) {
     RunStatus status = RunStatus::OK;
     int c;
-    while ((c = getopt(argc, argv, "dho:svqzpLPBRSV:w")) != -1) {
+    while ((c = getopt(argc, argv, "dho:svqzpmLPBRSV:w")) != -1) {
         switch (c) {
             // clang-format off
             case 'o': out_dir = optarg;              break;
@@ -3072,6 +3113,7 @@ Dumpstate::RunStatus Dumpstate::DumpOptions::Initialize(int argc, char* argv[]) 
             case 'v': show_header_only = true;       break;
             case 'q': do_vibrate = false;            break;
             case 'p': do_screenshot = true;          break;
+            case 'm': multi_display_screenshot = true;      break;
             case 'P': do_progress_updates = true;    break;
             case 'R': is_remote_mode = true;         break;
             case 'L': limited_only = true;           break;
@@ -3358,14 +3400,16 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
         return ERROR;
     }
 
+
+    // clang-format off
+    std::vector<std::string> am_args = {
+            "--receiver-permission", "android.permission.DUMP",
+    };
+    // clang-format on
+
     // Interactive, wear & telephony modes are default to true.
     // and may enable from cli option or when using control socket
     if (options_->do_progress_updates) {
-        // clang-format off
-        std::vector<std::string> am_args = {
-                "--receiver-permission", "android.permission.DUMP",
-        };
-        // clang-format on
         // Send STARTED broadcast for apps that listen to bugreport generation events
         SendBroadcast("com.android.internal.intent.action.BUGREPORT_STARTED",
                       am_args, multiuser_get_user_id(calling_uid));
@@ -3459,6 +3503,7 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
     }
 
     MaybeTakeEarlyScreenshot();
+    MaybeSavePlaceholderScreenshot();
     MaybeWaitForSnapshotSystemTrace(std::move(snapshot_system_trace));
     onUiIntensiveBugreportDumpsFinished(calling_uid);
     MaybeCheckUserConsent(calling_uid, calling_package);
@@ -3519,6 +3564,14 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
         }
     }
 
+     if (options_->do_progress_updates) {
+        // Send COMPLETED broadcast to notify corresponding apps.
+        // Compare to the deprecated `BUGREPORT_FINISHED` action, this does not contain any
+        // bugreport information. This acts solely for notification only.
+        SendBroadcast("com.android.internal.intent.action.BUGREPORT_COMPLETED",
+                      am_args, multiuser_get_user_id(calling_uid));
+     }
+
     /* vibrate a few but shortly times to let user know it's finished */
     if (options_->do_vibrate) {
         for (int i = 0; i < 3; i++) {
@@ -3558,6 +3611,26 @@ void Dumpstate::MaybeTakeEarlyScreenshot() {
     TakeScreenshot();
 }
 
+void Dumpstate::MaybeSavePlaceholderScreenshot() {
+    if (options_->do_screenshot) {
+        // No need to save a placeholder screenshot if a real one will be taken.
+        return;
+    }
+    if (!options_->is_consent_deferred) {
+        return;
+    }
+
+    // When consent is deferred, a screenshot used to be taken even when one
+    // was not requested. The screenshot is not taken any more but a placeholder
+    // is saved for backwards compatibility.
+    std::string path = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
+    if (android::os::CopyFileToFile(DEFAULT_SCREENSHOT_PATH, path)) {
+        MYLOGD("Saved fallback screenshot on %s\n", path.c_str());
+    } else {
+        MYLOGE("Failed to save fallback screenshot on %s\n", path.c_str());
+    };
+}
+
 std::future<std::string> Dumpstate::MaybeSnapshotSystemTraceAsync() {
     // When capturing traces via bugreport handler (BH), this function will be invoked twice:
     // 1) When BH invokes IDumpstate::PreDumpUiData()
@@ -3582,7 +3655,12 @@ std::future<std::string> Dumpstate::MaybeSnapshotSystemTraceAsync() {
     }
 
     // If a stale file exists already, remove it.
-    android::os::ForEachTrace([&](const std::string& trace_path) { unlink(trace_path.c_str()); });
+    android::os::ForEachTrace([&](const std::string& trace_path) {
+        if (trace_path == PREV_BOOT_TRACE_PATH) {
+            return;
+        }
+        unlink(trace_path.c_str());
+    });
 
     MYLOGI("Launching async '%s'", SERIALIZE_PERFETTO_TRACE_TASK.c_str())
 
@@ -3627,18 +3705,6 @@ void Dumpstate::MaybeSnapshotUiTraces() {
         {"cmd", "window", "tracing", "save-for-bugreport"},
         {"cmd", "window", "shell", "tracing", "save-for-bugreport"},
     };
-
-    if (!android_tracing_perfetto_transition_tracing()) {
-        dumpTracesForBugReportCommands.push_back({"dumpsys", "activity", "service",
-                                                  "SystemUIService", "WMShell", "transitions",
-                                                  "tracing", "save-for-bugreport"});
-    }
-
-    if (!android_tracing_perfetto_protolog_tracing()) {
-        dumpTracesForBugReportCommands.push_back({"dumpsys", "activity", "service",
-                                                  "SystemUIService", "WMShell", "protolog",
-                                                  "save-for-bugreport"});
-    }
 
     for (const auto& command : dumpTracesForBugReportCommands) {
         RunCommand(
@@ -3707,6 +3773,9 @@ bool Dumpstate::CalledByApi() const {
 void Dumpstate::CleanupTmpFiles() {
     android::os::UnlinkAndLogOnError(tmp_path_);
     android::os::UnlinkAndLogOnError(screenshot_path_);
+    for (auto& [_, path] : screenshot_path_by_display_id_) {
+        android::os::UnlinkAndLogOnError(path);
+    }
     android::os::UnlinkAndLogOnError(path_);
     if (dump_traces_path != nullptr) {
         android::os::UnlinkAndLogOnError(dump_traces_path);
@@ -4670,7 +4739,7 @@ void Dumpstate::UpdateProgress(int32_t delta_sec) {
     // Always update progess so stats can be tuned...
     progress_->Inc(delta_sec);
 
-    // ...but only notifiy listeners when necessary.
+    // ...but only notify listeners when necessary.
     if (!options_->do_progress_updates) return;
 
     int progress = progress_->Get();
@@ -4702,6 +4771,15 @@ void Dumpstate::UpdateProgress(int32_t delta_sec) {
 }
 
 void Dumpstate::TakeScreenshot(const std::string& path) {
+    if (android::os::bugreport_multi_display_screenshot_enabled() &&
+        ds.options_->multi_display_screenshot) {
+        TakeMultiDisplayScreenshots(path);
+    } else {
+        TakeSingleDisplayScreenshot(path);
+    }
+}
+
+void Dumpstate::TakeSingleDisplayScreenshot(const std::string& path) {
     const std::string& real_path = path.empty() ? screenshot_path_ : path;
     int status =
         RunCommand("", {"screencap", "-p", real_path},
@@ -4715,6 +4793,44 @@ void Dumpstate::TakeScreenshot(const std::string& path) {
         // Show a visual indication to indicate screenshot is taken via
         // IDumpstateListener.onScreenshotTaken()
         listener_->onScreenshotTaken(status == 0);
+    }
+}
+
+void Dumpstate::TakeMultiDisplayScreenshots(const std::string& path) {
+    const std::string& real_path = path.empty() ? screenshot_path_ : path;
+
+    FILE* zipFile = fopen(real_path.c_str(), "wb");
+    std::unique_ptr<ZipWriter> zip_writer = std::make_unique<ZipWriter>(zipFile);
+
+    bool success = false;
+
+    for (auto& [display_id, screenshot_path] : ds.screenshot_path_by_display_id_) {
+        int status = RunCommand(
+            "", {"/system/bin/screencap", "-p", screenshot_path, "-d", display_id},
+            CommandOptions::WithTimeout(10).Always().DropRoot().RedirectStderr().Build());
+
+        if (status == 0) {
+            MYLOGD("Screenshot for display id %s saved on %s\n", display_id.c_str(),
+                   screenshot_path.c_str());
+
+            size_t flags = ZipWriter::kCompress | ZipWriter::kDefaultCompression;
+            std::filesystem::path p(screenshot_path);
+            std::string filename = p.filename().string();
+            AddZipEntry(zip_writer, filename, screenshot_path);
+            success = true;
+        } else {
+            MYLOGE("Failed to take screenshot for display id %s on %s\n", display_id.c_str(),
+                   screenshot_path.c_str());
+        }
+    }
+
+    zip_writer->Finish();
+    fclose(zipFile);
+
+    if (listener_ != nullptr) {
+        // Show a visual indication to indicate screenshot is taken via
+        // IDumpstateListener.onScreenshotTaken()
+        listener_->onScreenshotTaken(success);
     }
 }
 

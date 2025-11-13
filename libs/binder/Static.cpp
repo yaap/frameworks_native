@@ -27,7 +27,7 @@ namespace android {
 
 // ------------ Text output streams
 
-Vector<int32_t> gTextBuffers;
+[[clang::no_destroy]] Vector<int32_t> gTextBuffers;
 
 class LogTextOutput : public BufferedTextOutput
 {

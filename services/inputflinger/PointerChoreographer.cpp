@@ -107,13 +107,15 @@ PointerChoreographer::PointerChoreographer(InputListenerInterface& inputListener
       : PointerChoreographer(
                 inputListener, policy,
                 [](const sp<android::gui::WindowInfosListener>& listener) {
-                    auto initialInfo = std::make_pair(std::vector<android::gui::WindowInfo>{},
-                                                      std::vector<android::gui::DisplayInfo>{});
 #if defined(__ANDROID__)
-                    SurfaceComposerClient::getDefault()->addWindowInfosListener(listener,
-                                                                                &initialInfo);
+                    android::base::Result<android::gui::WindowInfosUpdate> result =
+                            SurfaceComposerClient::getDefault()->addWindowInfosListener(listener);
+                    LOG_IF(FATAL, !result.ok()) << "Can't add window listener, pointers won't work";
+                    return result->windowInfos;
+#else
+                    gui::WindowInfosUpdate emptyUpdate;
+                    return emptyUpdate.windowInfos;
 #endif
-                    return initialInfo.first;
                 },
                 [](const sp<android::gui::WindowInfosListener>& listener) {
 #if defined(__ANDROID__)
@@ -867,14 +869,12 @@ std::optional<DisplayViewport> PointerChoreographer::getViewportForPointerDevice
     return std::nullopt;
 }
 
-vec2 PointerChoreographer::getMouseCursorPosition(ui::LogicalDisplayId displayId) {
+std::optional<vec2> PointerChoreographer::getMouseCursorPosition(ui::LogicalDisplayId displayId) {
     std::scoped_lock _l(getLock());
-    const ui::LogicalDisplayId resolvedDisplayId = getTargetMouseDisplayLocked(displayId);
-    if (auto it = mMousePointersByDisplay.find(resolvedDisplayId);
-        it != mMousePointersByDisplay.end()) {
+    if (auto it = mMousePointersByDisplay.find(displayId); it != mMousePointersByDisplay.end()) {
         return it->second->getPosition();
     }
-    return {AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION};
+    return std::nullopt;
 }
 
 void PointerChoreographer::setShowTouchesEnabled(bool enabled) {
@@ -1030,7 +1030,8 @@ PointerChoreographer::findDestinationDisplayLocked(const ui::LogicalDisplayId so
         LOG(WARNING) << "Source display missing from topology " << sourceDisplayId;
         return std::nullopt;
     }
-    for (const DisplayTopologyAdjacentDisplay& adjacentDisplay : sourceNode->second) {
+    for (const DisplayTopologyAdjacentDisplay& adjacentDisplay :
+         sourceNode->second.adjacentDisplays) {
         if (adjacentDisplay.position != sourceBoundary) {
             continue;
         }
@@ -1043,8 +1044,8 @@ PointerChoreographer::findDestinationDisplayLocked(const ui::LogicalDisplayId so
         }
         // As displays can have different densities we need to do all calculations in
         // density-independent-pixels a.k.a. dp values.
-        const int sourceDensity = mTopology.displaysDensity.at(sourceDisplayId);
-        const int adjacentDisplayDensity = mTopology.displaysDensity.at(adjacentDisplay.displayId);
+        const int sourceDensity = mTopology.graph.at(sourceDisplayId).density;
+        const int adjacentDisplayDensity = mTopology.graph.at(adjacentDisplay.displayId).density;
         const float sourceCursorOffsetDp = pxToDp(sourceCursorOffsetPx, sourceDensity);
         const int32_t edgeSizePx = sourceBoundary == DisplayTopologyPosition::TOP ||
                         sourceBoundary == DisplayTopologyPosition::BOTTOM

@@ -20,6 +20,7 @@
 #include <include/core/SkSurface.h>
 #include <include/core/SkTraceMemoryDump.h>
 #include <include/gpu/graphite/GraphiteTypes.h>
+#include <include/gpu/graphite/ContextOptions.h>
 #include <include/gpu/graphite/Surface.h>
 #include <include/gpu/graphite/vk/VulkanGraphiteUtils.h>
 

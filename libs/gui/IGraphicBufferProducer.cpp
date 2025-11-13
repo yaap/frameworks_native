@@ -779,7 +779,7 @@ public:
         }
         return result;
     }
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
+
     virtual status_t setFrameRate(float frameRate, int8_t compatibility,
                                   int8_t changeFrameRateStrategy) override {
         Parcel data, reply;
@@ -793,7 +793,7 @@ public:
         }
         return result;
     }
-#endif
+
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     virtual status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) {
         Parcel data, reply;
@@ -1016,13 +1016,11 @@ status_t IGraphicBufferProducer::setAutoPrerotation(bool autoPrerotation) {
     return INVALID_OPERATION;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
 status_t IGraphicBufferProducer::setFrameRate(float /*frameRate*/, int8_t /*compatibility*/,
                                               int8_t /*changeFrameRateStrategy*/) {
     // No-op for IGBP other than BufferQueue.
     return INVALID_OPERATION;
 }
-#endif
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
 status_t IGraphicBufferProducer::setAdditionalOptions(const std::vector<gui::AdditionalOptions>&) {
@@ -1572,7 +1570,6 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
         case SET_FRAME_RATE: {
             CHECK_INTERFACE(IGraphicBuffer, data, reply);
             float frameRate = data.readFloat();
@@ -1582,7 +1579,6 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
-#endif
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
         case SET_ADDITIONAL_OPTIONS: {
             CHECK_INTERFACE(IGraphicBuffer, data, reply);

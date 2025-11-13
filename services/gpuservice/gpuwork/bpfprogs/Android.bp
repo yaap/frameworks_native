@@ -23,6 +23,17 @@ bpf {
         "-Wthread-safety",
         "-Wunreachable-code",
     ],
+    include_dirs: [
+        "system/bpf/include/defs",
+    ],
+}
+
+libbpf_prog {
+    name: "gpuWork.bpf",
+    srcs: ["gpuWork.c"],
+    header_libs: [
+        "android_bpf_defs",
+    ],
 }
 
 cc_library_headers {

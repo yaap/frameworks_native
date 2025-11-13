@@ -14,14 +14,28 @@
  * limitations under the License.
  */
 
+use alloc::boxed::Box;
 use binder::{unstable_api::AsNative, SpIBinder};
 use libc::size_t;
+use log::error;
 use std::ffi::{c_char, c_void};
 use std::ptr;
-use tipc::{ConnectResult, Handle, MessageResult, PortCfg, TipcError, UnbufferedService, Uuid};
+use tipc::{
+    ClientIdentifier, ConnectResult, Handle, MessageResult, PortCfg, TipcError, UnbufferedService,
+    Uuid,
+};
 
-pub trait PerSessionCallback: Fn(Uuid) -> Option<SpIBinder> + Send + Sync + 'static {}
-impl<T> PerSessionCallback for T where T: Fn(Uuid) -> Option<SpIBinder> + Send + Sync + 'static {}
+/// Trait alias for the callback passed into the per-session constructor of the RpcServer.
+/// Note: this is used in this file only, although it is marked as pub to be able to be used in
+/// the definition of the pub constructor.
+pub trait PerSessionCallback:
+    Fn(ClientIdentifier) -> Option<SpIBinder> + Send + Sync + 'static
+{
+}
+impl<T> PerSessionCallback for T where
+    T: Fn(ClientIdentifier) -> Option<SpIBinder> + Send + Sync + 'static
+{
+}
 
 pub struct RpcServer {
     inner: *mut binder_rpc_server_bindgen::ARpcServerTrusty,
@@ -52,7 +66,7 @@ impl RpcServer {
     /// Allocates a new per-session RpcServer object.
     ///
     /// Per-session objects take a closure that gets called once
-    /// for every new connection. The closure gets the UUID of
+    /// for every new connection. The closure gets the `ClientIdentifier` of
     /// the peer and can accept or reject that connection.
     pub fn new_per_session<F: PerSessionCallback>(f: F) -> RpcServer {
         // SAFETY: Takes ownership of the returned handle, which has correct refcount.
@@ -68,25 +82,35 @@ impl RpcServer {
 }
 
 unsafe extern "C" fn per_session_callback_wrapper<F: PerSessionCallback>(
-    uuid_ptr: *const c_void,
+    client_id_ptr: *const c_void,
     len: size_t,
     cb_ptr: *mut c_char,
 ) -> *mut binder_rpc_server_bindgen::AIBinder {
     // SAFETY: This callback should only get called while the RpcServer is alive.
     let cb = unsafe { &mut *cb_ptr.cast::<F>() };
 
-    if len != std::mem::size_of::<Uuid>() {
+    if len < 1 {
         return ptr::null_mut();
     }
-
-    // SAFETY: On the previous lines we check that we got exactly the right amount of bytes.
-    let uuid = unsafe {
-        let mut uuid = std::mem::MaybeUninit::<Uuid>::uninit();
-        uuid.as_mut_ptr().copy_from(uuid_ptr.cast(), 1);
-        uuid.assume_init()
+    // SAFETY: We have checked that the length is at least 1
+    // We know that the pointer has not been freed at this point, because:
+    // 1) The pointer is allocated in the call to: `on_connect` or `on_new_connection` in the
+    //    implementation of the `UnbufferredService` trait for `RpcServer`.
+    // 2) `on_connect` and `on_new_connection` invokes `ARpcServerTrusty_handleConnect`, immediately
+    //    after the allocation.
+    // 3) this callback is invoked in the callpath of `ARpcServerTrusty_handleConnect`.
+    // We know that there is no concurrent mutable access to the pointer because it is allocated
+    // and accessed in the same (single) process as per the callpath described above.
+    let client_id_data = unsafe { std::slice::from_raw_parts(client_id_ptr.cast(), len) };
+    let client_id = match ClientIdentifier::from_tagged_bytes(client_id_data) {
+        Ok(c) => c,
+        Err(_) => {
+            error!("error in reconstructing the ClientIdentifier from pointer and length");
+            return ptr::null_mut();
+        }
     };
 
-    cb(uuid).map_or_else(ptr::null_mut, |b| {
+    cb(client_id).map_or_else(ptr::null_mut, |b| {
         // Prevent AIBinder_decStrong from being called before AIBinder_toPlatformBinder.
         // The per-session callback in C++ is supposed to call AIBinder_decStrong on the
         // pointer we return here.
@@ -129,11 +153,21 @@ impl UnbufferedService for RpcServer {
         peer: &Uuid,
     ) -> tipc::Result<ConnectResult<Self::Connection>> {
         let mut conn = RpcServerConnection { ctx: std::ptr::null_mut() };
+        let client_identifier = ClientIdentifier::UUID(peer.clone());
+        let mut data = client_identifier.as_tagged_bytes();
+        let len = data.len();
+        // SAFETY: This unsafe block calls into a C++ function, which is considered safe, i.e. it
+        // does not cause undefined behavior for valid inputs (see below), returns an integer which
+        // indicates success or error, does not allocate or deallocate memory that Rust owns.
+        // The inputs passed into the C++ function are valid: Trusty is single threaded, so there is
+        // no concurrent access to `sef.inner`` and other inputs are not freed/deallocated until the
+        // function returns. Correct length of the data pointed to by the pointer is passed in.
         let rc = unsafe {
             binder_rpc_server_bindgen::ARpcServerTrusty_handleConnect(
                 self.inner,
                 handle.as_raw_fd(),
-                peer.as_ptr().cast(),
+                data.as_mut_ptr() as *const c_void,
+                len,
                 &mut conn.ctx,
             )
         };
@@ -148,9 +182,8 @@ impl UnbufferedService for RpcServer {
         &self,
         conn: &Self::Connection,
         _handle: &Handle,
-        buffer: &mut [u8],
+        _buffer: &mut [u8],
     ) -> tipc::Result<MessageResult> {
-        assert!(buffer.is_empty());
         let rc = unsafe { binder_rpc_server_bindgen::ARpcServerTrusty_handleMessage(conn.ctx) };
         if rc < 0 {
             Err(TipcError::from_uapi(rc.into()))
@@ -161,5 +194,36 @@ impl UnbufferedService for RpcServer {
 
     fn on_disconnect(&self, conn: &Self::Connection) {
         unsafe { binder_rpc_server_bindgen::ARpcServerTrusty_handleDisconnect(conn.ctx) };
+    }
+
+    fn on_new_connection(
+        &self,
+        _port: &PortCfg,
+        handle: &Handle,
+        client_identifier: &ClientIdentifier,
+    ) -> tipc::Result<ConnectResult<Self::Connection>> {
+        let mut conn = RpcServerConnection { ctx: std::ptr::null_mut() };
+        let mut data = client_identifier.as_tagged_bytes();
+        let len = data.len();
+        // SAFETY: This unsafe block calls into a C++ function, which is considered safe, i.e. it
+        // does not cause undefined behavior for valid inputs (see below), returns an integer which
+        // indicates success or error, does not allocate or deallocate memory that Rust owns.
+        // The inputs passed into the C++ function are valid: Trusty is single threaded, so there is
+        // no concurrent access to `sef.inner`` and other inputs are not freed/deallocated until the
+        // function returns. Correct length of the data pointed to by the pointer is passed in.
+        let rc = unsafe {
+            binder_rpc_server_bindgen::ARpcServerTrusty_handleConnect(
+                self.inner,
+                handle.as_raw_fd(),
+                data.as_mut_ptr() as *const c_void,
+                len,
+                &mut conn.ctx,
+            )
+        };
+        if rc < 0 {
+            Err(TipcError::from_uapi(rc.into()))
+        } else {
+            Ok(ConnectResult::Accept(conn))
+        }
     }
 }

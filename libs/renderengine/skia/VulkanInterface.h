@@ -44,9 +44,7 @@ public:
     bool takeOwnership();
     void teardown();
 
-    // TODO(b/309785258) Combine these into one now that they are the same implementation.
-    VulkanBackendContext getGaneshBackendContext();
-    VulkanBackendContext getGraphiteBackendContext();
+    VulkanBackendContext createSkiaVulkanBackendContext();
     VkSemaphore createExportableSemaphore();
     VkSemaphore importSemaphoreFromSyncFd(int syncFd);
     int exportSemaphoreSyncFd(VkSemaphore semaphore);

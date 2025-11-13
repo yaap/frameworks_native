@@ -115,7 +115,6 @@ public:
     status_t disableDevice(int32_t deviceId) override;
 
     void addConfigurationProperty(int32_t deviceId, const char* key, const char* value);
-    void addConfigurationMap(int32_t deviceId, const PropertyMap* configuration);
 
     void addAbsoluteAxis(int32_t deviceId, int axis, int32_t minValue, int32_t maxValue, int flat,
                          int fuzz, int resolution = 0);

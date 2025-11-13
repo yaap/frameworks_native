@@ -73,9 +73,9 @@ class OutputLayer;
 struct LayerFECompositionState;
 }
 
-namespace frametimeline {
+namespace scheduler {
 class SurfaceFrame;
-} // namespace frametimeline
+} // namespace scheduler
 
 class Layer : public virtual RefBase {
 public:
@@ -104,20 +104,14 @@ public:
 
         uint64_t frameNumber;
         uint64_t previousFrameNumber;
-        // high watermark framenumber to use to check for barriers to protect ourselves
-        // from out of order transactions
-        uint64_t barrierFrameNumber;
         ui::Transform transform;
 
         uint32_t producerId = 0;
-        // high watermark producerId to use to check for barriers to protect ourselves
-        // from out of order transactions
-        uint32_t barrierProducerId = 0;
 
         uint32_t bufferTransform;
         bool transformToDisplayInverse;
         Region transparentRegionHint;
-        std::shared_ptr<renderengine::ExternalTexture> previousBuffer;
+        std::weak_ptr<renderengine::ExternalTexture> previousBuffer;
         std::shared_ptr<renderengine::ExternalTexture> buffer;
         sp<Fence> acquireFence;
         std::shared_ptr<FenceTime> acquireFenceTime;
@@ -143,11 +137,11 @@ public:
         // such SurfaceFrame exists because only one buffer can be presented on the layer per vsync.
         // If multiple buffers are queued, the prior ones will be dropped, along with the
         // SurfaceFrame that's tracking them.
-        std::shared_ptr<frametimeline::SurfaceFrame> bufferSurfaceFrameTX;
+        std::shared_ptr<scheduler::SurfaceFrame> bufferSurfaceFrameTX;
         // A map of token(frametimelineVsyncId) to the SurfaceFrame that's tracking a transaction
         // that contains the token. Only one SurfaceFrame exisits for transactions that share the
         // same token, unless they are presented in different vsyncs.
-        std::unordered_map<int64_t, std::shared_ptr<frametimeline::SurfaceFrame>>
+        std::unordered_map<int64_t, std::shared_ptr<scheduler::SurfaceFrame>>
                 bufferlessSurfaceFramesTX;
         // An arbitrary threshold for the number of BufferlessSurfaceFrames in the state. Used to
         // trigger a warning if the number of SurfaceFrames crosses the threshold.
@@ -160,6 +154,7 @@ public:
         float desiredHdrSdrRatio = -1.f;
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
+        bool useLuts = false;
     };
 
     explicit Layer(const surfaceflinger::LayerCreationArgs& args);
@@ -187,6 +182,7 @@ public:
     bool setDataspace(ui::Dataspace /*dataspace*/);
     bool setExtendedRangeBrightness(float currentBufferRatio, float desiredRatio);
     bool setDesiredHdrHeadroom(float desiredRatio);
+    void setUseLuts(bool useLuts) { mDrawingState.useLuts = useLuts; }
     bool setSidebandStream(const sp<NativeHandle>& /*sidebandStream*/,
                            const FrameTimelineInfo& /* info*/, nsecs_t /* postTime */,
                            gui::GameMode gameMode);
@@ -245,8 +241,6 @@ public:
         sp<Fence> mFence;
         uint32_t mTransform{0};
         ui::Dataspace mDataspace{ui::Dataspace::UNKNOWN};
-        std::chrono::steady_clock::time_point mTimeSinceDataspaceUpdate =
-                std::chrono::steady_clock::time_point::min();
         Rect mCrop;
         PixelFormat mPixelFormat{PIXEL_FORMAT_NONE};
         bool mTransformToDisplayInverse{false};
@@ -258,6 +252,9 @@ public:
     };
 
     BufferInfo mBufferInfo;
+    std::optional<SurfaceFlinger::LayerEvent> mLastLayerEvent;
+    std::chrono::steady_clock::time_point mTimeSinceLayerEventsUpdate =
+            std::chrono::steady_clock::time_point::min();
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> mBufferReleaseChannel;
 
     bool fenceHasSignaled() const;
@@ -333,15 +330,14 @@ public:
     void setFrameTimelineVsyncForBufferlessTransaction(const FrameTimelineInfo& info,
                                                        nsecs_t postTime, gui::GameMode gameMode);
 
-    void addSurfaceFrameDroppedForBuffer(std::shared_ptr<frametimeline::SurfaceFrame>& surfaceFrame,
+    void addSurfaceFrameDroppedForBuffer(std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame,
                                          nsecs_t dropTime);
-    void addSurfaceFramePresentedForBuffer(
-            std::shared_ptr<frametimeline::SurfaceFrame>& surfaceFrame, nsecs_t acquireFenceTime,
-            nsecs_t currentLatchTime);
+    void addSurfaceFramePresentedForBuffer(std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame,
+                                           nsecs_t acquireFenceTime, nsecs_t currentLatchTime);
 
-    std::shared_ptr<frametimeline::SurfaceFrame> createSurfaceFrameForTransaction(
+    std::shared_ptr<scheduler::SurfaceFrame> createSurfaceFrameForTransaction(
             const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode);
-    std::shared_ptr<frametimeline::SurfaceFrame> createSurfaceFrameForBuffer(
+    std::shared_ptr<scheduler::SurfaceFrame> createSurfaceFrameForBuffer(
             const FrameTimelineInfo& info, nsecs_t queueTime, std::string debugName,
             gui::GameMode gameMode);
     void setFrameTimelineVsyncForSkippedFrames(const FrameTimelineInfo& info, nsecs_t postTime,
@@ -558,7 +554,7 @@ private:
 
     std::vector<std::pair<frontend::LayerHierarchy::TraversalPath, sp<LayerFE>>> mLayerFEs;
     bool mHandleAlive = false;
-    std::optional<std::reference_wrapper<frametimeline::FrameTimeline>> getTimeline() const {
+    std::optional<std::reference_wrapper<scheduler::FrameTimeline>> getTimeline() const {
         return *mFlinger->mFrameTimeline;
     }
 };

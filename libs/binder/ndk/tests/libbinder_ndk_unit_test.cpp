@@ -1085,6 +1085,39 @@ TEST(NdkBinder, GetClassInterfaceDescriptor) {
     ASSERT_STREQ(IFoo::kIFooDescriptor, AIBinder_Class_getDescriptor(IFoo::kClass));
 }
 
+TEST(NdkBinder, CheckServiceAccessOk) {
+    // This test case runs as su which has access to all services
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb",
+            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb",
+            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_LIST));
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb", AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_ADD));
+}
+
+TEST(NdkBinder, CheckServiceAccessNotOk) {
+    EXPECT_FALSE(AServiceManager_checkServiceAccess(
+            "u:r:some_unknown_sid:s0", 0, 0, "adb",
+            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
+}
+
+TEST(NdkBinder, InvalidCheckServiceAccessArgs) {
+    constexpr AServiceManager_PermissionType kUnknownPermission =
+            static_cast<AServiceManager_PermissionType>(8000);
+    EXPECT_DEATH(AServiceManager_checkServiceAccess(nullptr, 0, 0, nullptr, kUnknownPermission),
+                 "nullptr");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess("u:r:su:s0", 0, 0, nullptr, kUnknownPermission),
+                 "nullptr");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess("u:r:su:s0", 0, 0, "adb", kUnknownPermission),
+                 "Unknown value for permission argument! permission: 8000");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess(
+                         "u:r:su:s0", 0, 0, nullptr,
+                         AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND),
+                 "nullptr");
+}
+
 static void addOne(int* to) {
     if (!to) return;
     ++(*to);

@@ -360,6 +360,35 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
     }
 }
 
+TEST_F(MirrorLayerTest, MirrorLayerWithStopLayer) {
+    if (!FlagManager::getInstance().stop_layer()) {
+        GTEST_SKIP() << "skipping test - stop_layer feature flag disabled";
+    }
+
+    sp<SurfaceControl> grandchild =
+            createColorLayer("Grandchild layer", Color::BLUE, mChildLayer.get());
+    Transaction()
+            .setFlags(grandchild, layer_state_t::eLayerOpaque, layer_state_t::eLayerOpaque)
+            .setCrop(grandchild, Rect(0, 0, 200, 200))
+            .show(grandchild)
+            .apply();
+
+    // Mirror child with stop layer set to grandchild.
+    sp<SurfaceControl> mirrorLayer = mClient->mirrorSurface(mChildLayer.get(), grandchild.get());
+    ASSERT_NE(mirrorLayer, nullptr);
+
+    // Add mirrorLayer as child of mParentLayer so it's shown on the display
+    Transaction()
+            .reparent(mirrorLayer, mParentLayer)
+            .setPosition(mirrorLayer, 500, 500)
+            .show(mirrorLayer)
+            .apply();
+
+    auto shot = screenshot();
+    // Assert that we see the child's color and not the grandchild's color
+    shot->expectColor(Rect(550, 550, 600, 600), Color::GREEN);
+}
+
 } // namespace android
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues

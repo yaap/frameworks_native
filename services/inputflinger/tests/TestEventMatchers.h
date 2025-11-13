@@ -22,6 +22,7 @@
 
 #include <android-base/stringprintf.h>
 #include <android/input.h>
+#include <ftl/flags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
@@ -143,7 +144,7 @@ public:
             return false;
         }
         if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL &&
-            (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            !event.getFlags().test(MotionFlag::CANCELED)) {
             *listener << "event with CANCEL action is missing FLAG_CANCELED";
             return false;
         }
@@ -232,21 +233,13 @@ inline WithDeviceIdMatcher WithDeviceId(int32_t deviceId) {
 }
 
 /// Flags
-class WithFlagsMatcher {
+class WithKeyFlagsMatcher {
 public:
     using is_gtest_matcher = void;
-    explicit WithFlagsMatcher(int32_t flags) : mFlags(flags) {}
-
-    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
-        return mFlags == args.flags;
-    }
+    explicit WithKeyFlagsMatcher(int32_t flags) : mFlags(flags) {}
 
     bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream*) const {
         return mFlags == args.flags;
-    }
-
-    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
-        return mFlags == event.getFlags();
     }
 
     bool MatchAndExplain(const KeyEvent& event, std::ostream*) const {
@@ -263,8 +256,33 @@ private:
     const int32_t mFlags;
 };
 
-inline WithFlagsMatcher WithFlags(int32_t flags) {
-    return WithFlagsMatcher(flags);
+class WithMotionFlagsMatcher {
+public:
+    using is_gtest_matcher = void;
+    explicit WithMotionFlagsMatcher(ftl::Flags<MotionFlag> flags) : mFlags(flags) {}
+
+    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
+        return mFlags == ftl::Flags<MotionFlag>(args.flags);
+    }
+
+    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
+        return mFlags == event.getFlags();
+    }
+
+    void DescribeTo(std::ostream* os) const { *os << "with flags " << mFlags.string(); }
+
+    void DescribeNegationTo(std::ostream* os) const { *os << "wrong flags"; }
+
+private:
+    const ftl::Flags<MotionFlag> mFlags;
+};
+
+inline WithKeyFlagsMatcher WithFlags(int32_t flags) {
+    return WithKeyFlagsMatcher(flags);
+}
+
+inline WithMotionFlagsMatcher WithFlags(ftl::Flags<MotionFlag> flags) {
+    return WithMotionFlagsMatcher(flags);
 }
 
 /// DownTime

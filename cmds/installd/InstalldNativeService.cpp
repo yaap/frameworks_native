@@ -77,6 +77,8 @@
 #include "QuotaUtils.h"
 #include "SysTrace.h"
 
+#include <android_installd_flags.h>
+
 #ifndef LOG_TAG
 #define LOG_TAG "installd"
 #endif
@@ -89,6 +91,7 @@ using android::base::StringPrintf;
 using android::base::unique_fd;
 using android::os::ParcelFileDescriptor;
 using std::endl;
+namespace flags = android::installd::flags;
 
 namespace android {
 namespace installd {
@@ -880,6 +883,11 @@ binder::Status InstalldNativeService::createAppDataLocked(
         }
         if (previousUid > 0 && previousUid != uid) {
             chown_app_profile_dir(packageName, appId, userId);
+        }
+
+        if (flags::enable_set_inode_quotas() &&
+            !PrepareAppInodeQuota(uuid ? uuid->c_str() : "", uid)) {
+            PLOG(ERROR) << "Failed to set hard quota " + path;
         }
 
         if (!prepare_app_profile_dir(packageName, appId, userId)) {

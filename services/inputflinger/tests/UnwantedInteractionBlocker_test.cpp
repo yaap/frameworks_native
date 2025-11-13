@@ -91,9 +91,8 @@ static NotifyMotionArgs generateMotionArgs(nsecs_t downTime, nsecs_t eventTime, 
                           ui::LogicalDisplayId::DEFAULT, POLICY_FLAG_PASS_TO_USER, action,
                           /*actionButton=*/0,
                           /*flags=*/0, AMETA_NONE, /*buttonState=*/0, MotionClassification::NONE,
-                          AMOTION_EVENT_EDGE_FLAG_NONE, pointerCount, pointerProperties,
-                          pointerCoords, /*xPrecision=*/0, /*yPrecision=*/0,
-                          AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                          pointerCount, pointerProperties, pointerCoords, /*xPrecision=*/0,
+                          /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                           AMOTION_EVENT_INVALID_CURSOR_POSITION, downTime, /*videoFrames=*/{});
 
     return args;
@@ -636,7 +635,7 @@ TEST_F(UnwantedInteractionBlockerTest, TouchIsBlockedWhenMixedWithStylus) {
     args4.pointerProperties[1].toolType = ToolType::STYLUS;
     mBlocker->notifyMotion(args4);
     mTestListener.assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(POINTER_0_UP), WithFlags(FLAG_CANCELED)));
+            AllOf(WithMotionAction(POINTER_0_UP), WithFlags(MotionFlag::CANCELED)));
 
     NotifyMotionArgs args5 =
             generateMotionArgs(/*downTime=*/0, 4 * RESAMPLE_PERIOD, MOVE, {{12, 22, 30}});

@@ -85,7 +85,16 @@ constexpr size_t countof(T (&)[N]) {
 }
 
 // avoid optimizations
-void zeroMemory(uint8_t* data, size_t size);
+inline void zeroMemory(uint8_t* data, size_t size) {
+#ifdef __BIONIC__
+    memset_explicit(data, 0, size);
+#else
+    // Assembly marking to prevent any optimizing compiler from not actually clearing the buffer,
+    // this matches what exactly what memset_explicit does.
+    memset(data, 0, size);
+    __asm__ __volatile__("" : : "r"(data) : "memory");
+#endif
+}
 
 // View of contiguous sequence. Similar to std::span.
 template <typename T>

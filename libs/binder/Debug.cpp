@@ -185,9 +185,9 @@ void printHexData(int32_t indent, const void *buf, size_t length,
 
     if ((int32_t)length < 0) {
         if (singleLineBytesCutoff < 0) func(cookie, "\n");
-        char buf[64];
-        sprintf(buf, "(bad length: %zu)", length);
-        func(cookie, buf);
+        char bufLocal[64];
+        sprintf(bufLocal, "(bad length: %zu)", length);
+        func(cookie, bufLocal);
         return;
     }
 

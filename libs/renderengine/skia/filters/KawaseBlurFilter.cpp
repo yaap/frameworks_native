@@ -34,11 +34,14 @@
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
 #include <log/log.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 
-KawaseBlurFilter::KawaseBlurFilter(): BlurFilter() {
+KawaseBlurFilter::KawaseBlurFilter(RuntimeEffectManager& effectManager)
+      : BlurFilter(effectManager) {
     SkString blurString(
         "uniform shader child;"
         "uniform float in_blurOffset;"
@@ -52,11 +55,10 @@ KawaseBlurFilter::KawaseBlurFilter(): BlurFilter() {
             "return half4(c.rgb * 0.2, 1.0);"
         "}");
 
-    auto [blurEffect, error] = SkRuntimeEffect::MakeForShader(blurString);
-    if (!blurEffect) {
-        LOG_ALWAYS_FATAL("RuntimeShader error: %s", error.c_str());
-    }
-    mBlurEffect = std::move(blurEffect);
+    mBlurEffect =
+            effectManager
+                    .createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::kKawaseBlurEffect,
+                                                 "KawaseBlurEffect", blurString);
 }
 
 // Draws the given runtime shader on a GPU (Ganesh) surface and returns the result as an

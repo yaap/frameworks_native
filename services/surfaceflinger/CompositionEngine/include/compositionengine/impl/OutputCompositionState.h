@@ -173,6 +173,8 @@ struct OutputCompositionState {
 
     PictureProfileHandle pictureProfileHandle;
 
+    sp<GraphicBuffer> readbackBuffer = nullptr;
+
     // Debugging
     void dump(std::string& result) const;
 };

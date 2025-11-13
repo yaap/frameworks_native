@@ -41,9 +41,12 @@ SensorFusion::SensorFusion()
     mEnabled[FUSION_NOGYRO] = false;
 
     if (count > 0) {
-        for (size_t i=0 ; i<size_t(count) ; i++) {
-            // Only use non-wakeup sensors
-            if ((list[i].flags & SENSOR_FLAG_WAKE_UP) == 0) {
+        std::unordered_set<int> foundNonWakeSensorTypes;
+        for (size_t i = 0; i < size_t(count); i++) {
+            // Only use non-wakeup sensors, and always pick the first one
+            if ((list[i].flags & SENSOR_FLAG_WAKE_UP) == 0 &&
+                !foundNonWakeSensorTypes.contains(list[i].type)) {
+                foundNonWakeSensorTypes.insert(list[i].type);
                 if (list[i].type == SENSOR_TYPE_ACCELEROMETER) {
                     mAcc = Sensor(list + i);
                 }
@@ -78,8 +81,11 @@ SensorFusion::SensorFusion()
 }
 
 void SensorFusion::process(const sensors_event_t& event) {
+    // sensor additional info is not currently used in fusion algorithm
+    if (event.type == SENSOR_TYPE_ADDITIONAL_INFO)
+        return;
 
-    if (event.type == mGyro.getType()) {
+    if (event.sensor == mGyro.getHandle()) {
         float dT;
         if ( event.timestamp - mGyroTime> 0 &&
              event.timestamp - mGyroTime< (int64_t)(5e7) ) { //0.05sec
@@ -101,14 +107,14 @@ void SensorFusion::process(const sensors_event_t& event) {
             }
         }
         mGyroTime = event.timestamp;
-    } else if (event.type == SENSOR_TYPE_MAGNETIC_FIELD) {
+    } else if (event.sensor == mMag.getHandle()) {
         const vec3_t mag(event.data);
         for (int i = 0; i<NUM_FUSION_MODE; ++i) {
             if (mEnabled[i]) {
                 mFusions[i].handleMag(mag);// fusion in no mag mode will ignore
             }
         }
-    } else if (event.type == SENSOR_TYPE_ACCELEROMETER) {
+    } else if (event.sensor == mAcc.getHandle()) {
         float dT;
         if ( event.timestamp - mAccTime> 0 &&
              event.timestamp - mAccTime< (int64_t)(1e8) ) { //0.1sec

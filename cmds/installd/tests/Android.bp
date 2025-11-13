@@ -95,6 +95,7 @@ cc_defaults {
         "server_configurable_flags",
     ],
     static_libs: [
+        "installd_flags_c_lib",
         "libasync_safe",
         "libdiskusage",
         "libext2_uuid",

@@ -22,6 +22,7 @@ import driver_generator
 import generator_common
 import null_generator
 import vkjson_generator
+import vk_parser
 
 if __name__ == '__main__':
   generator_common.parse_vulkan_registry()
@@ -31,6 +32,8 @@ if __name__ == '__main__':
   driver_generator.gen_cpp()
   null_generator.gen_h()
   null_generator.gen_cpp()
+  vk_parser.gen_vk()
+  vkjson_generator.re_import_vk()
   vkjson_generator.gen_h()
   vkjson_generator.gen_cc()
   vkjson_generator.gen_instance_cc()

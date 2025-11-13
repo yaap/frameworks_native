@@ -19,15 +19,71 @@
 #include <android/gui/FrameTimelineInfo.h>
 #include <binder/Parcelable.h>
 #include <gui/LayerState.h>
+#include <gui/SimpleTransactionState.h>
 
 namespace android {
+
+struct TransactionListenerCallbacks {
+    std::vector<ListenerCallbacks> mFlattenedListenerCallbacks;
+    // Note: mHasListenerCallbacks can be true even if mFlattenedListenerCallbacks is
+    // empty because it reflects the unflattened map.
+    bool mHasListenerCallbacks = false;
+
+    status_t writeToParcel(Parcel* parcel) const;
+    status_t readFromParcel(const Parcel* parcel);
+    void clear();
+    bool operator==(const TransactionListenerCallbacks& rhs) const = default;
+    bool operator!=(const TransactionListenerCallbacks& rhs) const = default;
+};
+
+// State components that are containers or aggregates and are passed by const ref to
+// setTransactionState.
+struct ComplexTransactionState {
+    // The vsync id provided by Choreographer.getVsyncId and the input event id
+    gui::FrameTimelineInfo mFrameTimelineInfo = {};
+    std::vector<client_cache_t> mUncacheBuffers = {};
+    std::vector<uint64_t> mMergedTransactionIds = {};
+    TransactionListenerCallbacks mCallbacks = TransactionListenerCallbacks();
+    InputWindowCommands mInputWindowCommands = {};
+    // Tracks the client setting the early wakeup request
+    std::vector<gui::EarlyWakeupInfo> mEarlyWakeupInfos = {};
+
+    ComplexTransactionState() = default;
+    status_t writeToParcel(Parcel* parcel) const;
+    status_t readFromParcel(const Parcel* parcel);
+
+    void clear();
+    void merge(ComplexTransactionState& other);
+    bool operator==(const ComplexTransactionState& rhs) const = default;
+    bool operator!=(const ComplexTransactionState& rhs) const = default;
+
+    // copied from FrameTimelineInfo::merge()
+    void mergeFrameTimelineInfo(const FrameTimelineInfo& other);
+
+private:
+    // We keep track of the last MAX_MERGE_HISTORY_LENGTH merged transaction ids.
+    // Ordered most recently merged to least recently merged.
+    static constexpr size_t MAX_MERGE_HISTORY_LENGTH = 10u;
+};
+
+struct MutableTransactionState {
+    Vector<ComposerState> mComposerStates;
+    Vector<DisplayState> mDisplayStates;
+
+    void clear();
+    status_t writeToParcel(Parcel* parcel) const;
+    status_t readFromParcel(const Parcel* parcel);
+    void merge(const MutableTransactionState& other,
+               const std::function<void(const layer_state_t&)>& onBufferOverwrite);
+    layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
+    DisplayState& getDisplayState(const sp<IBinder>& token);
+};
 
 // Class to store all the transaction data and the parcelling logic
 class TransactionState {
 public:
     explicit TransactionState() = default;
-    TransactionState(TransactionState&& other) = default;
-    TransactionState& operator=(TransactionState&& other) = default;
+    TransactionState(TransactionState const& other) = default;
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(const Parcel* parcel);
     layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
@@ -35,38 +91,21 @@ public:
 
     // Returns the current id of the transaction.
     // The id is updated every time the transaction is applied.
-    uint64_t getId() const { return mId; }
-    std::vector<uint64_t> getMergedTransactionIds() const { return mMergedTransactionIds; }
+    uint64_t getId() const { return mSimpleState.mId; }
+    std::vector<uint64_t> getMergedTransactionIds() const {
+        return mComplexState.mMergedTransactionIds;
+    }
     void enableDebugLogCallPoints() { mLogCallPoints = true; }
     void merge(TransactionState&& other,
                const std::function<void(layer_state_t&)>& onBufferOverwrite);
 
-    // copied from FrameTimelineInfo::merge()
-    void mergeFrameTimelineInfo(const FrameTimelineInfo& other);
     void clear();
     bool operator==(const TransactionState& rhs) const = default;
     bool operator!=(const TransactionState& rhs) const = default;
 
-    uint64_t mId = 0;
-    std::vector<uint64_t> mMergedTransactionIds;
-    uint32_t mFlags = 0;
-    // The vsync id provided by Choreographer.getVsyncId and the input event id
-    gui::FrameTimelineInfo mFrameTimelineInfo;
-    // mDesiredPresentTime is the time in nanoseconds that the client would like the transaction
-    // to be presented. When it is not possible to present at exactly that time, it will be
-    // presented after the time has passed.
-    //
-    // If the client didn't pass a desired presentation time, mDesiredPresentTime will be
-    // populated to the time setBuffer was called, and mIsAutoTimestamp will be set to true.
-    //
-    // Desired present times that are more than 1 second in the future may be ignored.
-    // When a desired present time has already passed, the transaction will be presented as soon
-    // as possible.
-    //
-    // Transactions from the same process are presented in the same order that they are applied.
-    // The desired present time does not affect this ordering.
-    int64_t mDesiredPresentTime = 0;
-    bool mIsAutoTimestamp = true;
+    SimpleTransactionState mSimpleState;
+    ComplexTransactionState mComplexState;
+
     // If not null, transactions will be queued up using this token otherwise a common token
     // per process will be used.
     sp<IBinder> mApplyToken;
@@ -79,20 +118,6 @@ public:
 
     std::vector<DisplayState> mDisplayStates;
     std::vector<ComposerState> mComposerStates;
-    InputWindowCommands mInputWindowCommands;
-    std::vector<client_cache_t> mUncacheBuffers;
-    // Note: mHasListenerCallbacks can be true even if mListenerCallbacks is
-    // empty.
-    bool mHasListenerCallbacks = false;
-    std::vector<ListenerCallbacks> mListenerCallbacks;
-
-private:
-    explicit TransactionState(TransactionState const& other) = default;
-    friend class TransactionApplicationTest;
-    friend class SurfaceComposerClient;
-    // We keep track of the last MAX_MERGE_HISTORY_LENGTH merged transaction ids.
-    // Ordered most recently merged to least recently merged.
-    static constexpr size_t MAX_MERGE_HISTORY_LENGTH = 10u;
 };
 
 }; // namespace android

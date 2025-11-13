@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "FdTrigger"
+#define LOG_TAG "libbinder.FdTrigger"
 #include <log/log.h>
 
 #include "FdTrigger.h"
@@ -23,7 +23,9 @@
 
 #include <binder/Functional.h>
 
+#ifndef BINDER_RPC_SINGLE_THREADED
 #include "FdUtils.h"
+#endif // BINDER_RPC_SINGLE_THREADED
 #include "RpcState.h"
 #include "Utils.h"
 

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "AidlLazyServiceRegistrar"
+#define LOG_TAG "libbinder.AidlLazyServiceRegistrar"
 
 #include <android/os/BnClientCallback.h>
 #include <android/os/IServiceManager.h>

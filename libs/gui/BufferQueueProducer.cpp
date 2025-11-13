@@ -364,10 +364,8 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // Producers are not allowed to dequeue more than
         // mMaxDequeuedBufferCount buffers.
         // This check is only done if a buffer has already been queued
-        using namespace com::android::graphics::libgui::flags;
-        bool flagGatedBufferHasBeenQueued =
-                bq_always_use_max_dequeued_buffer_count() || mCore->mBufferHasBeenQueued;
-        if (flagGatedBufferHasBeenQueued && dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
+        if (mCore->mBufferHasBeenQueued &&
+                dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
             // Supress error logs when timeout is non-negative.
             if (mDequeueTimeout < 0) {
                 BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
@@ -1954,7 +1952,6 @@ status_t BufferQueueProducer::setAutoPrerotation(bool autoPrerotation) {
     return NO_ERROR;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
 status_t BufferQueueProducer::setFrameRate(float frameRate, int8_t compatibility,
                                            int8_t changeFrameRateStrategy) {
     ATRACE_CALL();
@@ -1975,7 +1972,6 @@ status_t BufferQueueProducer::setFrameRate(float frameRate, int8_t compatibility
     }
     return NO_ERROR;
 }
-#endif
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
 status_t BufferQueueProducer::setAdditionalOptions(

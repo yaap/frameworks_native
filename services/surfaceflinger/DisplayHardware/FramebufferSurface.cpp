@@ -49,18 +49,11 @@ namespace android {
 
 using ui::Dataspace;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 FramebufferSurface::FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
                                        const sp<IGraphicBufferProducer>& producer,
                                        const sp<IGraphicBufferConsumer>& consumer,
                                        const ui::Size& size, const ui::Size& maxSize)
       : ConsumerBase(producer, consumer),
-#else
-FramebufferSurface::FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
-                                       const sp<IGraphicBufferConsumer>& consumer,
-                                       const ui::Size& size, const ui::Size& maxSize)
-      : ConsumerBase(consumer),
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         mDisplayId(displayId),
         mMaxSize(maxSize),
         mCurrentBufferSlot(-1),

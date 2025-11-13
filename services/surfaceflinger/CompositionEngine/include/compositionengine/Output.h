@@ -29,7 +29,6 @@
 
 #include <compositionengine/LayerFE.h>
 #include <renderengine/LayerSettings.h>
-#include <ui/DisplayIdentification.h>
 #include <ui/Fence.h>
 #include <ui/FenceTime.h>
 #include <ui/GraphicTypes.h>
@@ -133,6 +132,7 @@ public:
         sp<Fence> presentFence{Fence::NO_FENCE};
         sp<Fence> clientTargetAcquireFence{Fence::NO_FENCE};
         std::unordered_map<HWC2::Layer*, sp<Fence>> layerFences;
+        sp<Fence> readbackFence{Fence::NO_FENCE};
     };
 
     struct ColorProfile {
@@ -241,6 +241,7 @@ public:
     // See Output::setLayerFilter.
     virtual bool includesLayer(ui::LayerFilter) const = 0;
     virtual bool includesLayer(const sp<LayerFE>&) const = 0;
+    virtual bool includesLayer(LayerFE*) const = 0;
 
     // Returns a pointer to the output layer corresponding to the given layer on
     // this output, or nullptr if the layer does not have one
@@ -283,6 +284,9 @@ public:
 
     // Enables overriding the 170M trasnfer function as sRGB
     virtual void setTreat170mAsSrgb(bool) = 0;
+
+    // For test use only. Returns whether the planner has the layer caching texture pool enabled.
+    virtual bool plannerTexturePoolEnabled() const = 0;
 
 protected:
     virtual void setDisplayColorProfile(std::unique_ptr<DisplayColorProfile>) = 0;

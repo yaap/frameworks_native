@@ -32,10 +32,6 @@ FrameTarget::FrameTarget(const std::string& displayLabel)
 std::pair<bool /* wouldBackpressure */, FrameTarget::PresentFence>
 FrameTarget::expectedSignaledPresentFence(Period vsyncPeriod, Period minFramePeriod) const {
     SFTRACE_CALL();
-    if (!FlagManager::getInstance().allow_n_vsyncs_in_targeter()) {
-        const size_t i = static_cast<size_t>(targetsVsyncsAhead<2>(minFramePeriod));
-        return {true, mPresentFencesLegacy[i]};
-    }
 
     bool wouldBackpressure = true;
     auto expectedPresentTime = mExpectedPresentTime;
@@ -80,14 +76,10 @@ bool FrameTarget::wouldPresentEarly(Period vsyncPeriod, Period minFramePeriod) c
 }
 
 const FenceTimePtr& FrameTarget::presentFenceForPreviousFrame() const {
-    if (FlagManager::getInstance().allow_n_vsyncs_in_targeter()) {
-        if (mPresentFences.size() > 0) {
-            return mPresentFences.back().fenceTime;
-        }
-        return FenceTime::NO_FENCE;
+    if (mPresentFences.size() > 0) {
+        return mPresentFences.back().fenceTime;
     }
-
-    return mPresentFencesLegacy.front().fenceTime;
+    return FenceTime::NO_FENCE;
 }
 
 void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& vsyncSource) {
@@ -142,10 +134,6 @@ void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& v
 
         const bool considerBackpressure =
                 mBackpressureGpuComposition || !mCompositionCoverage.test(CompositionCoverage::Gpu);
-
-        if (!FlagManager::getInstance().allow_n_vsyncs_in_targeter()) {
-            return static_cast<int>(considerBackpressure);
-        }
 
         if (!wouldBackpressure || !considerBackpressure) {
             return 0;
@@ -209,12 +197,7 @@ FenceTimePtr FrameTargeter::setPresentFence(sp<Fence> presentFence) {
 }
 
 FenceTimePtr FrameTargeter::setPresentFence(sp<Fence> presentFence, FenceTimePtr presentFenceTime) {
-    if (FlagManager::getInstance().allow_n_vsyncs_in_targeter()) {
-        addFence(std::move(presentFence), presentFenceTime, mExpectedPresentTime);
-    } else {
-        mPresentFencesLegacy[1] = mPresentFencesLegacy[0];
-        mPresentFencesLegacy[0] = {std::move(presentFence), presentFenceTime, mExpectedPresentTime};
-    }
+    addFence(std::move(presentFence), presentFenceTime, mExpectedPresentTime);
     return presentFenceTime;
 }
 

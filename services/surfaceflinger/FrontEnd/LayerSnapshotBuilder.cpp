@@ -438,8 +438,8 @@ void LayerSnapshotBuilder::updateSnapshots(const Args& args) {
     }
 
     for (auto& snapshot : mSnapshots) {
-        if (snapshot->reachablilty == LayerSnapshot::Reachablilty::Reachable) {
-            snapshot->reachablilty = LayerSnapshot::Reachablilty::Unreachable;
+        if (snapshot->reachability == LayerSnapshot::Reachability::Reachable) {
+            snapshot->reachability = LayerSnapshot::Reachability::Unreachable;
         }
     }
 
@@ -450,11 +450,17 @@ void LayerSnapshotBuilder::updateSnapshots(const Args& args) {
         LayerHierarchy::TraversalPath childPath =
                 root.makeChild(args.root.getLayer()->id, LayerHierarchy::Variant::Attached);
         updateSnapshotsInHierarchy(args, args.root, childPath, rootSnapshot, /*depth=*/0);
+        if (FlagManager::getInstance().stop_layer()) {
+            applyStopLayers(args.root, childPath);
+        }
     } else {
         for (auto& [childHierarchy, variant] : args.root.mChildren) {
             LayerHierarchy::TraversalPath childPath =
                     root.makeChild(childHierarchy->getLayer()->id, variant);
             updateSnapshotsInHierarchy(args, *childHierarchy, childPath, rootSnapshot, /*depth=*/0);
+            if (FlagManager::getInstance().stop_layer()) {
+                applyStopLayers(*childHierarchy, childPath);
+            }
         }
     }
 
@@ -480,7 +486,7 @@ void LayerSnapshotBuilder::updateSnapshots(const Args& args) {
     while (it < mSnapshots.end()) {
         auto& traversalPath = it->get()->path;
         const bool unreachable =
-                it->get()->reachablilty == LayerSnapshot::Reachablilty::Unreachable;
+                it->get()->reachability == LayerSnapshot::Reachability::Unreachable;
         const bool isClone = traversalPath.isClone();
         const bool layerIsDestroyed =
                 destroyedLayerIds.find(traversalPath.id) != destroyedLayerIds.end();
@@ -631,7 +637,7 @@ bool LayerSnapshotBuilder::sortSnapshotsByZ(const Args& args) {
         mSnapshots[globalZ]->globalZ = globalZ;
         /* mark unreachable snapshots as explicitly invisible */
         updateVisibility(*mSnapshots[globalZ], false);
-        if (mSnapshots[globalZ]->reachablilty == LayerSnapshot::Reachablilty::Unreachable) {
+        if (mSnapshots[globalZ]->reachability == LayerSnapshot::Reachability::Unreachable) {
             hasUnreachableSnapshots = true;
         }
         globalZ++;
@@ -655,8 +661,8 @@ void LayerSnapshotBuilder::updateRelativeState(LayerSnapshot& snapshot,
             snapshot.relativeLayerMetadata = parentSnapshot.relativeLayerMetadata;
         }
     }
-    if (snapshot.reachablilty == LayerSnapshot::Reachablilty::Unreachable) {
-        snapshot.reachablilty = LayerSnapshot::Reachablilty::ReachableByRelativeParent;
+    if (snapshot.reachability == LayerSnapshot::Reachability::Unreachable) {
+        snapshot.reachability = LayerSnapshot::Reachability::ReachableByRelativeParent;
     }
 }
 
@@ -711,6 +717,13 @@ void LayerSnapshotBuilder::resetRelativeState(LayerSnapshot& snapshot) {
     snapshot.relativeLayerMetadata.mMap.clear();
 }
 
+int multiplyAlpha(int color, float alpha) {
+    uint32_t c = static_cast<uint32_t>(color);
+    float scaledAlpha = alpha * (c >> 24) / 255.0f;
+    uint32_t a = static_cast<uint32_t>(scaledAlpha * 255 + 0.5f);
+    return static_cast<int32_t>((c & ~0xff000000) | (a << 24));
+}
+
 void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& args,
                                           const RequestedLayerState& requested,
                                           const LayerSnapshot& parentSnapshot,
@@ -723,7 +736,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
              RequestedLayerState::Changes::FrameRate | RequestedLayerState::Changes::GameMode);
     snapshot.changes |= parentChanges;
     if (args.displayChanges) snapshot.changes |= RequestedLayerState::Changes::Geometry;
-    snapshot.reachablilty = LayerSnapshot::Reachablilty::Reachable;
+    snapshot.reachability = LayerSnapshot::Reachability::Reachable;
     snapshot.clientChanges |= (parentSnapshot.clientChanges & layer_state_t::AFFECTS_CHILDREN);
     // mark the content as dirty if the parent state changes can dirty the child's content (for
     // example alpha)
@@ -797,7 +810,7 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
         // Display mirrors are always placed in a VirtualDisplay so we never want to capture layers
         // marked as skip capture
         snapshot.handleSkipScreenshotFlag = parentSnapshot.handleSkipScreenshotFlag ||
-                (requested.layerStackToMirror != ui::INVALID_LAYER_STACK);
+                (requested.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK);
     }
 
     if (forceUpdate || snapshot.clientChanges & layer_state_t::eAlphaChanged) {
@@ -903,11 +916,16 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
 
     if (forceUpdate ||
         snapshot.clientChanges &
-                (layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBlurRegionsChanged |
+                (layer_state_t::eBackgroundBlurRadiusChanged |
+                 layer_state_t::eBackgroundBlurScaleChanged |
+                 layer_state_t::eBlurRegionsChanged |
                  layer_state_t::eAlphaChanged)) {
         snapshot.backgroundBlurRadius = args.supportsBlur
                 ? static_cast<int>(parentSnapshot.color.a * (float)requested.backgroundBlurRadius)
                 : 0;
+        snapshot.backgroundBlurScale = args.supportsBlur
+                ? requested.backgroundBlurScale
+                : 1.0f;
         snapshot.blurRegions = requested.blurRegions;
         for (auto& region : snapshot.blurRegions) {
             region.alpha = region.alpha * snapshot.color.a;
@@ -937,14 +955,22 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
 
     if (forceUpdate ||
         snapshot.clientChanges &
+                (layer_state_t::eBoxShadowSettingsChanged | layer_state_t::eAlphaChanged)) {
+        snapshot.boxShadowSettings = requested.boxShadowSettings;
+        for (gui::BoxShadowSettings::BoxShadowParams& params :
+             snapshot.boxShadowSettings.boxShadows) {
+            params.color = multiplyAlpha(params.color, snapshot.alpha);
+        }
+    }
+
+    if (forceUpdate ||
+        snapshot.clientChanges &
                 (layer_state_t::eBorderSettingsChanged | layer_state_t::eAlphaChanged)) {
         snapshot.borderSettings = requested.borderSettings;
 
         // Multiply outline alpha by snapshot alpha.
-        uint32_t c = static_cast<uint32_t>(snapshot.borderSettings.color);
-        float alpha = snapshot.alpha * (c >> 24) / 255.0f;
-        uint32_t a = static_cast<uint32_t>(alpha * 255 + 0.5f);
-        snapshot.borderSettings.color = static_cast<int32_t>((c & ~0xff000000) | (a << 24));
+        snapshot.borderSettings.color =
+                multiplyAlpha(snapshot.borderSettings.color, snapshot.alpha);
     }
 
     if (forceUpdate ||
@@ -956,7 +982,8 @@ void LayerSnapshotBuilder::updateSnapshot(LayerSnapshot& snapshot, const Args& a
     // computed snapshot properties
     snapshot.forceClientComposition = snapshot.shadowSettings.length > 0 ||
             snapshot.stretchEffect.hasEffect() || snapshot.edgeExtensionEffect.hasEffect() ||
-            snapshot.borderSettings.strokeWidth > 0;
+            snapshot.borderSettings.strokeWidth > 0 ||
+            !snapshot.boxShadowSettings.boxShadows.empty();
 
     snapshot.contentOpaque = snapshot.isContentOpaque();
     snapshot.isOpaque = snapshot.contentOpaque && !snapshot.roundedCorner.hasRoundedCorners() &&
@@ -1026,6 +1053,8 @@ void LayerSnapshotBuilder::updateRoundedCorner(LayerSnapshot& snapshot,
     } else {
         snapshot.roundedCorner.radius = snapshot.roundedCorner.requestedRadius;
     }
+
+    snapshot.parentRoundedCorner = parentRoundedCorner;
 }
 
 /**
@@ -1112,6 +1141,9 @@ void LayerSnapshotBuilder::updateLayerBounds(LayerSnapshot& snapshot,
                                                         requested.getTransparentRegion());
         snapshot.cursorFrame = snapshot.geomLayerTransform.transform(bounds);
     }
+
+    snapshot.parentGeomLayerCrop =
+            snapshot.localTransform.inverse().transform(parentSnapshot.geomLayerCrop);
 }
 
 void LayerSnapshotBuilder::updateShadows(LayerSnapshot& snapshot, const RequestedLayerState&,
@@ -1377,6 +1409,100 @@ void LayerSnapshotBuilder::updateTouchableRegionCrop(const Args& args) {
                     displayInfo.transform.transform(Rect{clonedRootSnapshot->transformedBounds});
             snapshot->inputInfo.touchableRegion =
                     snapshot->inputInfo.touchableRegion.intersect(rect);
+        }
+    }
+}
+
+// Apply stop layers to the hierarchy.
+//
+// If layer X specifies stop layer Y, then any layer within X's subhierarchy that is z-ordered
+// above Y is hidden. The stop layer itself, layer Y, is also hidden.
+//
+// This works by traversing the hierarchy in z-order. When a layer that specifies a stop layer is
+// encountered, the specified stop layer is pushed to the stopLayer stack, the subhierarchy is
+// traversed, then the stop layer is popped from the stack. If a layer whose id is stored in the
+// stop layer stack is encountered during traversal, it is added to the activeStopLayers set. Any
+// layer visited while the activeStopLayer set is non-empty is hidden. When an element is popped
+// from the stopLayer stack, any active stop layers that are no longer in the stopLayer stack are
+// removed from the activeStopLayers set.
+void LayerSnapshotBuilder::applyStopLayers(const LayerHierarchy& hierarchy,
+                                           const LayerHierarchy::TraversalPath& traversalPath) {
+    ftl::SmallVector<uint32_t, 5> stopLayers;
+    ftl::SmallVector<uint32_t, 5> activeStopLayers;
+    applyStopLayersInternal(hierarchy, traversalPath, stopLayers, activeStopLayers);
+}
+
+void LayerSnapshotBuilder::applyStopLayersInternal(
+        const LayerHierarchy& hierarchy, const LayerHierarchy::TraversalPath& traversalPath,
+        ftl::SmallVector<uint32_t, 5>& stopLayers,
+        ftl::SmallVector<uint32_t, 5>& activeStopLayers) {
+    const RequestedLayerState* layer = hierarchy.getLayer();
+
+    // Push to the stopLayer stack.
+    if (layer->stopLayerId != UNASSIGNED_LAYER_ID) {
+        stopLayers.push_back(layer->stopLayerId);
+    }
+
+    // Hide this layer if the activeStopLayers set is non-empty.
+    if (!activeStopLayers.empty()) {
+        LayerSnapshot* snapshot = getSnapshot(traversalPath);
+        snapshot->isHiddenByPolicyFromParent = true;
+    }
+
+    // Traverse z-ordered below children before potentially activating this layer as a stop layer.
+    auto childIt = hierarchy.mChildren.begin();
+    while (childIt != hierarchy.mChildren.end()) {
+        auto& [childHierarchy, childVariant] = *childIt;
+        if (childHierarchy->getLayer()->z >= 0) {
+            break;
+        }
+        childIt++;
+
+        LayerHierarchy::TraversalPath childTraversalPath =
+                traversalPath.makeChild(childHierarchy->getLayer()->id, childVariant);
+        if (childTraversalPath.detached) {
+            continue;
+        }
+
+        applyStopLayersInternal(*childHierarchy, childTraversalPath, stopLayers, activeStopLayers);
+    }
+
+    // Activate this layer as a stop layer if it's in the stopLayers stack.
+    bool isStopLayer =
+            std::find(stopLayers.begin(), stopLayers.end(), layer->id) != stopLayers.end();
+    if (isStopLayer) {
+        activeStopLayers.push_back(layer->id);
+        LayerSnapshot* snapshot = getSnapshot(traversalPath);
+        snapshot->isHiddenByPolicyFromParent = true;
+    }
+
+    // Traverse z-ordered above children.
+    while (childIt != hierarchy.mChildren.end()) {
+        auto& [childHierarchy, childVariant] = *childIt++;
+
+        LayerHierarchy::TraversalPath childTraversalPath =
+                traversalPath.makeChild(childHierarchy->getLayer()->id, childVariant);
+        if (childTraversalPath.detached) {
+            continue;
+        }
+
+        applyStopLayersInternal(*childHierarchy, childTraversalPath, stopLayers, activeStopLayers);
+    }
+
+    // Pop from the stopLayer stack and remove active stop layers from the activeStopLayers set
+    // if necessary.
+    if (layer->stopLayerId != UNASSIGNED_LAYER_ID) {
+        stopLayers.pop_back();
+
+        auto it = activeStopLayers.begin();
+        while (it != activeStopLayers.end()) {
+            bool stopLayerNoLongerActive =
+                    std::find(stopLayers.begin(), stopLayers.end(), *it) == stopLayers.end();
+            if (stopLayerNoLongerActive) {
+                activeStopLayers.unstable_erase(it);
+            } else {
+                it++;
+            }
         }
     }
 }

@@ -182,7 +182,6 @@ cc_library_static {
 // Contains methods to help access C++ code from rust
 cc_library_static {
     name: "libinput_from_rust_to_cpp",
-    cpp_std: "c++20",
     host_supported: true,
     cflags: [
         "-Wall",
@@ -209,7 +208,6 @@ cc_library_static {
 
 cc_library {
     name: "libinput",
-    cpp_std: "c++20",
     host_supported: true,
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
@@ -222,6 +220,7 @@ cc_library {
         "-Wshadow-uncaptured-local",
         "-Wthread-safety",
     ],
+    afdo: true,
     srcs: [
         "AccelerationCurve.cpp",
         "CoordinateFilter.cpp",
@@ -379,7 +378,6 @@ genrule {
 
 cc_defaults {
     name: "libinput_fuzz_defaults",
-    cpp_std: "c++20",
     host_supported: true,
     shared_libs: [
         "libbase",

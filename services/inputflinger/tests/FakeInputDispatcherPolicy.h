@@ -20,6 +20,7 @@
 
 #include "InputDispatcherInterface.h"
 #include "NotifyArgs.h"
+#include "TestEventMatchers.h"
 
 #include <condition_variable>
 #include <functional>
@@ -119,6 +120,8 @@ public:
     void setInterceptKeyBeforeDispatchingResult(
             std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult> result);
     void assertFocusedDisplayNotified(ui::LogicalDisplayId expectedDisplay);
+    void assertKeyConsumedByPolicy(const ::testing::Matcher<KeyEvent>& matcher);
+    void assertNoKeysConsumedByPolicy();
 
 private:
     std::mutex mLock;
@@ -150,6 +153,7 @@ private:
 
     std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
             mInterceptKeyBeforeDispatchingResult;
+    BlockingQueue<KeyEvent> mKeysConsumedByPolicy;
 
     BlockingQueue<std::pair<int32_t /*deviceId*/, std::set<gui::Uid>>> mNotifiedInteractions;
 

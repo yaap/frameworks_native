@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcServerTrusty"
+#define LOG_TAG "libbinder.RpcServerTrusty"
 
 #include <binder/Parcel.h>
 #include <binder/RpcServer.h>
@@ -97,11 +97,13 @@ RpcServerTrusty::RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::stri
 int RpcServerTrusty::handleConnect(const tipc_port* port, handle_t chan, const uuid* peer,
                                    void** ctx_p) {
     auto* server = reinterpret_cast<RpcServerTrusty*>(const_cast<void*>(port->priv));
-    return handleConnectInternal(server->mRpcServer.get(), chan, peer, ctx_p);
+    const void* uuid_ptr = static_cast<const void*>(peer);
+    constexpr size_t uuidLen = sizeof(*peer);
+    return handleConnectInternal(server->mRpcServer.get(), chan, uuid_ptr, uuidLen, ctx_p);
 }
 
-int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan, const uuid* peer,
-                                           void** ctx_p) {
+int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan,
+                                           const void* addrData, size_t addrDataLen, void** ctx_p) {
     rpcServer->mShutdownTrigger = FdTrigger::make();
     rpcServer->mConnectingThreads[rpc_this_thread::get_id()] = RpcMaybeThread();
 
@@ -137,10 +139,12 @@ int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan, 
     android::RpcTransportFd transportFd(std::move(clientFd));
 
     std::array<uint8_t, RpcServer::kRpcAddressSize> addr;
-    constexpr size_t addrLen = sizeof(*peer);
-    memcpy(addr.data(), peer, addrLen);
+    if (addrDataLen > RpcServer::kRpcAddressSize) {
+        return ERR_BAD_LEN;
+    }
+    memcpy(addr.data(), addrData, addrDataLen);
     RpcServer::establishConnection(sp<RpcServer>::fromExisting(rpcServer), std::move(transportFd),
-                                   addr, addrLen, joinFn);
+                                   addr, addrDataLen, joinFn);
 
     return rc;
 }

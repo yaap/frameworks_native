@@ -1089,7 +1089,7 @@ auto RefreshRateSelector::getFrameRateOverrides(const std::vector<LayerRequireme
         ALOGV("%s: overriding to %s for uid=%d", __func__, to_string(overrideFps).c_str(), uid);
         SFTRACE_FORMAT_INSTANT("%s: overriding to %s for uid=%d", __func__,
                                to_string(overrideFps).c_str(), uid);
-        if (SFTRACE_ENABLED() && FlagManager::getInstance().trace_frame_rate_override()) {
+        if (SFTRACE_ENABLED()) {
             std::stringstream ss;
             ss << "FrameRateOverride " << uid;
             SFTRACE_INT(ss.str().c_str(), overrideFps.getIntValue());
@@ -1674,7 +1674,7 @@ void RefreshRateSelector::dump(utils::Dumper& dumper) const {
 }
 
 std::chrono::milliseconds RefreshRateSelector::getIdleTimerTimeout() {
-    if (FlagManager::getInstance().idle_screen_refresh_rate_timeout() && mIdleTimer) {
+    if (mIdleTimer) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(mIdleTimer->interval());
     }
     return mConfig.legacyIdleTimerTimeout;

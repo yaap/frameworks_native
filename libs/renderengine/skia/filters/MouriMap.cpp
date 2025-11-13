@@ -19,16 +19,13 @@
 #include <SkPaint.h>
 #include <SkTileMode.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 namespace {
-sk_sp<SkRuntimeEffect> makeEffect(const SkString& sksl) {
-    auto [effect, error] = SkRuntimeEffect::MakeForShader(sksl);
-    LOG_ALWAYS_FATAL_IF(!effect, "RuntimeShader error: %s", error.c_str());
-    return effect;
-}
-const SkString kCrosstalkAndChunk16x16(R"(
+const SkString kCrosstalkAndChunk16x16String(R"(
     uniform shader bitmap;
     uniform float inputMultiplier;
     vec4 main(vec2 xy) {
@@ -43,7 +40,7 @@ const SkString kCrosstalkAndChunk16x16(R"(
         return float4(float3(maximum), 1.0);
     }
 )");
-const SkString kChunk8x8(R"(
+const SkString kChunk8x8String(R"(
     uniform shader bitmap;
     vec4 main(vec2 xy) {
         float maximum = 0.0;
@@ -55,7 +52,7 @@ const SkString kChunk8x8(R"(
         return float4(float3(maximum), 1.0);
     }
 )");
-const SkString kBlur(R"(
+const SkString kBlurString(R"(
     uniform shader bitmap;
     vec4 main(vec2 xy) {
         float C[5];
@@ -73,7 +70,7 @@ const SkString kBlur(R"(
         return float4(float3(exp2(result)), 1.0);
     }
 )");
-const SkString kTonemap(R"(
+const SkString kTonemapString(R"(
     uniform shader image;
     uniform shader lux;
     uniform float scaleFactor;
@@ -108,12 +105,22 @@ sk_sp<SkImage> makeImage(SkSurface* surface, const SkRuntimeShaderBuilder& build
 }
 
 } // namespace
-
-MouriMap::MouriMap()
-      : mCrosstalkAndChunk16x16(makeEffect(kCrosstalkAndChunk16x16)),
-        mChunk8x8(makeEffect(kChunk8x8)),
-        mBlur(makeEffect(kBlur)),
-        mTonemap(makeEffect(kTonemap)) {}
+MouriMap::MouriMap(RuntimeEffectManager& effectManager)
+      : mCrosstalkAndChunk16x16(
+                effectManager
+                        .createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                             kMouriMap_CrossTalkAndChunk16x16Effect,
+                                                     "MouriMap_CrossTalkAndChunk16x16",
+                                                     kCrosstalkAndChunk16x16String)),
+        mChunk8x8(effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                                    kMouriMap_Chunk8x8Effect,
+                                                            "MouriMap_Chunk8x8", kChunk8x8String)),
+        mBlur(effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                                kMouriMap_BlurEffect,
+                                                        "MouriMap_Blur", kBlurString)),
+        mTonemap(effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
+                                                                   kMouriMap_TonemapEffect,
+                                                           "MouriMap_Tonemap", kTonemapString)) {}
 
 sk_sp<SkShader> MouriMap::mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input,
                                    float inputMultiplier, float targetHdrSdrRatio) {

@@ -262,7 +262,7 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
                 std::optional<PropertyMap> configuration =
                         getEventHub()->getConfiguration(context.getEventHubId());
                 if (configuration) {
-                    mConfiguration.addAll(&(*configuration));
+                    mConfiguration.addAll(*configuration);
                 }
             });
 

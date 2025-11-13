@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <android/util/ProtoOutputStream.h>
+
 #include <utils/SortedVector.h>
 #include <utils/Singleton.h>
 #include <utils/String8.h>
@@ -87,6 +89,7 @@ public:
     status_t activate(int mode, void* ident, bool enabled);
     status_t setDelay(int mode, void* ident, int64_t ns);
 
+    int32_t getAccelHandle() const { return mAcc.getHandle(); }
     float getPowerUsage(int mode=FUSION_9AXIS) const;
     int32_t getMinDelay() const;
 

@@ -32,7 +32,8 @@ struct ISchedulerCallback {
     virtual void onExpectedPresentTimePosted(TimePoint, ftl::NonNull<DisplayModePtr>,
                                              Fps renderRate) = 0;
     virtual void onCommitNotComposited() = 0;
-    virtual void vrrDisplayIdle(bool idle) = 0;
+    virtual void vrrDisplayIdle(PhysicalDisplayId, bool idle) = 0;
+    virtual void enableLayerCachingTexturePool(PhysicalDisplayId, bool enable) = 0;
 
 protected:
     ~ISchedulerCallback() = default;

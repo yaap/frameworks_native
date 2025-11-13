@@ -47,6 +47,7 @@ import android.gui.IJankListener;
 import android.gui.LayerCaptureArgs;
 import android.gui.OverlayProperties;
 import android.gui.PullAtomData;
+import android.gui.RegionSamplingDescriptor;
 import android.gui.ScreenCaptureResults;
 import android.gui.ARect;
 import android.gui.SchedulingPolicy;
@@ -350,18 +351,41 @@ interface ISurfaceComposer {
      * The sampling area is bounded by both samplingArea and the given stopLayerHandle
      * (i.e., only layers behind the stop layer will be captured and sampled).
      *
-     * Multiple listeners may be provided so long as they have independent listeners.
-     * If multiple listeners are provided, the effective sampling region for each listener will
-     * be bounded by whichever stop layer has a lower Z value.
+     * Multiple listeners for the same sampling region may be provided so long as they have
+     * independent IRegionSamplingListener objects. If multiple listeners are provided, the
+     * effective sampling region for each listener will be bounded by whichever stop layer has
+     * a lower Z-value.
      *
      * Requires the same permissions as captureLayers and captureScreen.
      */
     void addRegionSamplingListener(in ARect samplingArea, @nullable IBinder stopLayerHandle, IRegionSamplingListener listener);
 
     /**
+     * Registers a listener by stopLayerId to stream median luma updates from SurfaceFlinger.
+     *
+     * The sampling area is bounded by both samplingArea and the given stopLayerId
+     * (i.e., only layers behind the stop layer will be captured and sampled).
+     *
+     * Multiple listeners for the same sampling region may be provided so long as they have
+     * independent IRegionSamplingListener objects. If multiple listeners are provided, the
+     * effective sampling region for each listener will be bounded by whichever stop layer has
+     * a lower Z-value.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    void addRegionSamplingListenerWithStopLayerId(in ARect samplingArea, int stopLayerId, IRegionSamplingListener listener);
+
+    /**
      * Removes a listener that was streaming median luma updates from SurfaceFlinger.
      */
     void removeRegionSamplingListener(IRegionSamplingListener listener);
+
+    /**
+     * Gets all listeners that are streaming median luma updates from SurfaceFlinger.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    List<RegionSamplingDescriptor> getRegionSamplingListeners();
 
     /**
      * Registers a listener that streams fps updates from SurfaceFlinger.
@@ -479,7 +503,7 @@ interface ISurfaceComposer {
      * lightRadius
      *      Radius of the light casting the shadow.
      */
-    oneway void setGlobalShadowSettings(in Color ambientColor, in Color spotColor, float lightPosY, float lightPosZ, float lightRadius);
+    void setGlobalShadowSettings(in Color ambientColor, in Color spotColor, float lightPosY, float lightPosZ, float lightRadius);
 
     /**
      * Gets whether a display supports DISPLAY_DECORATION layers.

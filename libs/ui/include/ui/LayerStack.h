@@ -25,7 +25,7 @@
 namespace android::ui {
 
 // A LayerStack identifies a Z-ordered group of layers. A layer can only be associated to a single
-// LayerStack, but a LayerStack can be associated to multiple displays, mirroring the same content.
+// LayerStack, and a LayerStack should be unique to each display in the composition target.
 struct LayerStack {
     uint32_t id = UINT32_MAX;
 
@@ -40,7 +40,9 @@ struct LayerStack {
     }
 };
 
-constexpr LayerStack INVALID_LAYER_STACK;
+// An unassigned LayerStack can indicate that a layer is offscreen and will not be
+// rendered onto a display. Multiple displays are allowed to have unassigned LayerStacks.
+constexpr LayerStack UNASSIGNED_LAYER_STACK;
 constexpr LayerStack DEFAULT_LAYER_STACK{0u};
 
 inline bool operator==(LayerStack lhs, LayerStack rhs) {
@@ -70,7 +72,7 @@ struct LayerFilter {
     // Returns true if the input filter can be output to this filter.
     bool includes(LayerFilter other) const {
         // The layer stacks must match.
-        if (other.layerStack == INVALID_LAYER_STACK || other.layerStack != layerStack) {
+        if (other.layerStack == UNASSIGNED_LAYER_STACK || other.layerStack != layerStack) {
             return false;
         }
 

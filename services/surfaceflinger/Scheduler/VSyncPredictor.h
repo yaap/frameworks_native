@@ -76,7 +76,8 @@ public:
                 mRateMap.find(idealPeriod())->second.slope;
     }
 
-    void setRenderRate(Fps, bool applyImmediately) final EXCLUDES(mMutex);
+    void setRenderRate(Fps, bool applyImmediately, std::vector<FrameRateOverride>) final
+            EXCLUDES(mMutex);
 
     void onFrameBegin(TimePoint expectedPresentTime, FrameTime lastSignaledFrameTime) final
             EXCLUDES(mMutex);
@@ -101,7 +102,7 @@ private:
         std::optional<TimePoint> nextAnticipatedVSyncTimeFrom(
                 Model model, std::optional<Period> minFramePeriodOpt, nsecs_t vsyncTime,
                 MissedVsync lastMissedVsync, std::optional<nsecs_t> lastVsyncOpt = {});
-        void freeze(TimePoint lastVsync);
+        void freeze(Model, TimePoint lastVsync, std::vector<FrameRateOverride>);
         std::optional<TimePoint> validUntil() const { return mValidUntil; }
         bool isVSyncInPhase(Model, nsecs_t vsync, Fps frameRate);
         void shiftVsyncSequence(Duration phase, Period minFramePeriod);
@@ -118,6 +119,10 @@ private:
         nsecs_t snapToVsyncAlignedWithRenderRate(Model model, nsecs_t vsync);
         VsyncSequence getVsyncSequenceLocked(Model, nsecs_t vsync);
         std::optional<VsyncSequence> makeVsyncSequence(TimePoint knownVsync);
+        // Get the phase for vsync sequence where all the provided frameRateOverrides align
+        // from the vsync provided.
+        int64_t getFreezeSequencePhase(Model, TimePoint vsync,
+                                       std::vector<FrameRateOverride> frameRateOverrides);
 
         const Period mIdealPeriod = Duration::fromNs(0);
         std::optional<Fps> mRenderRateOpt;

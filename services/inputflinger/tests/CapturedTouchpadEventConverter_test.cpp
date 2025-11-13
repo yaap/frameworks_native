@@ -623,7 +623,7 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerAndFingerTurningIntoPalm_partia
                                     AllOf(WithMotionAction(
                                                   AMOTION_EVENT_ACTION_POINTER_UP |
                                                   1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                                          WithFlags(AMOTION_EVENT_FLAG_CANCELED)))));
+                                          WithFlags(MotionFlag::CANCELED)))));
     EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithPointerCount(2u))));
 }
 
