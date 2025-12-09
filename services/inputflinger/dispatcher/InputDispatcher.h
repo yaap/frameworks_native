@@ -29,6 +29,7 @@
 #include "InputDispatcherPolicyInterface.h"
 #include "InputTarget.h"
 #include "InputThread.h"
+#include "InputTracingBackendInterface.h"
 #include "LatencyAggregator.h"
 #include "LatencyAggregatorWithHistograms.h"
 #include "LatencyTracker.h"
@@ -36,7 +37,6 @@
 #include "TouchState.h"
 #include "TouchedWindow.h"
 #include "trace/InputTracerInterface.h"
-#include "trace/InputTracingBackendInterface.h"
 
 #include <attestation/HmacKeyManager.h>
 #include <ftl/flags.h>
@@ -88,10 +88,11 @@ class InputDispatcher : public android::InputDispatcherInterface {
 public:
     static constexpr bool kDefaultInTouchMode = true;
 
-    explicit InputDispatcher(InputDispatcherPolicyInterface& policy, JNIEnv* env);
-    // Constructor used for testing.
     explicit InputDispatcher(InputDispatcherPolicyInterface&,
-                             std::unique_ptr<trace::InputTracingBackendInterface>, JNIEnv* env);
+                             std::shared_ptr<input_trace::InputTracingBackendInterface>,
+                             JNIEnv* env);
+    // Creates a dispatcher without tracing. Used in some tests.
+    explicit InputDispatcher(InputDispatcherPolicyInterface& policy, JNIEnv* env);
     ~InputDispatcher() override;
 
     void dump(std::string& dump) const override;
@@ -139,7 +140,7 @@ public:
             ui::LogicalDisplayId displayId, const std::string& name, gui::Pid pid) override;
     status_t removeInputChannel(const sp<IBinder>& connectionToken) override;
     status_t pilferPointers(const sp<IBinder>& token) override;
-    void requestPointerCapture(const sp<IBinder>& windowToken, bool enabled) override;
+    void requestPointerCapture(const sp<IBinder>& windowToken, PointerCaptureMode mode) override;
     bool flushSensor(int deviceId, InputDeviceSensorType sensorType) override;
     void setDisplayEligibilityForPointerCapture(ui::LogicalDisplayId displayId,
                                                 bool isEligible) override;
@@ -315,6 +316,9 @@ private:
                 const android::gui::WindowInfo& windowInfo,
                 std::optional<ui::LogicalDisplayId> pointerDisplayId = std::nullopt) const;
 
+        ui::Transform getCrossDisplayTransform(ui::LogicalDisplayId sourceDisplay,
+                                               ui::LogicalDisplayId destinationDisplay) const;
+
         // Lookup for WindowInfoHandle from token and optionally a display-id. In cases where
         // display-id is not provided lookup is done for all displays.
         sp<android::gui::WindowInfoHandle> findWindowHandle(
@@ -383,14 +387,6 @@ private:
 
     class DispatcherTouchState {
     public:
-        struct CancellationArgs {
-            const sp<gui::WindowInfoHandle> windowHandle;
-            CancelationOptions::Mode mode;
-            std::optional<DeviceId> deviceId{std::nullopt};
-            ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
-            std::bitset<MAX_POINTER_ID + 1> pointerIds{};
-        };
-
         struct PointerDownArgs {
             const nsecs_t downTimeInTarget;
             const std::shared_ptr<Connection> connection;
@@ -418,7 +414,7 @@ private:
         sp<android::gui::WindowInfoHandle> findTouchedForegroundWindow(
                 ui::LogicalDisplayId displayId) const;
 
-        bool hasTouchingOrHoveringPointers(ui::LogicalDisplayId displayId, int32_t deviceId) const;
+        bool hasTouchingOrHoveringPointers(ui::LogicalDisplayId displayId, DeviceId deviceId) const;
 
         bool isPointerInWindow(const sp<android::IBinder>& token, ui::LogicalDisplayId displayId,
                                DeviceId deviceId, int32_t pointerId) const;
@@ -436,8 +432,10 @@ private:
         std::string dump() const;
 
         // Updates the touchState for display from WindowInfo,
-        // returns list of CancellationArgs for every cancelled touch
-        std::list<CancellationArgs> updateFromWindowInfo(ui::LogicalDisplayId displayId);
+        // returns list of CancelationOptions for every cancelled touch
+        std::list<CancelationOptions> updateFromWindowInfo(
+                ui::LogicalDisplayId displayId,
+                const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
         void removeAllPointersForDevice(DeviceId deviceId);
 
@@ -445,12 +443,14 @@ private:
         // pointers, list of cancelled windows and pointers on successful transfer.
         std::optional<
                 std::tuple<sp<gui::WindowInfoHandle>, DeviceId, std::vector<PointerProperties>,
-                           std::list<CancellationArgs>, std::list<PointerDownArgs>>>
+                           std::list<CancelationOptions>, std::list<PointerDownArgs>>>
         transferTouchGesture(const sp<IBinder>& fromToken, const sp<IBinder>& toToken,
-                             bool transferEntireGesture);
+                             bool transferEntireGesture,
+                             const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
-        base::Result<std::list<CancellationArgs>, status_t> pilferPointers(
-                const sp<IBinder>& token, const Connection& requestingConnection);
+        base::Result<std::list<CancelationOptions>, status_t> pilferPointers(
+                const sp<IBinder>& token, const Connection& requestingConnection,
+                const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
         void clear();
 
@@ -483,12 +483,13 @@ private:
         std::optional<std::tuple<TouchState&, TouchedWindow&, ui::LogicalDisplayId>>
         findTouchStateWindowAndDisplay(const sp<IBinder>& token);
 
-        std::pair<std::list<CancellationArgs>, std::list<PointerDownArgs>> transferWallpaperTouch(
+        std::pair<std::list<CancelationOptions>, std::list<PointerDownArgs>> transferWallpaperTouch(
                 const sp<gui::WindowInfoHandle> fromWindowHandle,
                 const sp<gui::WindowInfoHandle> toWindowHandle, TouchState& state,
                 DeviceId deviceId, const std::vector<PointerProperties>& pointers,
                 ftl::Flags<InputTarget::Flags> oldTargetFlags,
-                ftl::Flags<InputTarget::Flags> newTargetFlags);
+                ftl::Flags<InputTarget::Flags> newTargetFlags,
+                const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
         void saveTouchStateForMotionEntry(const MotionEntry& entry, TouchState&& touchState);
 
@@ -504,11 +505,13 @@ private:
         // and false otherwise.
         bool isStylusActiveInDisplay(ui::LogicalDisplayId displayId) const;
 
-        std::list<CancellationArgs> eraseRemovedWindowsFromWindowInfo(
-                TouchState& state, ui::LogicalDisplayId displayId);
+        std::list<CancelationOptions> eraseRemovedWindowsFromWindowInfo(
+                TouchState& state, ui::LogicalDisplayId displayId,
+                const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
-        std::list<CancellationArgs> updateHoveringStateFromWindowInfo(
-                TouchState& state, ui::LogicalDisplayId displayId);
+        std::list<CancelationOptions> updateHoveringStateFromWindowInfo(
+                TouchState& state, ui::LogicalDisplayId displayId,
+                const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
         std::vector<InputTarget> findOutsideTargets(ui::LogicalDisplayId displayId,
                                                     const sp<gui::WindowInfoHandle>& touchedWindow,
@@ -703,8 +706,12 @@ private:
     void disablePointerCaptureForcedLocked() REQUIRES(mLock);
 
     // Set the Pointer Capture state in the Policy.
-    // The window is not nullptr for requests to enable, otherwise it is nullptr.
-    void setPointerCaptureLocked(const sp<IBinder>& window) REQUIRES(mLock);
+    // The window must not be null unless the mode is UNCAPTURED.
+    void setPointerCaptureLocked(PointerCaptureMode mode, const sp<IBinder>& window)
+            REQUIRES(mLock);
+
+    // Clear the pointer capture state.
+    void clearPointerCaptureLocked() REQUIRES(mLock);
 
     // Dispatcher state at time of last ANR.
     std::string mLastAnrState GUARDED_BY(mLock);
@@ -864,12 +871,11 @@ private:
     void dispatchPointerDownOutsideFocus(uint32_t source, int32_t action,
                                          const sp<IBinder>& newToken) REQUIRES(mLock);
 
-    void synthesizeCancelationEventsForAllConnectionsLocked(const CancelationOptions& options)
+    void synthesizeCancelationEventsForAllConnectionsLocked(CancelationOptions&& options)
             REQUIRES(mLock);
     void synthesizeCancelationEventsForMonitorsLocked(const CancelationOptions& options)
             REQUIRES(mLock);
-    void synthesizeCancelationEventsForWindowLocked(const sp<gui::WindowInfoHandle>&,
-                                                    const CancelationOptions&,
+    void synthesizeCancelationEventsForWindowLocked(const CancelationOptions&,
                                                     const std::shared_ptr<Connection>& = nullptr)
             REQUIRES(mLock);
     // This is a convenience function used to generate cancellation for a connection without having

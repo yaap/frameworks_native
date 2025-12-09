@@ -16,8 +16,10 @@
 #pragma once
 
 #include <binder/unique_fd.h>
+#include <binder/Functional.h>
 #include <poll.h>
 
+#include "Constants.h"
 #include "FdTrigger.h"
 #include "RpcState.h"
 
@@ -60,8 +62,9 @@ status_t interruptableReadOrWrite(
         return OK;
     }
 
-    // size to break up message - this is not reset for this read/write operation.
-    constexpr size_t kChunkMax = 65536;
+    // We should never break up a message by default, but we do reduce chunk size on
+    // ENOMEM conditions.
+    constexpr size_t kChunkMax = binder::kRpcTransactionLimitBytes;
     const size_t kChunkMin = getpagesize(); // typical allocated granularity for sockets
     size_t chunkSize = kChunkMax;
 
@@ -74,16 +77,22 @@ status_t interruptableReadOrWrite(
     size_t enomemWaitUs = 0;
     size_t enomemTotalUs = 0;
 
+    size_t numSysCalls = 0;
+    auto syscallBugCatcher = binder::impl::make_scope_guard([&]() {
+        if (numSysCalls > 1000) {
+            ALOGE("Too many calls to %s! Spinning? %zu", funName, numSysCalls);
+        }
+    });
+
     bool havePolled = false;
     while (true) {
         ssize_t processSize = -1;
-        bool skipPollingAndContinue = false; // set when we should retry immediately
 
         // This block dynamically adjusts packet sizes down to work around a
         // limitation in the vsock driver where large packets are sometimes
-        // dropped (b/419364025 b/399469406 b/421244320).
-        // TODO: only apply this workaround on vsock ???
-        // TODO: fix vsock
+        // dropped (b/419364025 b/399469406 b/421244320), though since this is
+        // fixed, it's only used in ENOMEM conditions to try to allocate
+        // smaller packets.
         {
             size_t chunkRemaining = chunkSize;
             int i = 0;
@@ -108,6 +117,8 @@ status_t interruptableReadOrWrite(
                                     "chunkRemaining never zero - see EMPTY IOVEC ISSUE above");
             }
 
+            ++numSysCalls;
+
             // MAIN ACTION
             if (MAYBE_TRUE_IN_FLAKE_MODE) {
                 LOG_RPC_DETAIL("Injecting ENOMEM.");
@@ -125,15 +136,6 @@ status_t interruptableReadOrWrite(
                 niovs = old_niovs;         // (A) - restored
                 iovs[i].iov_len = old_len; // (B) - restored
             }
-
-            // altPoll may introduce long waiting since it assumes if it cannot write
-            // data, that it needs to wait to send more to give time for the producer
-            // consumer problem to be solved - otherwise it will busy loop. However,
-            // for this workaround, we are breaking up the transaction intentionally,
-            // not because the transaction won't fit, but to avoid a bug in the kernel
-            // for how it combines messages. So, when we artificially simulate a
-            // limited send, don't poll and just keep on sending data.
-            skipPollingAndContinue = !canSendFullTransaction;
         }
 
         // HANDLE RESULT OF SEND OR RECEIVE
@@ -168,14 +170,6 @@ status_t interruptableReadOrWrite(
                     LOG_RPC_DETAIL("Sleeping %zuus due to ENOMEM.", enomemWaitUs);
                     usleep(enomemWaitUs);
                 }
-
-                // Need to survey socket code to see if polling in this situation is
-                // guaranteed to be non-blocking.
-                // NOTE: if the other side needs to deallocate memory, and that is the
-                // only deallocatable memory in the entire system, but we need altPoll
-                // to drain commands to unstick it so it can do that, then this could
-                // cause a deadlock, but this is not realistic on Android.
-                skipPollingAndContinue = true;
             } else if (havePolled || (savedErrno != EAGAIN && savedErrno != EWOULDBLOCK)) {
                 // Still return the error on later passes, since it would expose
                 // a problem with polling
@@ -213,21 +207,15 @@ status_t interruptableReadOrWrite(
         }
 
         // METHOD OF POLLING
-        if (skipPollingAndContinue) {
-            // Since we aren't polling, manually check if we should shutdown. This ensures any bug
-            // leading to an infinite loop can still be recovered from.
-            if (fdTrigger->isTriggered()) {
-                return DEAD_OBJECT;
-            }
-            // continue;
-        } else if (altPoll) {
+        if (altPoll) {
             if (status_t status = (*altPoll)(); status != OK) return status;
             if (fdTrigger->isTriggered()) { // altPoll may not check this
                 return DEAD_OBJECT;
             }
         } else {
-            if (status_t status = fdTrigger->triggerablePoll(socket, event); status != OK)
+            if (status_t status = fdTrigger->triggerablePoll(socket, event); status != OK) {
                 return status;
+            }
             if (!havePolled) havePolled = true;
         }
     }

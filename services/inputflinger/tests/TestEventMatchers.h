@@ -202,7 +202,7 @@ inline WithDisplayIdMatcher WithDisplayId(ui::LogicalDisplayId displayId) {
 class WithDeviceIdMatcher {
 public:
     using is_gtest_matcher = void;
-    explicit WithDeviceIdMatcher(int32_t deviceId) : mDeviceId(deviceId) {}
+    explicit WithDeviceIdMatcher(DeviceId deviceId) : mDeviceId(deviceId) {}
 
     bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
         return mDeviceId == args.deviceId;
@@ -225,10 +225,10 @@ public:
     void DescribeNegationTo(std::ostream* os) const { *os << "wrong device id"; }
 
 private:
-    const int32_t mDeviceId;
+    const DeviceId mDeviceId;
 };
 
-inline WithDeviceIdMatcher WithDeviceId(int32_t deviceId) {
+inline WithDeviceIdMatcher WithDeviceId(DeviceId deviceId) {
     return WithDeviceIdMatcher(deviceId);
 }
 
@@ -937,12 +937,6 @@ MATCHER_P(WithPolicyFlags, policyFlags, "InputEvent with specified policy flags"
     *result_listener << "expected policy flags 0x" << std::hex << policyFlags << ", but got 0x"
                      << arg.policyFlags;
     return arg.policyFlags == static_cast<uint32_t>(policyFlags);
-}
-
-MATCHER_P(WithEdgeFlags, edgeFlags, "InputEvent with specified edge flags") {
-    *result_listener << "expected edge flags 0x" << std::hex << edgeFlags << ", but got 0x"
-                     << arg.edgeFlags;
-    return arg.edgeFlags == edgeFlags;
 }
 
 } // namespace android

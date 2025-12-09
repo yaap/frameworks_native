@@ -34,6 +34,8 @@
 
 #include "input/PrintTools.h"
 
+namespace input_flags = com::android::input::flags;
+
 namespace android {
 
 namespace {
@@ -41,14 +43,18 @@ namespace {
 /** Max density value supported by input. */
 const int32_t ACONFIGURATION_MAX_SUPPORTED_DENSITY = ACONFIGURATION_DENSITY_ANY;
 
+// TODO(b/408170793): We use ACONFIGURATION_DENSITY_XHIGH as baseline for scale due to
+// legacy reasons, this need to be tuned with further UX testing.
+const float SCALING_BASELINE_DENSITY = static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
+
 // Density values in range (0, ACONFIGURATION_MAX_SUPPORTED_DENSITY] are supported for cursor
 // moves scaling. Other density values e.g. ACONFIGURATION_DENSITY_DEFAULT,
 // ACONFIGURATION_DENSITY_NONE etc. are ignored.
-inline bool isDensityValueSupportedForScaling(int32_t density) {
+inline bool isDensityValueSupportedForScaling(float density) {
     if (density > 0 && density <= ACONFIGURATION_MAX_SUPPORTED_DENSITY) {
         return true;
     }
-    ALOGE("Unexpected display density value %d, cursor move scaling will be disabled.", density);
+    ALOGE("Unexpected display density value %f, cursor move scaling will be disabled.", density);
     return false;
 }
 
@@ -149,6 +155,8 @@ void CursorInputMapper::dump(std::string& dump) {
                          toString(mDisplayId, streamableToString).c_str());
     dump += StringPrintf(INDENT3 "Orientation: %s\n", ftl::enum_string(mOrientation).c_str());
     dump += StringPrintf(INDENT3 "ViewportDensityDpi: %d\n", mViewportDensityDpi);
+    dump += StringPrintf(INDENT3 "ViewportXDpi: %f\n", mViewportXDpi);
+    dump += StringPrintf(INDENT3 "ViewportYDpi: %f\n", mViewportYDpi);
     dump += StringPrintf(INDENT3 "ButtonState: 0x%08x\n", mButtonState);
     dump += StringPrintf(INDENT3 "Down: %s\n", toString(isPointerDown(mButtonState)));
     dump += StringPrintf(INDENT3 "DownTime: %" PRId64 "\n", mDownTime);
@@ -518,13 +526,17 @@ void CursorInputMapper::configureOnChangePointerSpeed(const InputReaderConfigura
                                      mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) != 0;
 
     if (mParameters.mode == Parameters::Mode::POINTER) {
-        // TODO(b/408170793): We use ACONFIGURATION_DENSITY_XHIGH as baseline for scale due to
-        // legacy reasons, this need to be tuned with further UX testing.
-        mXScale = mYScale = InputFlags::scaleCursorSpeedWithDisplayDensity() &&
-                        !disableAllScaling && isDensityValueSupportedForScaling(mViewportDensityDpi)
-                ? static_cast<float>(mViewportDensityDpi) /
-                        static_cast<float>(ACONFIGURATION_DENSITY_XHIGH)
-                : 1.0;
+        if (!disableAllScaling && input_flags::use_separate_xy_dpi_scaling_for_mice() &&
+            isDensityValueSupportedForScaling(mViewportXDpi) &&
+            isDensityValueSupportedForScaling(mViewportYDpi)) {
+            mXScale = mViewportXDpi / SCALING_BASELINE_DENSITY;
+            mYScale = mViewportYDpi / SCALING_BASELINE_DENSITY;
+        } else if (!disableAllScaling && InputFlags::scaleCursorSpeedWithDisplayDensity() &&
+                   isDensityValueSupportedForScaling(mViewportDensityDpi)) {
+            mXScale = mYScale = static_cast<float>(mViewportDensityDpi) / SCALING_BASELINE_DENSITY;
+        } else {
+            mXScale = mYScale = 1.0f;
+        }
     }
     mPointerVelocityControl.setAccelerationEnabled(!disableAllScaling);
 
@@ -568,8 +580,15 @@ void CursorInputMapper::configureOnChangeDisplayInfo(const InputReaderConfigurat
                         static_cast<float>(resolvedViewport->logicalBottom - 1)}
             : FloatRect{0, 0, 0, 0};
 
-    mViewportDensityDpi =
-            resolvedViewport ? resolvedViewport->densityDpi : ACONFIGURATION_DENSITY_MEDIUM;
+    if (resolvedViewport) {
+        mViewportDensityDpi = resolvedViewport->densityDpi;
+        mViewportXDpi = resolvedViewport->xDpi;
+        mViewportYDpi = resolvedViewport->yDpi;
+    } else {
+        // we use SCALING_BASELINE_DENSITY if density information is not available,
+        // this will set scaling to 1.0f.
+        mViewportDensityDpi = mViewportXDpi = mViewportYDpi = SCALING_BASELINE_DENSITY;
+    }
 
     bumpGeneration();
 }

@@ -210,4 +210,8 @@ std::optional<scheduler::ScheduleResult> MessageQueue::getScheduledFrameResult()
     return std::nullopt;
 }
 
+void MessageQueue::scheduleImmediateFrame() {
+    mHandler->dispatchFrame(VsyncId(), TimePoint::now());
+}
+
 } // namespace android::impl

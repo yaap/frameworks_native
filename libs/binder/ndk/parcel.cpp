@@ -460,7 +460,13 @@ binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
         return status;
     }
 
-    if (!allocator(arrayData, length)) return STATUS_NO_MEMORY;
+    if (!allocator(arrayData, length)) {
+        if (length < 0) {
+            return STATUS_UNEXPECTED_NULL;
+        } else {
+            return STATUS_NO_MEMORY;
+        }
+    }
 
     if (length == -1) return STATUS_OK;  // null string array
 
@@ -504,7 +510,13 @@ binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayDa
         return status;
     }
 
-    if (!allocator(arrayData, length)) return STATUS_NO_MEMORY;
+    if (!allocator(arrayData, length)) {
+        if (length < 0) {
+            return STATUS_UNEXPECTED_NULL;
+        } else {
+            return STATUS_NO_MEMORY;
+        }
+    }
 
     if (length == -1) return STATUS_OK;  // null array
 

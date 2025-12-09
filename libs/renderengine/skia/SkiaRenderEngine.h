@@ -33,6 +33,8 @@
 #include <unordered_map>
 
 #include "AutoBackendTexture.h"
+#include "BoxShadowUtils.h"
+#include "RenderDocUtils.h"
 #include "android-base/macros.h"
 #include "compat/SkiaGpuContext.h"
 #include "debug/SkiaCapture.h"
@@ -91,6 +93,7 @@ protected:
     virtual Contexts createContexts() = 0;
     virtual bool supportsProtectedContentImpl() const = 0;
     virtual bool supportsForwardPixelKill() const { return false; }
+    virtual bool supportsFastRotatedClipRRectAA() const { return true; }
     virtual bool useProtectedContextImpl(GrProtected isProtected) = 0;
     virtual void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) = 0;
     virtual base::unique_fd flushAndSubmit(SkiaGpuContext* context,
@@ -103,6 +106,8 @@ protected:
     SkiaGpuContext* getActiveContext();
 
     bool isProtected() const { return mInProtectedContext; }
+
+    void rdocCaptureNextFrame() override { mRenderDocCaptureNextFrame = true; }
 
     // Implements PersistentCache as a way to monitor what SkSL shaders Skia has
     // cached.
@@ -128,7 +133,6 @@ protected:
         int mTotalShadersCompiled = 0;
     };
 
-    SkSLCacheMonitor mSkSLCacheMonitor;
     RuntimeEffectManager mRuntimeEffectManager;
 
     // Graphics context used for creating surfaces and submitting commands.
@@ -136,6 +140,10 @@ protected:
     // occasionally needs to be referenced by subclasses (e.g. for Graphite's
     // precompilation).
     unique_ptr<SkiaGpuContext> mContext;
+
+    BoxShadowUtils mBoxShadowUtils;
+
+    GrContextOptions::PersistentCache& persistentCache(const void* identity, ssize_t size);
 
 private:
     void mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
@@ -213,6 +221,12 @@ private:
     // Same as mContext, but for protected content (eg. DRM)
     unique_ptr<SkiaGpuContext> mProtectedContext;
     bool mInProtectedContext = false;
+
+    bool mInitializedDiskCache = false;
+    SkSLCacheMonitor mSkSLCacheMonitor;
+
+    std::atomic<bool> mRenderDocCaptureNextFrame;
+    RenderDocUtils mRenderDoc;
 };
 
 } // namespace skia

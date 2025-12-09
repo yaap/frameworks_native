@@ -182,10 +182,7 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint3
         mAttached(true) {
     GLC_LOGV("GLConsumer");
 
-    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(),
-            sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
 }
 
 GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
@@ -213,8 +210,6 @@ GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledB
     GLC_LOGV("GLConsumer");
 
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
 }
 
 GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget, bool useFenceSync,
@@ -244,8 +239,15 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
 
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(),
             sizeof(mCurrentTransformMatrix));
+}
 
+void GLConsumer::initializeConsumer() {
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
+
+void GLConsumer::onFirstRef() {
+    ConsumerBase::onFirstRef();
+    initializeConsumer();
 }
 
 status_t GLConsumer::setDefaultBufferSize(uint32_t w, uint32_t h)

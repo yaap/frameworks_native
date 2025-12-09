@@ -24,7 +24,7 @@ cc_benchmark {
         "libbinder_ndk",
         "libcrypto",
         "libcutils",
-        "libinputflinger_base",
+        "libinputflinger",
         "libinputreporter",
         "liblog",
         "libstatslog_inputflinger",

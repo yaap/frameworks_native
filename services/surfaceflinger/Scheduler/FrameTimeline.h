@@ -192,7 +192,14 @@ public:
     void setAcquireFenceTime(nsecs_t acquireFenceTime);
     void setDesiredPresentTime(nsecs_t desiredPresentTime);
     void setDropTime(nsecs_t dropTime);
-    void setPresentState(PresentState presentState, nsecs_t lastLatchTime = 0);
+
+    struct LastFrameTimestamps {
+        nsecs_t latchTime = 0;
+        nsecs_t expectedPresentTime = 0;
+    };
+    void setPresentState(PresentState presentState,
+                         LastFrameTimestamps lastFrameTimestamps = {.latchTime = 0,
+                                                                    .expectedPresentTime = 0});
     void setRenderRate(Fps renderRate);
     // Return the render rate if it exists, otherwise returns the DisplayFrame's render rate.
     Fps getRenderRate() const;
@@ -281,10 +288,10 @@ private:
             FramePresentMetadata::UnknownPresent;
     // Enum for the type of finish
     FrameReadyMetadata mFrameReadyMetadata GUARDED_BY(mMutex) = FrameReadyMetadata::UnknownFinish;
-    // Time when the previous buffer from the same layer was latched by SF. This is used in checking
-    // for BufferStuffing where the current buffer is expected to be ready but the previous buffer
-    // was latched instead.
-    nsecs_t mLastLatchTime GUARDED_BY(mMutex) = 0;
+    // Time when the previous buffer from the same layer was latched by SF, togther with the
+    // expected present time for that buffer. This is used in checking for BufferStuffing where
+    // the current buffer is expected to be ready but the previous buffer was latched instead.
+    LastFrameTimestamps mLastFrameTimestamps GUARDED_BY(mMutex) = {};
     // TraceCookieCounter is used to obtain the cookie for sendig trace packets to perfetto. Using a
     // reference here because the counter is owned by FrameTimeline, which outlives SurfaceFrame.
     TraceCookieCounter& mTraceCookieCounter;

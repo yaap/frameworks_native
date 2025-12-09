@@ -29,7 +29,7 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-static const SkString kStretchShaderString = SkString(R"(
+const SkString kEffectSource_StretchEffect(R"(
     uniform shader uContentTexture;
 
     // multiplier to apply to scale effect
@@ -192,9 +192,7 @@ static const SkString kStretchShaderString = SkString(R"(
 const float INTERPOLATION_STRENGTH_VALUE = 0.7f;
 
 StretchShaderFactory::StretchShaderFactory(RuntimeEffectManager& effectManager) {
-    mEffect =
-            effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::kStretchEffect,
-                                                      "StretchEffect", kStretchShaderString);
+    mEffect = effectManager.mKnownEffects[kStretchEffect];
 }
 
 sk_sp<SkShader> StretchShaderFactory::createSkShader(const sk_sp<SkShader>& inputShader,

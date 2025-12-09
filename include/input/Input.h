@@ -27,6 +27,8 @@
 #include <android/os/IInputConstants.h>
 #include <android/os/MotionEventFlag.h>
 #endif
+#include <android-base/result.h>
+#include <android/os/PointerCaptureMode.h>
 #include <android/os/PointerIconType.h>
 #include <ftl/flags.h>
 #include <math.h>
@@ -603,8 +605,19 @@ struct PointerProperties {
 
 std::ostream& operator<<(std::ostream& out, const PointerProperties& properties);
 
+/*
+ * Represents an ID assigned to an InputDevice by InputReader. Such a device may be a combination of
+ * multiple evdev devices, each with their own RawDeviceId.
+ */
 // TODO(b/211379801) : Use a strong type from ftl/mixins.h instead
 using DeviceId = int32_t;
+
+/*
+ * Represents an ID assigned to an individual evdev device by EventHub.
+ *
+ * (This is not the same as the number used by the device's /dev/input/eventX node.)
+ */
+using RawDeviceId = int32_t;
 
 /*
  * Input events.
@@ -1008,8 +1021,8 @@ public:
 
     static std::string actionToString(int32_t action);
 
-    static std::tuple<int32_t /*action*/, std::vector<PointerProperties>,
-                      std::vector<PointerCoords>>
+    static base::Result<std::tuple<int32_t /*action*/, std::vector<PointerProperties>,
+                                   std::vector<PointerCoords>>>
     split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
           const std::vector<PointerProperties>&, const std::vector<PointerCoords>&,
           std::bitset<MAX_POINTER_ID + 1> splitPointerIds);
@@ -1037,6 +1050,9 @@ protected:
     int32_t mAction;
     int32_t mActionButton;
     ftl::Flags<MotionFlag> mFlags;
+    // The input subsystem no longer sets edge flags to anything except NONE. However, some users of
+    // the input API, such as Launcher, use it to store metadata about an event, so we have to keep
+    // it around.
     int32_t mEdgeFlags;
     int32_t mMetaState;
     int32_t mButtonState;
@@ -1283,22 +1299,38 @@ public:
     TouchModeEvent* createTouchModeEvent() override { return new TouchModeEvent(); };
 };
 
+/** Modes in which the pointer can be captured by a window. */
+enum class PointerCaptureMode : int32_t {
+    UNCAPTURED = static_cast<int32_t>(::android::os::PointerCaptureMode::UNCAPTURED),
+    ABSOLUTE = static_cast<int32_t>(::android::os::PointerCaptureMode::ABSOLUTE),
+    RELATIVE = static_cast<int32_t>(::android::os::PointerCaptureMode::RELATIVE),
+    ftl_first = UNCAPTURED,
+    ftl_last = RELATIVE,
+};
+
 /*
  * Describes a unique request to enable or disable Pointer Capture.
  */
 struct PointerCaptureRequest {
 public:
-    inline PointerCaptureRequest() : window(), seq(0) {}
-    inline PointerCaptureRequest(sp<IBinder> window, uint32_t seq) : window(window), seq(seq) {}
-    inline bool operator==(const PointerCaptureRequest& other) const {
-        return window == other.window && seq == other.seq;
+    inline PointerCaptureRequest() : window(), mode(PointerCaptureMode::UNCAPTURED), seq(0) {}
+    inline PointerCaptureRequest(PointerCaptureMode mode, sp<IBinder> window, uint32_t seq)
+          : window(window), mode(mode), seq(seq) {
+        LOG_ALWAYS_FATAL_IF(mode != PointerCaptureMode::UNCAPTURED && window == nullptr);
     }
-    inline bool isEnable() const { return window != nullptr; }
+    inline bool operator==(const PointerCaptureRequest& other) const {
+        return window == other.window && mode == other.mode && seq == other.seq;
+    }
+    inline bool isEnable() const {
+        return mode != PointerCaptureMode::UNCAPTURED && window != nullptr;
+    }
 
     // The requesting window.
-    // If the request is to enable the capture, this is the input token of the window that requested
-    // pointer capture. Otherwise, this is nullptr.
+    // If the request is for a mode other than UNCAPTURED, this is the input token of the window
+    // that requested pointer capture. Otherwise, this is nullptr.
     sp<IBinder> window;
+
+    PointerCaptureMode mode;
 
     // The sequence number for the request.
     uint32_t seq;

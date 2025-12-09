@@ -75,8 +75,14 @@ struct DispSyncIsSupportedVariant {
                     onDisplayModeChanged(DisplayModeFps(Fps::fromPeriodNsecs(DEFAULT_VSYNC_PERIOD)),
                                          false))
                 .Times(1);
-        EXPECT_CALL(static_cast<mock::VSyncTracker&>(vsyncSchedule->getTracker()), resetModel())
-                .Times(1);
+        if (FlagManager::getInstance().reset_model_flushes_fence()) {
+            EXPECT_CALL(static_cast<mock::VsyncController&>(vsyncSchedule->getController()),
+                        resetModel())
+                    .Times(1);
+        } else {
+            EXPECT_CALL(static_cast<mock::VSyncTracker&>(vsyncSchedule->getTracker()), resetModel())
+                    .Times(1);
+        }
     }
 };
 
@@ -118,11 +124,7 @@ struct TransitionOffToDozeSuspendVariant
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::setupComposerCallExpectations(test, Case::Doze::ACTUAL_POWER_MODE_FOR_DOZE_SUSPEND);
-<<<<<<< HEAD
-        Case::EventThread::setupEnableSyntheticVsyncCallExpectations(test);
-=======
         Case::setupEnableSyntheticVsyncCallExpectations(test);
->>>>>>> android-16.0.0_r3
         Case::setupRepaintEverythingCallExpectations(test);
     }
 
@@ -147,11 +149,7 @@ struct TransitionDozeSuspendToOffVariant
       : public TransitionVariantCommon<PowerMode::DOZE_SUSPEND, PowerMode::OFF> {
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
-<<<<<<< HEAD
-        Case::EventThread::setupEnableSyntheticVsyncCallExpectations(test);
-=======
         Case::setupEnableSyntheticVsyncCallExpectations(test);
->>>>>>> android-16.0.0_r3
         Case::setupComposerCallExpectations(test, IComposerClient::PowerMode::OFF);
     }
 
@@ -163,11 +161,7 @@ struct TransitionDozeSuspendToOffVariant
 struct TransitionOnToDozeVariant : public TransitionVariantCommon<PowerMode::ON, PowerMode::DOZE> {
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
-<<<<<<< HEAD
-        Case::EventThread::setupDisableSyntheticVsyncCallExpectations(test);
-=======
         Case::setupDisableSyntheticVsyncCallExpectations(test);
->>>>>>> android-16.0.0_r3
         Case::setupComposerCallExpectations(test, Case::Doze::ACTUAL_POWER_MODE_FOR_DOZE);
     }
 };
@@ -185,11 +179,7 @@ struct TransitionDozeSuspendToDozeVariant
 struct TransitionDozeToOnVariant : public TransitionVariantCommon<PowerMode::DOZE, PowerMode::ON> {
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
-<<<<<<< HEAD
-        Case::EventThread::setupDisableSyntheticVsyncCallExpectations(test);
-=======
         Case::setupDisableSyntheticVsyncCallExpectations(test);
->>>>>>> android-16.0.0_r3
         Case::setupComposerCallExpectations(test, IComposerClient::PowerMode::ON);
     }
 };
@@ -217,11 +207,7 @@ struct TransitionOnToUnknownVariant
       : public TransitionVariantCommon<PowerMode::ON, static_cast<PowerMode>(POWER_MODE_LEET)> {
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
-<<<<<<< HEAD
-        Case::EventThread::setupDisableSyntheticVsyncCallExpectations(test);
-=======
         Case::setupDisableSyntheticVsyncCallExpectations(test);
->>>>>>> android-16.0.0_r3
         Case::setupNoComposerPowerModeCallExpectations(test);
     }
 };
@@ -348,17 +334,11 @@ void SetPhysicalDisplayPowerModeTest::transitionDisplayCommon() {
     SET_FLAG_FOR_TEST(android::companion::virtualdevice::flags::correct_virtual_display_power_state,
                       true);
     SET_FLAG_FOR_TEST(flags::disable_synthetic_vsync_for_performance, true);
-<<<<<<< HEAD
-=======
     SET_FLAG_FOR_TEST(flags::pacesetter_selection, true);
 
     const auto displayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
     ASSERT_TRUE(displayIdOpt);
     injectMockScheduler(*displayIdOpt);
-    // TODO: b/389983418 - Remove once the Scheduler is no longer dependent on front internal
-    // display.
-    mFlinger.mutableFrontInternalDisplayId() = *displayIdOpt;
->>>>>>> android-16.0.0_r3
 
     Case::Doze::setupComposerCallExpectations(this);
     auto display =

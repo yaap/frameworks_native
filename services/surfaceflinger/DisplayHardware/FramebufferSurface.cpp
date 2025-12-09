@@ -20,8 +20,6 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "FramebufferSurface"
 
 #include <errno.h>
 #include <stdio.h>
@@ -50,12 +48,11 @@ namespace android {
 using ui::Dataspace;
 
 FramebufferSurface::FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
-                                       const sp<IGraphicBufferProducer>& producer,
-                                       const sp<IGraphicBufferConsumer>& consumer,
                                        const ui::Size& size, const ui::Size& maxSize)
-      : ConsumerBase(producer, consumer),
+      : ConsumerBase(),
         mDisplayId(displayId),
         mMaxSize(maxSize),
+        mLimitedSize(limitSize(size)),
         mCurrentBufferSlot(-1),
         mCurrentBuffer(),
         mCurrentFence(Fence::NO_FENCE),
@@ -65,19 +62,25 @@ FramebufferSurface::FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displa
         mPreviousBuffer() {
     ALOGV("Creating for display %s", to_string(displayId).c_str());
 
+    for (size_t i = 0; i < sizeof(mHwcBufferIds) / sizeof(mHwcBufferIds[0]); ++i) {
+        mHwcBufferIds[i] = UINT64_MAX;
+    }
+}
+
+void FramebufferSurface::initializeConsumer() {
     mName = "FramebufferSurface";
     mConsumer->setConsumerName(mName);
     mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_FB |
                                        GRALLOC_USAGE_HW_RENDER |
                                        GRALLOC_USAGE_HW_COMPOSER);
-    const auto limitedSize = limitSize(size);
-    mConsumer->setDefaultBufferSize(limitedSize.width, limitedSize.height);
+    mConsumer->setDefaultBufferSize(mLimitedSize.width, mLimitedSize.height);
     mConsumer->setMaxAcquiredBufferCount(
             SurfaceFlinger::maxFrameBufferAcquiredBuffers - 1);
+}
 
-    for (size_t i = 0; i < sizeof(mHwcBufferIds) / sizeof(mHwcBufferIds[0]); ++i) {
-        mHwcBufferIds[i] = UINT64_MAX;
-    }
+void FramebufferSurface::onFirstRef() {
+    ConsumerBase::onFirstRef();
+    initializeConsumer();
 }
 
 void FramebufferSurface::resizeBuffers(const ui::Size& newSize) {

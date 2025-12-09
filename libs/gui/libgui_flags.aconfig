@@ -33,6 +33,13 @@ flag {
 } # frametimestamps_previousrelease
 
 flag {
+  name: "unapplied_transaction_cleanup"
+  namespace: "window_surfaces"
+  description: "properly clean up resources for transactions that aren't applied"
+  bug: "261757446"
+} # unapplied_transaction_cleanup
+
+flag {
   name: "bq_extendedallocate"
   namespace: "core_graphics"
   description: "Add BQ support for allocate with extended options"
@@ -63,14 +70,6 @@ flag {
     bug: "340933206"
     is_fixed_read_only: true
 } # wb_stream_splitter
-
-flag {
-  name: "buffer_release_channel"
-  namespace: "window_surfaces"
-  description: "Enable BufferReleaseChannel to optimize buffer releases"
-  bug: "294133380"
-  is_fixed_read_only: true
-} # buffer_release_channel
 
 flag {
   name: "wb_ring_buffer"
@@ -119,3 +118,14 @@ flag {
   bug: "340934031"
   is_fixed_read_only: true
 } # wb_media_migration
+
+flag {
+  name: "default_scaling_mode_freeze"
+  namespace: "window_surfaces"
+  description: "Changes the default bbq scaling mode to FREEZE instead of SCALE_TO_WINDOW."
+  bug: "435757017"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+} # default_scaling_mode_freeze
+

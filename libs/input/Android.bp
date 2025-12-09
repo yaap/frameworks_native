@@ -31,6 +31,7 @@ filegroup {
         "android/os/InputEventInjectionResult.aidl",
         "android/os/InputEventInjectionSync.aidl",
         "android/os/MotionEventFlag.aidl",
+        "android/os/PointerCaptureMode.aidl",
         "android/os/PointerIconType.aidl",
     ],
 }

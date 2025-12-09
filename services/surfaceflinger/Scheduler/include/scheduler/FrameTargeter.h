@@ -151,10 +151,15 @@ public:
 
     void endFrame(const CompositeResult&);
 
+    // Returns the number of fences that are or were pending at |time|. |time| must not be in
+    // the future.
+    size_t countPresentFencesPendingAt(TimePoint time) const;
+
     void dump(utils::Dumper&) const;
 
 private:
     friend class FrameTargeterTestBase;
+    friend class TestableScheduler;
 
     // For tests.
     using IsFencePendingFuncPtr = bool (*)(const FenceTimePtr&, int graceTimeMs);

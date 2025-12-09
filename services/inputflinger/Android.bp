@@ -34,6 +34,7 @@ cc_defaults {
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-Wall",
         "-Werror",
+        "-Werror=reorder-init-list",
         "-Wextra",
         "-Wno-unused-parameter",
         "-Wshadow",
@@ -93,6 +94,14 @@ filegroup {
         "PointerChoreographer.cpp",
         "PreferStylusOverTouchBlocker.cpp",
         "UnwantedInteractionBlocker.cpp",
+        "InputDeviceMetricsSource.cpp",
+        "InputListener.cpp",
+        "InputReaderBase.cpp",
+        "InputThread.cpp",
+        "NotifyArgs.cpp",
+        "VibrationElement.cpp",
+        "trace/InputTracingPerfettoBackend.cpp",
+        "trace/InputTracingThreadedBackend.cpp",
     ],
 }
 
@@ -112,6 +121,7 @@ cc_defaults {
         "libinput",
         "libkll",
         "liblog",
+        "libprocessgroup",
         "libprotobuf-cpp-lite",
         "libstatslog_inputflinger",
         "libstatspull",
@@ -125,12 +135,17 @@ cc_defaults {
         "libpalmrejection",
         "libperfetto_client_experimental",
         "libui-types",
+        "perfetto_winscope_extensions_zero",
     ],
     generated_headers: [
         "cxx-bridge-header",
         "inputflinger_rs_bootstrap_bridge_header",
     ],
-    header_libs: ["inputflinger_rs_bootstrap_cxx_headers"],
+    header_libs: [
+        "inputflinger_rs_bootstrap_cxx_headers",
+        "libbatteryservice_headers",
+        "libinputflinger_headers",
+    ],
     generated_sources: ["inputflinger_rs_bootstrap_bridge_code"],
     whole_static_libs: ["libinputflinger_rs"],
     export_shared_lib_headers: ["com.android.server.inputflinger-ndk"],
@@ -149,6 +164,7 @@ cc_library_shared {
     defaults: [
         "inputflinger_defaults",
         "libinputflinger_defaults",
+        "libinputreader_defaults",
     ],
     srcs: [
         "InputManager.cpp",
@@ -162,8 +178,6 @@ cc_library_shared {
         // This should consist only of dependencies from inputflinger. Other dependencies should be
         // in cc_defaults so that they are included in the tests.
         "libPlatformProperties",
-        "libinputflinger_base",
-        "libinputreader",
         "libinputreporter",
     ],
     static_libs: [
@@ -171,9 +185,10 @@ cc_library_shared {
     ],
     export_static_lib_headers: [
         "libinputdispatcher",
+        "libperfetto_client_experimental",
     ],
-    export_shared_lib_headers: [
-        "libinputflinger_base",
+    export_header_lib_headers: [
+        "libinputflinger_headers",
     ],
 }
 
@@ -187,56 +202,13 @@ cc_library_headers {
     export_include_dirs: [
         ".",
         "include",
+        "trace",
     ],
     header_libs: [
         "libchrome-gestures_headers",
     ],
     export_header_lib_headers: [
         "libchrome-gestures_headers",
-    ],
-}
-
-filegroup {
-    name: "libinputflinger_base_sources",
-    srcs: [
-        "InputDeviceMetricsSource.cpp",
-        "InputListener.cpp",
-        "InputReaderBase.cpp",
-        "InputThread.cpp",
-        "NotifyArgs.cpp",
-        "VibrationElement.cpp",
-    ],
-}
-
-cc_defaults {
-    name: "libinputflinger_base_defaults",
-    srcs: [":libinputflinger_base_sources"],
-    shared_libs: [
-        "libbase",
-        "libbinder",
-        "libcutils",
-        "libinput",
-        "liblog",
-        "libprocessgroup",
-        "libstatslog_inputflinger",
-        "libstatspull",
-        "libstatssocket",
-        "libutils",
-    ],
-    header_libs: [
-        "libinputflinger_headers",
-    ],
-}
-
-cc_library_shared {
-    name: "libinputflinger_base",
-    host_supported: true,
-    defaults: [
-        "inputflinger_defaults",
-        "libinputflinger_base_defaults",
-    ],
-    export_header_lib_headers: [
-        "libinputflinger_headers",
     ],
 }
 
@@ -279,7 +251,6 @@ phony {
         "libinput_rust_test",
         "libinput_tests",
         "libinputflinger",
-        "libinputreader_static",
         "libinputservice_test",
         "libpalmrejection_test",
         "libservices.core",

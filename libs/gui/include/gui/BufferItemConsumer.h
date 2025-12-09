@@ -104,6 +104,8 @@ class BufferItemConsumer: public ConsumerBase
     status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
                            const sp<Fence>& releaseFence = Fence::NO_FENCE);
 
+    void onFirstRef() override;
+
 protected:
     // This should only be used by BLASTBufferQueue:
     BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
@@ -119,12 +121,15 @@ protected:
 private:
     friend sp<BufferItemConsumer>;
 
-    void initialize(uint64_t consumerUsage, int bufferCount);
+    void initializeConsumer();
 
     status_t releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
                                      const sp<Fence>& releaseFence);
 
     void freeBufferLocked(int slotIndex) override;
+
+    uint64_t mConsumerUsage;
+    int mBufferCount;
 
     // mBufferFreedListener is the listener object that will be called when
     // an old buffer is being freed. If it is not NULL it will be called from

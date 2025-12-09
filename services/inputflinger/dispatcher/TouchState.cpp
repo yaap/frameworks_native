@@ -17,9 +17,12 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <gui/WindowInfo.h>
+#include <input/PrintTools.h>
 
 #include "InputTarget.h"
 #include "TouchState.h"
+
+#define INDENT "  "
 
 using namespace android::ftl::flag_operators;
 using android::base::StringPrintf;
@@ -287,13 +290,13 @@ void TouchState::removeAllPointersForDevice(DeviceId deviceId) {
 std::string TouchState::dump() const {
     std::string out;
     if (!windows.empty()) {
-        out += "  Windows:\n";
+        out += "TouchedWindows:\n";
         for (size_t i = 0; i < windows.size(); i++) {
             const TouchedWindow& touchedWindow = windows[i];
-            out += StringPrintf("    %zu : ", i) + touchedWindow.dump();
+            out += addLinePrefix(StringPrintf("%zu: ", i) + touchedWindow.dump(), INDENT);
         }
     } else {
-        out += "  Windows: <none>\n";
+        out += "TouchedWindows: <none>\n";
     }
     return out;
 }

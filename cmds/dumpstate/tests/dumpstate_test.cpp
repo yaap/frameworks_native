@@ -1001,7 +1001,7 @@ TEST_F(DumpstateTest, DumpPool_withParallelRunDisabled_isNull) {
 TEST_F(DumpstateTest, PreDumpUiData) {
     // These traces are always enabled, i.e. they are always pre-dumped
     std::vector<std::filesystem::path> uiTraces;
-    for (const auto traceFile : uiTraces) {
+    for (const auto& traceFile : uiTraces) {
         std::system(("rm -f " + traceFile.string()).c_str());
         EXPECT_FALSE(std::filesystem::exists(traceFile)) << traceFile << " was not deleted.";
 

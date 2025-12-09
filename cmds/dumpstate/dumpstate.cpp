@@ -1554,7 +1554,7 @@ static void DumpVintf() {
 
     const std::string sku = android::base::GetProperty("ro.boot.product.hardware.sku", "");
     const auto vintfFiles = android::vintf::details::dumpFileList(sku);
-    for (const auto vintfFile : vintfFiles) {
+    for (const auto& vintfFile : vintfFiles) {
         struct stat st;
         if (stat(vintfFile.c_str(), &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
@@ -1880,10 +1880,14 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
     /* Binder state is expensive to look at as it uses a lot of memory. */
     std::string binder_logs_dir = access("/dev/binderfs/binder_logs", R_OK) ?
             "/sys/kernel/debug/binder" : "/dev/binderfs/binder_logs";
+    std::string binder_transactions_path = binder_logs_dir + "/transactions";
+    if (access(binder_transactions_path.c_str(), R_OK) != 0) {
+        binder_transactions_path += "_hashed";
+    }
 
     DumpFile("BINDER FAILED TRANSACTION LOG", binder_logs_dir + "/failed_transaction_log");
     DumpFile("BINDER TRANSACTION LOG", binder_logs_dir + "/transaction_log");
-    DumpFile("BINDER TRANSACTIONS", binder_logs_dir + "/transactions");
+    DumpFile("BINDER TRANSACTIONS", binder_transactions_path);
     DumpFile("BINDER STATS", binder_logs_dir + "/stats");
     DumpFile("BINDER STATE", binder_logs_dir + "/state");
 
@@ -1908,11 +1912,6 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
         }
         RunCommand("DUMP VENDOR RIL LOGS", {"vril-dump"}, options.Build());
     }
-
-    /* Dump USB information */
-    RunCommand("typec_connector_class", {"typec_connector_class"},
-               CommandOptions::WithTimeout(10).AsRootIfAvailable().Build());
-    RunCommand("lsusb", {"lsusb"}, CommandOptions::WithTimeout(10).AsRootIfAvailable().Build());
 
     printf("========================================================\n");
     printf("== Android Framework Services\n");
@@ -2287,6 +2286,30 @@ static void DumpstateOnboardingOnly() {
     ds.AddDir(LOGPERSIST_DATA_DIR, false);
 }
 
+// This method collects log sections for bluetooth debugging only
+static void DumpstateBluetoothOnly() {
+    DurationReporter duration_reporter("DUMPSTATE");
+
+    printf("========================================================\n");
+    printf("== Android Framework Services\n");
+    printf("========================================================\n");
+    printf("------ DUMPSYS (/system/bin/dumpsys) ------\n");
+
+    const std::vector<std::string> services = {"bluetooth_manager", "package"};
+    for (const std::string& service : services) {
+        printf("-------------------------------------------------------------------------------\n");
+        printf("DUMP OF SERVICE %s:\n", service.c_str());
+        RunDumpsys("", {service}, CommandOptions::WithTimeout(90).Build(), SEC_TO_MSEC(10));
+    }
+
+    printf("========================================================\n");
+    printf("== dumpstate: done (id %d)\n", ds.id_);
+    printf("========================================================\n");
+
+    /* Dump Bluetooth HCI logs after getting bluetooth_manager dumpsys */
+    ds.AddDir("/data/misc/bluetooth/logs", true);
+}
+
 static std::string GetTimestamp(const timespec& ts) {
     tm tm;
     localtime_r(&ts.tv_sec, &tm);
@@ -2493,6 +2516,7 @@ static dumpstate_hal_hidl::DumpstateMode GetDumpstateHalModeHidl(
         case Dumpstate::BugreportMode::BUGREPORT_WIFI:
             return dumpstate_hal_hidl::DumpstateMode::WIFI;
         case Dumpstate::BugreportMode::BUGREPORT_ONBOARDING:
+        case Dumpstate::BugreportMode::BUGREPORT_BLUETOOTH:
         case Dumpstate::BugreportMode::BUGREPORT_DEFAULT:
             return dumpstate_hal_hidl::DumpstateMode::DEFAULT;
     }
@@ -2515,6 +2539,7 @@ static dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode GetDumpstateHalModeAi
         case Dumpstate::BugreportMode::BUGREPORT_WIFI:
             return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::WIFI;
         case Dumpstate::BugreportMode::BUGREPORT_ONBOARDING:
+        case Dumpstate::BugreportMode::BUGREPORT_BLUETOOTH:
         case Dumpstate::BugreportMode::BUGREPORT_DEFAULT:
             return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::DEFAULT;
     }
@@ -2922,6 +2947,8 @@ static bool PrepareToWriteToFile() {
         ds.base_name_ += "-telephony";
     } else if (ds.options_->wifi_only) {
         ds.base_name_ += "-wifi";
+    } else if (ds.options_->bluetooth_only) {
+        ds.base_name_ += "-bluetooth";
     }
 
     if (ds.options_->do_screenshot) {
@@ -3016,6 +3043,8 @@ static inline const char* ModeToString(Dumpstate::BugreportMode mode) {
             return "BUGREPORT_WIFI";
         case Dumpstate::BugreportMode::BUGREPORT_ONBOARDING:
             return "BUGREPORT_ONBOARDING";
+        case Dumpstate::BugreportMode::BUGREPORT_BLUETOOTH:
+            return "BUGREPORT_BLUETOOTH";
         case Dumpstate::BugreportMode::BUGREPORT_DEFAULT:
             return "BUGREPORT_DEFAULT";
     }
@@ -3063,6 +3092,10 @@ static void SetOptionsFromMode(Dumpstate::BugreportMode mode, Dumpstate::DumpOpt
             break;
         case Dumpstate::BugreportMode::BUGREPORT_ONBOARDING:
             options->onboarding_only = true;
+            options->do_screenshot = false;
+            break;
+        case Dumpstate::BugreportMode::BUGREPORT_BLUETOOTH:
+            options->bluetooth_only = true;
             options->do_screenshot = false;
             break;
         case Dumpstate::BugreportMode::BUGREPORT_DEFAULT:
@@ -3486,8 +3519,8 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
 
     std::future<std::string> snapshot_system_trace;
 
-    bool is_dumpstate_restricted =
-        options_->telephony_only || options_->wifi_only || options_->limited_only;
+    bool is_dumpstate_restricted = options_->telephony_only || options_->wifi_only ||
+                                   options_->limited_only || options_->bluetooth_only;
     if (!is_dumpstate_restricted) {
         // Snapshot the system trace now (if running) to avoid that dumpstate's
         // own activity pushes out interesting data from the trace ring buffer.
@@ -3515,6 +3548,8 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
         DumpstateLimitedOnly();
     } else if (options_->onboarding_only) {
         DumpstateOnboardingOnly();
+    } else if (options_->bluetooth_only) {
+        DumpstateBluetoothOnly();
     } else {
         // Dump state for the default case. This also drops root.
         RunStatus s = DumpstateDefaultAfterCritical();
@@ -3625,6 +3660,10 @@ void Dumpstate::MaybeSavePlaceholderScreenshot() {
     // is saved for backwards compatibility.
     std::string path = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
     if (android::os::CopyFileToFile(DEFAULT_SCREENSHOT_PATH, path)) {
+        if (chown(path.c_str(), AID_SHELL, AID_SHELL)) {
+            MYLOGE("Unable to change ownership of copied screenshot %s: %s\n", path.c_str(),
+                   strerror(errno));
+        }
         MYLOGD("Saved fallback screenshot on %s\n", path.c_str());
     } else {
         MYLOGE("Failed to save fallback screenshot on %s\n", path.c_str());
@@ -4043,6 +4082,10 @@ void Progress::Save() {
     std::string content = android::base::StringPrintf("%d %d\n", runs, average);
     if (!android::base::WriteStringToFile(content, path_)) {
         MYLOGE("Could not save stats on %s\n", path_.c_str());
+    }
+
+    if (chown(path_.c_str(), AID_SHELL, AID_SHELL)) {
+        MYLOGE("Unable to change ownership of %s: %s\n", path_.c_str(), strerror(errno));
     }
 }
 

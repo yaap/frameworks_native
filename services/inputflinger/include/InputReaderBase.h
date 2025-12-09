@@ -100,6 +100,9 @@ struct InputReaderConfiguration {
         // primary button.
         MOUSE_SETTINGS = 1u << 15,
 
+        // The virtual devices list is updated
+        VIRTUAL_DEVICES = 1u << 16,
+
         // All devices must be reopened.
         MUST_REOPEN = 1u << 31,
     };
@@ -132,6 +135,10 @@ struct InputReaderConfiguration {
     // The map from the input device physical port location to the input device layout info.
     // Can be used to determine the layout of the keyboard device.
     std::unordered_map<std::string, KeyboardLayoutInfo> keyboardLayoutAssociations;
+
+    // List of input device physical port locations of devices that are marked as virtual and should
+    // not be treated as physically connected peripheral (e.g. created using VDM in userspace)
+    std::set<std::string> virtualDevicePorts;
 
     // The suggested display ID to show the cursor.
     ui::LogicalDisplayId defaultPointerDisplayId;
@@ -261,8 +268,11 @@ struct InputReaderConfiguration {
     // True to enable system gestures (three- and four-finger swipes) on touchpads.
     bool touchpadSystemGesturesEnabled;
 
+    // True to enable touchpads.
+    bool touchpadsEnabled;
+
     // The set of currently disabled input devices.
-    std::set<int32_t> disabledDevices;
+    std::set<DeviceId> disabledDevices;
 
     // True if stylus button reporting through motion events should be enabled, in which case
     // stylus button state changes are reported through motion events.
@@ -319,6 +329,7 @@ struct InputReaderConfiguration {
             touchpadRightClickZoneEnabled(false),
             touchpadThreeFingerTapShortcutEnabled(false),
             touchpadSystemGesturesEnabled(true),
+            touchpadsEnabled(true),
             stylusButtonMotionEventsEnabled(true),
             stylusPointerIconEnabled(false),
             mouseReverseVerticalScrollingEnabled(false),
@@ -375,20 +386,20 @@ public:
     virtual std::vector<InputDeviceInfo> getInputDevices() const = 0;
 
     /* Query current input state. */
-    virtual int32_t getScanCodeState(int32_t deviceId, uint32_t sourceMask, int32_t scanCode) = 0;
-    virtual int32_t getKeyCodeState(int32_t deviceId, uint32_t sourceMask, int32_t keyCode) = 0;
-    virtual int32_t getSwitchState(int32_t deviceId, uint32_t sourceMask, int32_t sw) = 0;
+    virtual int32_t getScanCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t scanCode) = 0;
+    virtual int32_t getKeyCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t keyCode) = 0;
+    virtual int32_t getSwitchState(DeviceId deviceId, uint32_t sourceMask, int32_t sw) = 0;
 
-    virtual int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const = 0;
+    virtual int32_t getKeyCodeForKeyLocation(DeviceId deviceId, int32_t locationKeyCode) const = 0;
 
     /* Toggle Caps Lock */
-    virtual void toggleCapsLockState(int32_t deviceId) = 0;
+    virtual void toggleCapsLockState(DeviceId deviceId) = 0;
 
     /* Resets locked modifier state */
     virtual void resetLockedModifierState() = 0;
 
     /* Determine whether physical keys exist for the given framework-domain key codes. */
-    virtual bool hasKeys(int32_t deviceId, uint32_t sourceMask,
+    virtual bool hasKeys(DeviceId deviceId, uint32_t sourceMask,
                          const std::vector<int32_t>& keyCodes, uint8_t* outFlags) = 0;
 
     /* Requests that a reconfiguration of all input devices.
@@ -397,54 +408,56 @@ public:
     virtual void requestRefreshConfiguration(ConfigurationChanges changes) = 0;
 
     /* Controls the vibrator of a particular input device. */
-    virtual void vibrate(int32_t deviceId, const VibrationSequence& sequence, ssize_t repeat,
+    virtual void vibrate(DeviceId deviceId, const VibrationSequence& sequence, ssize_t repeat,
                          int32_t token) = 0;
-    virtual void cancelVibrate(int32_t deviceId, int32_t token) = 0;
+    virtual void cancelVibrate(DeviceId deviceId, int32_t token) = 0;
 
-    virtual bool isVibrating(int32_t deviceId) = 0;
+    virtual bool isVibrating(DeviceId deviceId) = 0;
 
-    virtual std::vector<int32_t> getVibratorIds(int32_t deviceId) = 0;
+    virtual std::vector<int32_t> getVibratorIds(DeviceId deviceId) = 0;
     /* Get battery level of a particular input device. */
-    virtual std::optional<int32_t> getBatteryCapacity(int32_t deviceId) = 0;
+    virtual std::optional<int32_t> getBatteryCapacity(DeviceId deviceId) = 0;
     /* Get battery status of a particular input device. */
-    virtual std::optional<int32_t> getBatteryStatus(int32_t deviceId) = 0;
+    virtual std::optional<int32_t> getBatteryStatus(DeviceId deviceId) = 0;
     /* Get the device path for the battery of an input device. */
-    virtual std::optional<std::string> getBatteryDevicePath(int32_t deviceId) = 0;
+    virtual std::optional<std::string> getBatteryDevicePath(DeviceId deviceId) = 0;
 
-    virtual std::vector<InputDeviceLightInfo> getLights(int32_t deviceId) = 0;
+    virtual std::vector<InputDeviceLightInfo> getLights(DeviceId deviceId) = 0;
 
-    virtual std::vector<InputDeviceSensorInfo> getSensors(int32_t deviceId) = 0;
+    virtual std::vector<InputDeviceSensorInfo> getSensors(DeviceId deviceId) = 0;
 
-    virtual std::optional<HardwareProperties> getTouchpadHardwareProperties(int32_t deviceId) = 0;
+    virtual std::optional<HardwareProperties> getTouchpadHardwareProperties(DeviceId deviceId) = 0;
 
     /* Return true if the device can send input events to the specified display. */
-    virtual bool canDispatchToDisplay(int32_t deviceId, ui::LogicalDisplayId displayId) = 0;
+    virtual bool canDispatchToDisplay(DeviceId deviceId, ui::LogicalDisplayId displayId) = 0;
 
     /* Enable sensor in input reader mapper. */
-    virtual bool enableSensor(int32_t deviceId, InputDeviceSensorType sensorType,
+    virtual bool enableSensor(DeviceId deviceId, InputDeviceSensorType sensorType,
                               std::chrono::microseconds samplingPeriod,
                               std::chrono::microseconds maxBatchReportLatency) = 0;
 
     /* Disable sensor in input reader mapper. */
-    virtual void disableSensor(int32_t deviceId, InputDeviceSensorType sensorType) = 0;
+    virtual void disableSensor(DeviceId deviceId, InputDeviceSensorType sensorType) = 0;
 
     /* Flush sensor data in input reader mapper. */
-    virtual void flushSensor(int32_t deviceId, InputDeviceSensorType sensorType) = 0;
+    virtual void flushSensor(DeviceId deviceId, InputDeviceSensorType sensorType) = 0;
 
     /* Set color for the light */
-    virtual bool setLightColor(int32_t deviceId, int32_t lightId, int32_t color) = 0;
+    virtual bool setLightColor(DeviceId deviceId, int32_t lightId, int32_t color) = 0;
     /* Set player ID for the light */
-    virtual bool setLightPlayerId(int32_t deviceId, int32_t lightId, int32_t playerId) = 0;
+    virtual bool setLightPlayerId(DeviceId deviceId, int32_t lightId, int32_t playerId) = 0;
     /* Get light color */
-    virtual std::optional<int32_t> getLightColor(int32_t deviceId, int32_t lightId) = 0;
+    virtual std::optional<int32_t> getLightColor(DeviceId deviceId, int32_t lightId) = 0;
     /* Get light player ID */
-    virtual std::optional<int32_t> getLightPlayerId(int32_t deviceId, int32_t lightId) = 0;
+    virtual std::optional<int32_t> getLightPlayerId(DeviceId deviceId, int32_t lightId) = 0;
 
     /* Get the Bluetooth address of an input device, if known. */
-    virtual std::optional<std::string> getBluetoothAddress(int32_t deviceId) const = 0;
+    virtual std::optional<std::string> getBluetoothAddress(DeviceId deviceId) const = 0;
+    /* Get the physical location path ("phys" ID) for an input device, if it is available. */
+    virtual std::optional<std::string> getPhysicalLocationPath(DeviceId deviceId) const = 0;
 
     /* Gets the sysfs root path for this device. Returns an empty path if there is none. */
-    virtual std::filesystem::path getSysfsRootPath(int32_t deviceId) const = 0;
+    virtual std::filesystem::path getSysfsRootPath(DeviceId deviceId) const = 0;
 
     /* Sysfs node change reported. Recreate device if required to incorporate the new sysfs nodes */
     virtual void sysfsNodeChanged(const std::string& sysfsNodePath) = 0;
@@ -466,7 +479,7 @@ public:
      *
      * Returns true if setting power wakeup was successful.
      */
-    virtual bool setKernelWakeEnabled(int32_t deviceId, bool enabled) = 0;
+    virtual bool setKernelWakeEnabled(DeviceId deviceId, bool enabled) = 0;
 };
 
 // --- TouchAffineTransformation ---
@@ -523,10 +536,10 @@ public:
 
     /* Sends the hardware state of a connected touchpad */
     virtual void notifyTouchpadHardwareState(const SelfContainedHardwareState& schs,
-                                             int32_t deviceId) = 0;
+                                             DeviceId deviceId) = 0;
 
     /* Sends the Info of gestures that happen on the touchpad. */
-    virtual void notifyTouchpadGestureInfo(GestureType type, int32_t deviceId) = 0;
+    virtual void notifyTouchpadGestureInfo(GestureType type, DeviceId deviceId) = 0;
 
     /* Notifies the policy that the user has performed a three-finger touchpad tap. */
     virtual void notifyTouchpadThreeFingerTap() = 0;
@@ -543,7 +556,7 @@ public:
     virtual TouchAffineTransformation getTouchAffineTransformation(
             const std::string& inputDeviceDescriptor, ui::Rotation surfaceRotation) = 0;
     /* Notifies the input reader policy that a stylus gesture has started. */
-    virtual void notifyStylusGestureStarted(int32_t deviceId, nsecs_t eventTime) = 0;
+    virtual void notifyStylusGestureStarted(DeviceId deviceId, nsecs_t eventTime) = 0;
 
     /* Returns true if any InputConnection is currently active. */
     virtual bool isInputMethodConnectionActive() = 0;

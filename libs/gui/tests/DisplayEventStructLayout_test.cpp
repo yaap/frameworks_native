@@ -69,6 +69,8 @@ TEST(DisplayEventStructLayoutTest, TestEventAlignment) {
 
     CHECK_OFFSET(DisplayEventReceiver::Event::FrameRateOverride, uid, 0);
     CHECK_OFFSET(DisplayEventReceiver::Event::FrameRateOverride, frameRateHz, 8);
+
+    CHECK_OFFSET(DisplayEventReceiver::Event::SupportedRefreshRate, refreshRate, 0);
 }
 
 } // namespace android::test

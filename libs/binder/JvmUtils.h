@@ -23,12 +23,24 @@ namespace {
 static void* getJavaVM() {
     return nullptr;
 }
+bool isThreadAttachedToJVM() {
+    return false;
+}
 #else
 static JavaVM* getJavaVM() {
     static auto fn = reinterpret_cast<decltype(&AndroidRuntimeGetJavaVM)>(
             dlsym(RTLD_DEFAULT, "AndroidRuntimeGetJavaVM"));
     if (fn == nullptr) return nullptr;
     return fn();
+}
+
+bool isThreadAttachedToJVM() {
+    JNIEnv* env = nullptr;
+    JavaVM* vm = getJavaVM();
+    if (vm == nullptr || vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_4) < 0) {
+        return false;
+    }
+    return env != nullptr;
 }
 #endif
 } // namespace

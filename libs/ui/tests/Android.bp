@@ -45,6 +45,17 @@ cc_test {
 }
 
 cc_test {
+    name: "FenceTime_test",
+    shared_libs: ["libui"],
+    static_libs: ["libgmock"],
+    srcs: ["FenceTime_test.cpp"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+}
+
+cc_test {
     name: "FlattenableHelpers_test",
     shared_libs: ["libui"],
     srcs: ["FlattenableHelpers_test.cpp"],

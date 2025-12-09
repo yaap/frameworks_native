@@ -16,9 +16,6 @@
 
 #include "GraphiteVkRenderEngine.h"
 
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
-
 #include <include/gpu/GpuTypes.h>
 #include <include/gpu/graphite/BackendSemaphore.h>
 #include <include/gpu/graphite/Context.h>
@@ -69,8 +66,15 @@ GraphiteVkRenderEngine::~GraphiteVkRenderEngine() {
 std::future<void> GraphiteVkRenderEngine::primeCache(PrimeCacheConfig config) {
     std::future<void> ret = {};
 
-    // Note: for local debugging only! Graphite's precompilation should stay ENABLED, and this
-    // switch will be removed in the future without warning.
+    // Note: this sysprop is for local debugging only! Legacy draw-based prewarming remains enabled
+    // for Graphite TEMPORARILY, and this switch may be removed in the future without warning.
+    // TODO(b/380159947): remove this option, and force just precompilation to always be enabled.
+    if (base::GetBoolProperty("debug.renderengine.graphite.prewarm", true)) {
+        ret = SkiaVkRenderEngine::primeCache(config);
+    }
+
+    // Note: this sysprop is for local debugging only! Graphite's precompilation should stay
+    // ENABLED, and this switch may be removed in the future without warning.
     if (base::GetBoolProperty("debug.renderengine.graphite.precompile", true)) {
         std::unique_ptr<graphite::PrecompileContext> precompileContext =
                 mContext->graphiteContext()->makePrecompileContext();
@@ -79,15 +83,6 @@ std::future<void> GraphiteVkRenderEngine::primeCache(PrimeCacheConfig config) {
                             std::move(precompileContext), std::ref(mRuntimeEffectManager));
     } else {
         ALOGW("Graphite's background shader / pipeline precompilation was disabled!");
-    }
-
-    // Note: for local debugging only! Legacy draw-based prewarming should stay DISABLED, and this
-    // switch will be removed  in the future without warning. Enabling this may regress boot time
-    // unnecessarily.
-    // TODO(b/380159947): remove this option, and force precompilation to always be enabled.
-    if (base::GetBoolProperty("debug.renderengine.graphite.prewarm", false)) {
-        ALOGW("Legacy draw-based shader / pipeline prewarming was enabled, and may delay boot!");
-        ret = SkiaVkRenderEngine::primeCache(config);
     }
 
     return ret;

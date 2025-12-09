@@ -26,12 +26,6 @@
 #include "test_framework/core/AsyncFunction.h"
 #include "test_framework/core/BufferId.h"
 
-namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger {
-
-class Surface;
-
-}  // namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger
-
 namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger::events {
 
 struct BufferReleased final {
@@ -39,7 +33,7 @@ struct BufferReleased final {
 
     using TimePoint = std::chrono::steady_clock::time_point;
 
-    Surface* surface{};
+    uintptr_t surfaceId{};
     uint64_t frameNumber{};
     core::BufferId bufferId{};
     TimePoint receivedAt{std::chrono::steady_clock::now()};
@@ -50,12 +44,12 @@ struct BufferReleased final {
 inline auto toString(const BufferReleased& event) -> std::string {
     return fmt::format(
             "sfBufferReleased{{"
-            " surface: {},"
+            " surfaceId: {},"
             " frameNumber: {},"
             " bufferId: {}"
             " receivedAt: {}"
             " }}",
-            static_cast<void*>(event.surface), event.frameNumber, toString(event.bufferId),
+            event.surfaceId, event.frameNumber, toString(event.bufferId),
             event.receivedAt.time_since_epoch());
 }
 

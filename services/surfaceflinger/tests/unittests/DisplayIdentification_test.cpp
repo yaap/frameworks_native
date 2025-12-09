@@ -18,14 +18,14 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra"
 
-#include <string_view>
-
+#include <common/test/FlagUtils.h>
 #include <ftl/hash.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <ui/ScreenPartStatus.h>
 
 #include "Display/DisplayIdentification.h"
+#include "com_android_graphics_surfaceflinger_flags.h"
 
 using ::testing::ElementsAre;
 
@@ -42,6 +42,16 @@ const unsigned char kInternalEdid[] =
         "\x00\x00\x00\x00\x00\x23\x87\x02\x64\x00\x00\x00\x00\xfe\x00\x53"
         "\x41\x4d\x53\x55\x4e\x47\x0a\x20\x20\x20\x20\x20\x00\x00\x00\xfe"
         "\x00\x31\x32\x31\x41\x54\x31\x31\x2d\x38\x30\x31\x0a\x20\x00\x45";
+
+const unsigned char kOuterEdid[] =
+        "\x00\xff\xff\xff\xff\xff\xff\x00\x4c\xa3\x39\x30\xd2\x02\x96\x49"
+        "\x00\x15\x01\x03\x80\x1a\x10\x78\x0a\xd3\xe5\x95\x5c\x60\x90\x27"
+        "\x19\x50\x54\x00\x00\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+        "\x01\x01\x01\x01\x01\x01\x9e\x1b\x00\xa0\x50\x20\x12\x30\x10\x30"
+        "\x13\x00\x05\xa3\x10\x00\x00\x19\x00\x00\x00\x0f\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x23\x87\x02\x64\x00\x00\x00\x00\xfe\x00\x53"
+        "\x41\x4d\x53\x55\x4e\x47\x0a\x20\x20\x20\x20\x20\x00\x00\x00\xfe"
+        "\x00\x31\x32\x31\x41\x54\x31\x31\x2d\x38\x30\x31\x0a\x20\x00\x9C";
 
 const unsigned char kExternalEdid[] =
         "\x00\xff\xff\xff\xff\xff\xff\x00\x22\xf0\x6c\x28\x01\x01\x01\x01"
@@ -94,7 +104,7 @@ const unsigned char kPanasonicTvEdid[] =
 
 const unsigned char kHisenseTvEdid[] =
         "\x00\xff\xff\xff\xff\xff\xff\x00\x20\xa3\x00\x00\x00\x00\x00"
-        "\x00\x12\x1d\x01\x03\x80\x00\x00\x78\x0a\xd7\xa5\xa2\x59\x4a"
+        "\x00\x12\x1d\x01\x03\x00\x00\x00\x78\x0a\xd7\xa5\xa2\x59\x4a"
         "\x96\x24\x14\x50\x54\xa3\x08\x00\xd1\xc0\xb3\x00\x81\x00\x81"
         "\x80\x81\x40\x81\xc0\x01\x01\x01\x01\x02\x3a\x80\x18\x71\x38"
         "\x2d\x40\x58\x2c\x45\x00\x3f\x43\x21\x00\x00\x1a\x02\x3a\x80"
@@ -140,6 +150,24 @@ const unsigned char kEdidWithMissingDescriptors[] =
         "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02"
         "\x00\x0d\x28\xff\x0a\x3c\xc8\x0f\x0b\x23\xc8\x00\x00\x00\x00\xcc";
 
+const unsigned char kNtsDisplayEdid[] =
+        "\x00\xff\xff\xff\xff\xff\xff\x00\x59\x3a\x10\x10\x01\x01\x01\x01"
+        "\x00\x18\x01\x03\x80\x85\x4b\x78\x0a\xf4\x53\xa1\x5b\x50\xa2\x27"
+        "\x10\x48\x4a\xa5\xce\x00\x81\x00\x81\xc0\x01\x01\x01\x01\x01\x01"
+        "\x01\x01\x01\x01\x01\x01\x02\x3a\x80\x18\x71\x38\x2d\x40\x58\x2c"
+        "\x45\x00\x32\xec\x52\x00\x00\x1e\xf9\x1c\x80\x18\x71\x1c\x16\x20"
+        "\x58\x2c\x25\x00\xc4\x8e\x21\x00\x00\x9e\x00\x00\x00\xfd\x00\x37"
+        "\x55\x1e\x5b\x10\x00\x0a\x20\x20\x20\x20\x20\x20\x00\x00\x00\xfc"
+        "\x00\x50\x35\x35\x32\x75\x69\x2d\x42\x32\x0a\x20\x20\x20\x01\x09"
+        "\x02\x03\x3b\x71\x4f\x01\x03\x04\x05\x90\x20\x11\x12\x13\x14\x1f"
+        "\x4f\x36\x50\x18\x26\x09\x07\x05\x15\x57\x50\x2c\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x83\x01\x00\x00\x6e\x03\x0c\x00"
+        "\x10\x00\x38\x3c\x00\x00\x00\x00\x00\x00\x00\x02\x3a\x80\x18\x71"
+        "\x38\x2d\x40\x58\x2c\x55\x00\x32\xec\x52\x00\x00\x1e\x01\x1d\x00"
+        "\x72\x51\xd0\x1e\x20\x6e\x28\x55\x00\x32\xec\x52\x00\x00\x1e\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x8c";
+
 template <size_t N>
 DisplayIdentificationData asDisplayIdentificationData(const unsigned char (&bytes)[N]) {
     return DisplayIdentificationData(bytes, bytes + N - 1);
@@ -153,6 +181,11 @@ uint32_t hash(const char* str) {
 
 const DisplayIdentificationData& getInternalEdid() {
     static const DisplayIdentificationData data = asDisplayIdentificationData(kInternalEdid);
+    return data;
+}
+
+const DisplayIdentificationData& getOuterEdid() {
+    static const DisplayIdentificationData data = asDisplayIdentificationData(kOuterEdid);
     return data;
 }
 
@@ -181,6 +214,11 @@ const DisplayIdentificationData& getCtlDisplayEdid() {
     return data;
 }
 
+const DisplayIdentificationData& getNtsDisplayEdid() {
+    static const DisplayIdentificationData data = asDisplayIdentificationData(kNtsDisplayEdid);
+    return data;
+}
+
 const DisplayIdentificationData& getEdidWithMissingDescriptors() {
     static const DisplayIdentificationData data =
             asDisplayIdentificationData(kEdidWithMissingDescriptors);
@@ -191,11 +229,13 @@ TEST(DisplayIdentificationTest, isEdid) {
     EXPECT_FALSE(isEdid({}));
 
     EXPECT_TRUE(isEdid(getInternalEdid()));
+    EXPECT_TRUE(isEdid(getOuterEdid()));
     EXPECT_TRUE(isEdid(getExternalEdid()));
     EXPECT_TRUE(isEdid(getExternalEedid()));
     EXPECT_TRUE(isEdid(getPanasonicTvEdid()));
     EXPECT_TRUE(isEdid(getHisenseTvEdid()));
     EXPECT_TRUE(isEdid(getCtlDisplayEdid()));
+    EXPECT_TRUE(isEdid(getNtsDisplayEdid()));
 }
 
 TEST(DisplayIdentificationTest, parseEdid) {
@@ -210,6 +250,28 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(12610, edid->productId);
     EXPECT_TRUE(edid->hashedBlockZeroSerialNumberOpt.has_value());
     EXPECT_EQ(ftl::stable_hash("12345678"), edid->hashedBlockZeroSerialNumberOpt.value());
+    EXPECT_FALSE(edid->hashedDescriptorBlockSerialNumberOpt.has_value());
+    EXPECT_EQ(21, edid->manufactureOrModelYear);
+    EXPECT_EQ(0, edid->manufactureWeek);
+    EXPECT_EQ(26, edid->physicalSizeInCm.width);
+    EXPECT_EQ(16, edid->physicalSizeInCm.height);
+    EXPECT_FALSE(edid->cea861Block);
+    EXPECT_EQ(1280, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(800, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(261, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(163, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
+
+    edid = parseEdid(getOuterEdid());
+    ASSERT_TRUE(edid);
+    EXPECT_EQ(0x4ca3u, edid->manufacturerId);
+    EXPECT_STREQ("SEC", edid->pnpId.data());
+    // ASCII text should be used as fallback if display name and serial number are missing.
+    EXPECT_EQ(hash("121AT11-801"), edid->modelHash);
+    EXPECT_EQ(hash("121AT11-801"), 626564263);
+    EXPECT_TRUE(edid->displayName.empty());
+    EXPECT_EQ(12345, edid->productId);
+    EXPECT_TRUE(edid->hashedBlockZeroSerialNumberOpt.has_value());
+    EXPECT_EQ(ftl::stable_hash("1234567890"), edid->hashedBlockZeroSerialNumberOpt.value());
     EXPECT_FALSE(edid->hashedDescriptorBlockSerialNumberOpt.has_value());
     EXPECT_EQ(21, edid->manufactureOrModelYear);
     EXPECT_EQ(0, edid->manufactureWeek);
@@ -238,8 +300,8 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(64, edid->physicalSizeInCm.width);
     EXPECT_EQ(40, edid->physicalSizeInCm.height);
     EXPECT_FALSE(edid->cea861Block);
-    EXPECT_EQ(1280, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
-    EXPECT_EQ(800, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(2560, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1600, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
     EXPECT_EQ(641, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
     EXPECT_EQ(400, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
@@ -265,8 +327,8 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(0, physicalAddress.b);
     EXPECT_EQ(0, physicalAddress.c);
     EXPECT_EQ(0, physicalAddress.d);
-    EXPECT_EQ(1366, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
-    EXPECT_EQ(768, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
     EXPECT_EQ(160, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
     EXPECT_EQ(90, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
@@ -292,8 +354,8 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(0, physicalAddress.b);
     EXPECT_EQ(0, physicalAddress.c);
     EXPECT_EQ(0, physicalAddress.d);
-    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
-    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(3840, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(2160, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
     EXPECT_EQ(698, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
     EXPECT_EQ(392, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
@@ -340,8 +402,8 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(29, edid->physicalSizeInCm.height);
     ASSERT_TRUE(edid->cea861Block);
     EXPECT_FALSE(edid->cea861Block->hdmiVendorDataBlock);
-    EXPECT_EQ(1360, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
-    EXPECT_EQ(768, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
     EXPECT_EQ(521, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
     EXPECT_EQ(293, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
@@ -365,6 +427,33 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(1504, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
     EXPECT_EQ(285, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
     EXPECT_EQ(190, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
+
+    edid = parseEdid(getNtsDisplayEdid());
+    ASSERT_TRUE(edid);
+    EXPECT_EQ(22842, edid->manufacturerId);
+    EXPECT_STREQ("VIZ", edid->pnpId.data());
+    EXPECT_EQ(hash("P552ui-B2"), edid->modelHash);
+    EXPECT_EQ(hash("P552ui-B2"), 639125453);
+    EXPECT_EQ("P552ui-B2", edid->displayName);
+    EXPECT_EQ(4112, edid->productId);
+    EXPECT_TRUE(edid->hashedBlockZeroSerialNumberOpt.has_value());
+    EXPECT_EQ(ftl::stable_hash("16843009"), edid->hashedBlockZeroSerialNumberOpt.value());
+    EXPECT_FALSE(edid->hashedDescriptorBlockSerialNumberOpt.has_value());
+    EXPECT_EQ(24, edid->manufactureOrModelYear);
+    EXPECT_EQ(0x00, edid->manufactureWeek);
+    EXPECT_EQ(133, edid->physicalSizeInCm.width);
+    EXPECT_EQ(75, edid->physicalSizeInCm.height);
+    ASSERT_TRUE(edid->cea861Block);
+    ASSERT_TRUE(edid->cea861Block->hdmiVendorDataBlock);
+    physicalAddress = edid->cea861Block->hdmiVendorDataBlock->physicalAddress;
+    EXPECT_EQ(1, physicalAddress.a);
+    EXPECT_EQ(0, physicalAddress.b);
+    EXPECT_EQ(0, physicalAddress.c);
+    EXPECT_EQ(0, physicalAddress.d);
+    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(1330, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(748, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 }
 
 TEST(DisplayIdentificationTest, parseInvalidEdid) {
@@ -398,25 +487,50 @@ TEST(DisplayIdentificationTest, getPnpId) {
     EXPECT_STREQ("SAM", getPnpId(0x4c2du).value_or(PnpId{}).data());
 }
 
-TEST(DisplayIdentificationTest, parseDisplayIdentificationData) {
+TEST(DisplayIdentificationTest, parseDisplayIdentificationDataWithPortBasedIds) {
     const auto primaryInfo = parseDisplayIdentificationData(0, getInternalEdid(),
-                                                            android::ScreenPartStatus::UNSUPPORTED);
+                                                            android::ScreenPartStatus::UNSUPPORTED,
+                                                            /*useStableEdidIds=*/false);
     ASSERT_TRUE(primaryInfo);
 
     const auto secondaryInfo =
             parseDisplayIdentificationData(1, getExternalEdid(),
-                                           android::ScreenPartStatus::UNSUPPORTED);
+                                           android::ScreenPartStatus::UNSUPPORTED,
+                                           /*useStableEdidIds=*/false);
     ASSERT_TRUE(secondaryInfo);
 
-    const auto tertiaryInfo =
-            parseDisplayIdentificationData(2, getExternalEedid(),
-                                           android::ScreenPartStatus::UNSUPPORTED);
+    const auto tertiaryInfo = parseDisplayIdentificationData(2, getExternalEedid(),
+                                                             android::ScreenPartStatus::UNSUPPORTED,
+                                                             /*useStableEdidIds=*/false);
     ASSERT_TRUE(tertiaryInfo);
 
     // Display IDs should be unique.
     EXPECT_EQ(4633257497453176576, primaryInfo->id.value);
     EXPECT_EQ(4621520285560261121, secondaryInfo->id.value);
     EXPECT_EQ(4633127902230889474, tertiaryInfo->id.value);
+}
+
+TEST(DisplayIdentificationTest, parseDisplayIdentificationDataWithStableEdidIds) {
+    const auto primaryInfo = parseDisplayIdentificationData(0, getInternalEdid(),
+                                                            android::ScreenPartStatus::UNSUPPORTED,
+                                                            /*useStableEdidIds=*/true);
+    ASSERT_TRUE(primaryInfo);
+
+    const auto secondaryInfo =
+            parseDisplayIdentificationData(1, getExternalEdid(),
+                                           android::ScreenPartStatus::UNSUPPORTED,
+                                           /*useStableEdidIds=*/true);
+    ASSERT_TRUE(secondaryInfo);
+
+    const auto tertiaryInfo = parseDisplayIdentificationData(2, getExternalEedid(),
+                                                             android::ScreenPartStatus::UNSUPPORTED,
+                                                             /*useStableEdidIds=*/true);
+    ASSERT_TRUE(tertiaryInfo);
+
+    // Display IDs should be unique.
+    EXPECT_EQ(12535292641168014882u, primaryInfo->id.value);
+    EXPECT_EQ(4067182673952280501u, secondaryInfo->id.value);
+    EXPECT_EQ(14712168404707886855u, tertiaryInfo->id.value);
 }
 
 TEST(DisplayIdentificationTest, resolveDisplayIdCollision) {
@@ -550,6 +664,81 @@ TEST(DisplayIdentificationTest, deviceProductInfo) {
         ASSERT_TRUE(std::holds_alternative<ModelYear>(info.manufactureOrModelDate));
         EXPECT_EQ(2013, std::get<ModelYear>(info.manufactureOrModelDate).year);
         EXPECT_TRUE(info.relativeAddress.empty());
+    }
+}
+
+// This test can be folded into DisplayIdentificationTest#deviceProductInfo once
+// the flag is removed.
+TEST(DisplayIdentificationTest, deviceProductInfoWithEdidStructureMetadataAndVideoInputType) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
+                              parse_edid_version_and_input_type,
+                      true);
+
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getInternalEdid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(3, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::DIGITAL, info.inputType);
+    }
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getExternalEdid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(4, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::DIGITAL, info.inputType);
+    }
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getExternalEedid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(3, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::DIGITAL, info.inputType);
+    }
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getPanasonicTvEdid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(3, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::DIGITAL, info.inputType);
+    }
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getHisenseTvEdid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(3, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::ANALOG, info.inputType);
+    }
+    {
+        const auto displayIdInfo =
+                parseDisplayIdentificationData(0, getCtlDisplayEdid(),
+                                               android::ScreenPartStatus::UNSUPPORTED);
+        ASSERT_TRUE(displayIdInfo);
+        ASSERT_TRUE(displayIdInfo->deviceProductInfo);
+        const auto& info = *displayIdInfo->deviceProductInfo;
+        EXPECT_EQ(1, info.edidStructureMetadata.version);
+        EXPECT_EQ(4, info.edidStructureMetadata.revision);
+        EXPECT_EQ(DeviceProductInfo::InputType::DIGITAL, info.inputType);
     }
 }
 

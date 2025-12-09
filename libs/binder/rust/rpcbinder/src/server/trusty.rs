@@ -16,10 +16,13 @@
 
 use alloc::boxed::Box;
 use binder::{unstable_api::AsNative, SpIBinder};
-use libc::size_t;
-use log::error;
-use std::ffi::{c_char, c_void};
-use std::ptr;
+use binder_rpc_server_bindgen::{
+    trusty_peer_id, AIBinder, ARpcServerTrusty, ARpcServerTrusty_delete,
+    ARpcServerTrusty_handleChannelCleanup, ARpcServerTrusty_handleConnect,
+    ARpcServerTrusty_handleDisconnect, ARpcServerTrusty_handleMessage,
+    ARpcServerTrusty_newPerSession,
+};
+use std::{ffi::c_void, ptr};
 use tipc::{
     ClientIdentifier, ConnectResult, Handle, MessageResult, PortCfg, TipcError, UnbufferedService,
     Uuid,
@@ -38,7 +41,7 @@ impl<T> PerSessionCallback for T where
 }
 
 pub struct RpcServer {
-    inner: *mut binder_rpc_server_bindgen::ARpcServerTrusty,
+    inner: *mut ARpcServerTrusty,
 }
 
 /// SAFETY: The opaque handle points to a heap allocation
@@ -52,7 +55,7 @@ impl Drop for RpcServer {
         // SAFETY: `ARpcServerTrusty_delete` is the correct destructor to call
         // on pointers returned by `ARpcServerTrusty_new`.
         unsafe {
-            binder_rpc_server_bindgen::ARpcServerTrusty_delete(self.inner);
+            ARpcServerTrusty_delete(self.inner);
         }
     }
 }
@@ -69,9 +72,19 @@ impl RpcServer {
     /// for every new connection. The closure gets the `ClientIdentifier` of
     /// the peer and can accept or reject that connection.
     pub fn new_per_session<F: PerSessionCallback>(f: F) -> RpcServer {
-        // SAFETY: Takes ownership of the returned handle, which has correct refcount.
+        // Safety: ARpcServerTrusty_newPerSession promises that while the returned ARpcServerTrusty
+        // is alive, it will pass the pointer to f as the argument to any calls it makes to
+        // per_session_callback_wrapper. Then when the ARpcServerTrusty's lifetime ends, it will
+        // pass the pointer to f to call per_session_callback_deleter. No other calls will be made
+        // to per_session_callback_deleter.
+        //
+        // The pointer to f is currently valid to pass to both functions (i.e. it's valid to convert
+        // to &mut F or to Box<F>), and it will remain a valid argument after any calls to
+        // per_session_callback_wrapper. We don't retain any other pointers or references to f, so
+        // nothing other than ARpcServerTrusty will modify it, so ARpcServerTrusty's use of it must
+        // be sound.
         let inner = unsafe {
-            binder_rpc_server_bindgen::ARpcServerTrusty_newPerSession(
+            ARpcServerTrusty_newPerSession(
                 Some(per_session_callback_wrapper::<F>),
                 Box::into_raw(Box::new(f)).cast(),
                 Some(per_session_callback_deleter::<F>),
@@ -81,36 +94,30 @@ impl RpcServer {
     }
 }
 
+/// # Safety
+///   * cb_ptr must be a pointer which is valid to convert into a &mut F, i.e.
+///     * It's properly aligned for F,
+///     * non-null,
+///     * dereferenceable
+///     * points to a valid value of type F (esp. it hasn't been dropped by drop_in_place,
+///       per_session_callback_deleter, etc.)
+///     * not aliased for the duration of this call
+///   * peer is similarly valid to convert to &trusty_peer_id
+///   * peer_len is the correct runtime length for *peer
 unsafe extern "C" fn per_session_callback_wrapper<F: PerSessionCallback>(
-    client_id_ptr: *const c_void,
-    len: size_t,
-    cb_ptr: *mut c_char,
-) -> *mut binder_rpc_server_bindgen::AIBinder {
-    // SAFETY: This callback should only get called while the RpcServer is alive.
+    peer: *const trusty_peer_id,
+    peer_len: usize,
+    cb_ptr: *mut c_void,
+) -> *mut AIBinder {
+    // SAFETY: Function preconditions guarantee cb_ptr can be converted to a &mut F
     let cb = unsafe { &mut *cb_ptr.cast::<F>() };
 
-    if len < 1 {
-        return ptr::null_mut();
-    }
-    // SAFETY: We have checked that the length is at least 1
-    // We know that the pointer has not been freed at this point, because:
-    // 1) The pointer is allocated in the call to: `on_connect` or `on_new_connection` in the
-    //    implementation of the `UnbufferredService` trait for `RpcServer`.
-    // 2) `on_connect` and `on_new_connection` invokes `ARpcServerTrusty_handleConnect`, immediately
-    //    after the allocation.
-    // 3) this callback is invoked in the callpath of `ARpcServerTrusty_handleConnect`.
-    // We know that there is no concurrent mutable access to the pointer because it is allocated
-    // and accessed in the same (single) process as per the callpath described above.
-    let client_id_data = unsafe { std::slice::from_raw_parts(client_id_ptr.cast(), len) };
-    let client_id = match ClientIdentifier::from_tagged_bytes(client_id_data) {
-        Ok(c) => c,
-        Err(_) => {
-            error!("error in reconstructing the ClientIdentifier from pointer and length");
-            return ptr::null_mut();
-        }
-    };
+    // SAFETY: Function preconditions guarantee peer is valid to convert to &trusty_peer_id
+    let peer = unsafe { &*peer };
+    // SAFETY: Function preconditions guarantee peer_len is the correct length for *peer
+    let peer = unsafe { trusty_sys::TrustyPeerIdRef::from_raw_parts(peer, peer_len) };
 
-    cb(client_id).map_or_else(ptr::null_mut, |b| {
+    cb(ClientIdentifier::from_c_repr(peer)).map_or_else(ptr::null_mut, |b| {
         // Prevent AIBinder_decStrong from being called before AIBinder_toPlatformBinder.
         // The per-session callback in C++ is supposed to call AIBinder_decStrong on the
         // pointer we return here.
@@ -118,12 +125,16 @@ unsafe extern "C" fn per_session_callback_wrapper<F: PerSessionCallback>(
     })
 }
 
-unsafe extern "C" fn per_session_callback_deleter<F: PerSessionCallback>(cb: *mut c_char) {
-    // SAFETY: shared_ptr calls this to delete the pointer we gave it.
-    // It should only get called once the last shared reference goes away.
-    unsafe {
-        drop(Box::<F>::from_raw(cb.cast()));
-    }
+/// # Safety
+///   * cb must be a pointer previously obtained with Box::<F>::into_raw.
+///   * cb must _still_ point to a valid F, i.e. Box::from_raw, per_session_callback_deleter, or
+///     drop_in_place, etc. must not have already been called on it.
+///   * *cb must not be accessed or referenced by anything else during or after this function call.
+unsafe extern "C" fn per_session_callback_deleter<F: PerSessionCallback>(cb: *mut c_void) {
+    // Safety: Function preconditions mean we have ownership over the underlying F value and since
+    // was created with Box::into_raw, we can convert back into a Box.
+    let cb = unsafe { Box::<F>::from_raw(cb.cast()) };
+    drop(cb);
 }
 
 pub struct RpcServerConnection {
@@ -138,7 +149,7 @@ impl Drop for RpcServerConnection {
     fn drop(&mut self) {
         // We do not need to close handle_fd since we do not own it.
         unsafe {
-            binder_rpc_server_bindgen::ARpcServerTrusty_handleChannelCleanup(self.ctx);
+            ARpcServerTrusty_handleChannelCleanup(self.ctx);
         }
     }
 }
@@ -148,34 +159,12 @@ impl UnbufferedService for RpcServer {
 
     fn on_connect(
         &self,
-        _port: &PortCfg,
+        port: &PortCfg,
         handle: &Handle,
         peer: &Uuid,
     ) -> tipc::Result<ConnectResult<Self::Connection>> {
-        let mut conn = RpcServerConnection { ctx: std::ptr::null_mut() };
-        let client_identifier = ClientIdentifier::UUID(peer.clone());
-        let mut data = client_identifier.as_tagged_bytes();
-        let len = data.len();
-        // SAFETY: This unsafe block calls into a C++ function, which is considered safe, i.e. it
-        // does not cause undefined behavior for valid inputs (see below), returns an integer which
-        // indicates success or error, does not allocate or deallocate memory that Rust owns.
-        // The inputs passed into the C++ function are valid: Trusty is single threaded, so there is
-        // no concurrent access to `sef.inner`` and other inputs are not freed/deallocated until the
-        // function returns. Correct length of the data pointed to by the pointer is passed in.
-        let rc = unsafe {
-            binder_rpc_server_bindgen::ARpcServerTrusty_handleConnect(
-                self.inner,
-                handle.as_raw_fd(),
-                data.as_mut_ptr() as *const c_void,
-                len,
-                &mut conn.ctx,
-            )
-        };
-        if rc < 0 {
-            Err(TipcError::from_uapi(rc.into()))
-        } else {
-            Ok(ConnectResult::Accept(conn))
-        }
+        let peer = ClientIdentifier::UUID(peer.clone());
+        self.on_new_connection(port, handle, &peer)
     }
 
     fn on_message(
@@ -184,7 +173,7 @@ impl UnbufferedService for RpcServer {
         _handle: &Handle,
         _buffer: &mut [u8],
     ) -> tipc::Result<MessageResult> {
-        let rc = unsafe { binder_rpc_server_bindgen::ARpcServerTrusty_handleMessage(conn.ctx) };
+        let rc = unsafe { ARpcServerTrusty_handleMessage(conn.ctx) };
         if rc < 0 {
             Err(TipcError::from_uapi(rc.into()))
         } else {
@@ -193,30 +182,34 @@ impl UnbufferedService for RpcServer {
     }
 
     fn on_disconnect(&self, conn: &Self::Connection) {
-        unsafe { binder_rpc_server_bindgen::ARpcServerTrusty_handleDisconnect(conn.ctx) };
+        unsafe { ARpcServerTrusty_handleDisconnect(conn.ctx) };
     }
 
     fn on_new_connection(
         &self,
         _port: &PortCfg,
         handle: &Handle,
-        client_identifier: &ClientIdentifier,
+        peer: &ClientIdentifier,
     ) -> tipc::Result<ConnectResult<Self::Connection>> {
         let mut conn = RpcServerConnection { ctx: std::ptr::null_mut() };
-        let mut data = client_identifier.as_tagged_bytes();
-        let len = data.len();
-        // SAFETY: This unsafe block calls into a C++ function, which is considered safe, i.e. it
-        // does not cause undefined behavior for valid inputs (see below), returns an integer which
-        // indicates success or error, does not allocate or deallocate memory that Rust owns.
-        // The inputs passed into the C++ function are valid: Trusty is single threaded, so there is
-        // no concurrent access to `sef.inner`` and other inputs are not freed/deallocated until the
-        // function returns. Correct length of the data pointed to by the pointer is passed in.
+        let peer = peer.c_repr();
+        let (peer_ref, peer_len) = peer.as_generic().into_raw_parts();
+
+        // SAFETY:
+        //   * Because of invariants on RpcServer, self.inner is a pointer obtained from
+        //     ARpcServerTrusty_newPerSession, which has not yet been passed to
+        //     ARpcServerTrusty_delete. RpcServer is !Sync, so self.inner isn't concurrently
+        //     accessed. Therefore, it's valid to call ARpcServerTrusty methods on it.
+        //   * handle is valid for borrowing since we have &Handle
+        //   * peer_ref is a correctly constructed trusty_peer_id and peer_len is its correct
+        //     runtime length since we got them from TrustyPeerIdRef::into_raw_parts.
+        //   * conn.ctx will be valid for writing for the duration of the call since it's a local
         let rc = unsafe {
-            binder_rpc_server_bindgen::ARpcServerTrusty_handleConnect(
+            ARpcServerTrusty_handleConnect(
                 self.inner,
                 handle.as_raw_fd(),
-                data.as_mut_ptr() as *const c_void,
-                len,
+                peer_ref,
+                peer_len,
                 &mut conn.ctx,
             )
         };

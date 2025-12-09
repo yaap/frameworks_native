@@ -36,6 +36,22 @@
 
 namespace android {
 
+namespace {
+    bool waitForFrozenListenerRemovalCompletion() {
+#if defined(LIBBINDER_DEFER_BC_REQUEST_FREEZE_NOTIFICATION)
+        return true;
+#else
+        return false;
+#endif
+    }
+
+#if defined(LIBBINDER_BPBINDER_DECSTRONG_LAST)
+    constexpr bool kDecStrongLast = true;
+#else
+    constexpr bool kDecStrongLast = false;
+#endif
+}
+
 using android::binder::unique_fd;
 
 // ---------------------------------------------------------------------------
@@ -292,8 +308,20 @@ std::optional<int32_t> BpBinder::getDebugBinderHandle() const {
     }
 }
 
+// Macro makes this simpler to call, since we need to allocate, and
+// we return something with a temporary lifetime.
+//
+// If you are missing an interface descriptor, try adding:
+//   'if (getpid() > 500) getInterfaceDescriptor();' in onFirstRef
+#define BPBINDER_BEST_DESCRIPTOR_LOCKED \
+    (isDescriptorCachedLocked() ? String8(mDescriptorCache).c_str() : "(not cached)")
+
 bool BpBinder::isDescriptorCached() const {
     RpcMutexUniqueLock _l(mLock);
+    return isDescriptorCachedLocked();
+}
+
+bool BpBinder::isDescriptorCachedLocked() const {
     return mDescriptorCache.c_str() != kDescriptorUninit.c_str();
 }
 
@@ -404,9 +432,9 @@ status_t BpBinder::transact(
 
         if (data.dataSize() > binder::kLogTransactionsOverBytes) {
             RpcMutexUniqueLock _l(mLock);
-            ALOGW("Large outgoing transaction of %zu bytes, interface descriptor %s, code %d was "
-                  "sent",
-                  data.dataSize(), String8(mDescriptorCache).c_str(), code);
+            ALOGW("Large outgoing transaction of %zu bytes, interface descriptor '%s', code %d, "
+                  "flags %d was sent",
+                  data.dataSize(), BPBINDER_BEST_DESCRIPTOR_LOCKED, code, flags);
         }
 
         if (status == DEAD_OBJECT) mAlive = 0;
@@ -563,6 +591,25 @@ void BpBinder::sendObituary()
     }
 }
 
+void BpBinder::onFrozenStateChangeListenerRemoved() {
+    LOG_ALWAYS_FATAL_IF(isRpcBinder(),
+                        "onFrozenStateChangeListenerRemoved() is not supported for RPC Binder.");
+    LOG_ALWAYS_FATAL_IF(!kEnableKernelIpc, "Binder kernel driver disabled at build time");
+    if (!waitForFrozenListenerRemovalCompletion()) {
+        return;
+    }
+    {
+        RpcMutexUniqueLock _l(mLock);
+        if (mFrozen->callbacks.size() == 0) {
+            mFrozen.reset();
+        } else {
+            mFrozen->isPendingClear = false;
+            std::ignore =
+                    IPCThreadState::self()->addFrozenStateChangeCallback(binderHandle(), this);
+        }
+    }
+}
+
 status_t BpBinder::addFrozenStateChangeCallback(const wp<FrozenStateChangeCallback>& callback) {
     LOG_ALWAYS_FATAL_IF(isRpcBinder(),
                         "addFrozenStateChangeCallback() is not supported for RPC Binder.");
@@ -633,6 +680,9 @@ status_t BpBinder::removeFrozenStateChangeCallback(const wp<FrozenStateChangeCal
             mFrozen->callbacks.removeAt(i);
             if (mFrozen->callbacks.size() == 0) {
                 ALOGV("Clearing freeze notification: %p handle %d\n", this, binderHandle());
+                if (mFrozen->isPendingClear) {
+                    return NO_ERROR;
+                }
                 status_t status =
                         IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(),
                                                                                 this);
@@ -642,7 +692,12 @@ status_t BpBinder::removeFrozenStateChangeCallback(const wp<FrozenStateChangeCal
                           "%p handle %d\n",
                           statusToString(status).c_str(), this, binderHandle());
                 }
-                mFrozen.reset();
+                if (waitForFrozenListenerRemovalCompletion()) {
+                    mFrozen->isPendingClear = true;
+                    mFrozen->initialStateReceived = false;
+                } else {
+                    mFrozen.reset();
+                }
             }
             return NO_ERROR;
         }
@@ -660,6 +715,9 @@ void BpBinder::onFrozenStateChanged(bool isFrozen) {
 
     RpcMutexUniqueLock _l(mLock);
     if (!mFrozen) {
+        return;
+    }
+    if (mFrozen->isPendingClear) {
         return;
     }
     bool stateChanged = !mFrozen->initialStateReceived || mFrozen->isFrozen != isFrozen;
@@ -796,22 +854,33 @@ void BpBinder::onLastStrongRef(const void* /*id*/) {
         printRefs();
     }
     IPCThreadState* ipc = IPCThreadState::self();
-    if (ipc) ipc->decStrongHandle(binderHandle());
+    if (ipc && !kDecStrongLast) ipc->decStrongHandle(binderHandle());
 
     mLock.lock();
     Vector<Obituary>* obits = mObituaries;
     if(obits != nullptr) {
         if (!obits->isEmpty()) {
-            ALOGV("onLastStrongRef automatically unlinking death recipients: %s",
-                  String8(mDescriptorCache).c_str());
+            ALOGV("onLastStrongRef automatically unlinking death recipients for descriptor: '%s'",
+                  BPBINDER_BEST_DESCRIPTOR_LOCKED);
         }
 
         if (ipc) ipc->clearDeathNotification(binderHandle(), this);
         mObituaries = nullptr;
     }
     if (mFrozen != nullptr) {
-        std::ignore = IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(), this);
-        mFrozen.reset();
+        if (waitForFrozenListenerRemovalCompletion()) {
+            if (!mFrozen->isPendingClear) {
+                std::ignore =
+                        IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(),
+                                                                                this);
+                mFrozen->isPendingClear = true;
+            }
+            mFrozen->callbacks.clear();
+        } else {
+            std::ignore =
+                    IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(), this);
+            mFrozen.reset();
+        }
     }
     mLock.unlock();
 
@@ -821,6 +890,8 @@ void BpBinder::onLastStrongRef(const void* /*id*/) {
         // are no longer linked?
         delete obits;
     }
+
+    if (ipc && kDecStrongLast) ipc->decStrongHandle(binderHandle());
 }
 
 bool BpBinder::onIncStrongAttempted(uint32_t /*flags*/, const void* /*id*/)

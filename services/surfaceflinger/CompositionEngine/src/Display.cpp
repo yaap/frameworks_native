@@ -55,7 +55,6 @@ Display::~Display() = default;
 void Display::setConfiguration(const compositionengine::DisplayCreationArgs& args) {
     mIdVariant = args.idVariant;
     mPowerAdvisor = args.powerAdvisor;
-    mHasPictureProcessing = args.hasPictureProcessing;
     mMaxLayerPictureProfiles = args.maxLayerPictureProfiles;
     editState().isSecure = args.isSecure;
     editState().isProtected = args.isProtected;
@@ -489,7 +488,12 @@ Display::getOverlaySupport() {
 }
 
 bool Display::hasPictureProcessing() const {
-    return mHasPictureProcessing;
+    const auto halDisplayIdOpt = getDisplayIdVariant().and_then(asHalDisplayId<DisplayIdVariant>);
+    if (!halDisplayIdOpt) {
+        return false;
+    }
+    return getCompositionEngine().getHwComposer().hasDisplayCapability(
+            *halDisplayIdOpt, DisplayCapability::PICTURE_PROCESSING);
 }
 
 int32_t Display::getMaxLayerPictureProfiles() const {

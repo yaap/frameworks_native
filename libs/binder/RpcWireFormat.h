@@ -97,6 +97,10 @@ enum : uint32_t {
     RPC_COMMAND_DEC_STRONG,
 };
 
+enum : uint64_t {
+    RPC_SPECIAL_TRANSACTION_ADDRESS = 0,
+};
+
 /**
  * These commands are used when the address in an RpcWireTransaction is zero'd
  * out (no address). This allows the transact/reply flow to be used for

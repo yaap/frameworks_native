@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.Debug"
 
 #include "Debug.h"
 #include "BuildFlags.h"
@@ -186,7 +187,7 @@ void printHexData(int32_t indent, const void *buf, size_t length,
     if ((int32_t)length < 0) {
         if (singleLineBytesCutoff < 0) func(cookie, "\n");
         char bufLocal[64];
-        sprintf(bufLocal, "(bad length: %zu)", length);
+        snprintf(bufLocal, sizeof(bufLocal), "(bad length: %zu)", length);
         func(cookie, bufLocal);
         return;
     }
@@ -212,7 +213,7 @@ void printHexData(int32_t indent, const void *buf, size_t length,
 
         char* c = buffer;
         if (!oneLine && !cStyle) {
-            sprintf(c, "0x%08x: ", (int)offset);
+            snprintf(c, sizeof(buffer), "0x%08x: ", (int)offset);
             c += 12;
         }
 

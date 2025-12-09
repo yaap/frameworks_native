@@ -18,8 +18,6 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
-#undef LOG_TAG
-#define LOG_TAG "HwcComposer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "HidlComposerHal.h"

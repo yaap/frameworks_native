@@ -48,13 +48,13 @@
 #include <android/gui/BnJankListener.h>
 #include <android/gui/ISurfaceComposerClient.h>
 #include <android/gui/RegionSamplingDescriptor.h>
+#include <android/gui/TransactionBarrier.h>
 
 #include <gui/BufferReleaseChannel.h>
 #include <gui/CpuConsumer.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <gui/LayerState.h>
-#include <gui/SimpleTransactionState.h>
 #include <gui/SurfaceControl.h>
 #include <gui/TransactionState.h>
 #include <gui/WindowInfosListenerReporter.h>
@@ -81,7 +81,8 @@ struct SurfaceControlStats {
                         std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence,
                         const sp<Fence>& presentFence, const sp<Fence>& prevReleaseFence,
                         std::optional<uint32_t> hint, FrameEventHistoryStats eventStats,
-                        uint32_t currentMaxAcquiredBufferCount)
+                        uint32_t currentMaxAcquiredBufferCount,
+                        std::optional<gui::CornerRadii> cornerRadii)
           : surfaceControl(sc),
             latchTime(latchTime),
             acquireTimeOrFence(std::move(acquireTimeOrFence)),
@@ -89,7 +90,8 @@ struct SurfaceControlStats {
             previousReleaseFence(prevReleaseFence),
             transformHint(hint),
             frameEventStats(eventStats),
-            currentMaxAcquiredBufferCount(currentMaxAcquiredBufferCount) {}
+            currentMaxAcquiredBufferCount(currentMaxAcquiredBufferCount),
+            cornerRadii(cornerRadii) {}
 
     sp<SurfaceControl> surfaceControl;
     nsecs_t latchTime = -1;
@@ -99,6 +101,7 @@ struct SurfaceControlStats {
     std::optional<uint32_t> transformHint = 0;
     FrameEventHistoryStats frameEventStats;
     uint32_t currentMaxAcquiredBufferCount = 0;
+    std::optional<gui::CornerRadii> cornerRadii = gui::CornerRadii(0.0f);
 };
 
 using TransactionCompletedCallbackTakesContext =
@@ -123,7 +126,7 @@ using TrustedPresentationCallback = std::function<void(void*, bool)>;
 
 class ReleaseCallbackThread {
 public:
-    void addReleaseCallback(const ReleaseCallbackId, sp<Fence>);
+    void addReleaseCallback(const ReleaseCallbackId, sp<Fence>, bool removeFromCache);
     void threadMain();
 
 private:
@@ -131,7 +134,7 @@ private:
     std::mutex mMutex;
     bool mStarted GUARDED_BY(mMutex) = false;
     std::condition_variable mReleaseCallbackPending;
-    std::queue<std::tuple<const ReleaseCallbackId, const sp<Fence>>> mCallbackInfos
+    std::queue<std::tuple<const ReleaseCallbackId, const sp<Fence>, bool>> mCallbackInfos
             GUARDED_BY(mMutex);
 };
 
@@ -471,15 +474,13 @@ public:
         void releaseBufferIfOverwriting(const layer_state_t& state);
         static void mergeFrameTimelineInfo(FrameTimelineInfo& t, const FrameTimelineInfo& other);
 
-        SimpleTransactionState mSimpleState;
-        ComplexTransactionState mComplexState;
         // Tracks registered callbacks
         sp<TransactionCompletedListener> mTransactionCompletedListener = nullptr;
         // Prints debug logs when enabled.
         bool mLogCallPoints = false;
 
     protected:
-        MutableTransactionState mMutableState;
+        TransactionState mState;
         std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
                 mListenerCallbacks;
 
@@ -559,11 +560,13 @@ public:
         Transaction& setCrop(const sp<SurfaceControl>& sc, const Rect& crop);
         Transaction& setCrop(const sp<SurfaceControl>& sc, const FloatRect& crop);
         Transaction& setCornerRadius(const sp<SurfaceControl>& sc, float cornerRadius);
-        // Sets the client drawn corner radius for the layer. If both a corner radius and a client
-        // radius are sent to SF, the client radius will be used. This indicates that the corner
-        // radius is drawn by the client and not SurfaceFlinger.
+        Transaction& setCornerRadius(const sp<SurfaceControl>& sc, const gui::CornerRadii& radii);
+        // Sets the client drawn corner radius and the corresponding crop for the layer
+        // used by the client. If the client drawn radius and crop both match the radius and
+        // crop computed by SF, then SF will send a zero radius to RenderEngine
         Transaction& setClientDrawnCornerRadius(const sp<SurfaceControl>& sc,
-                                                float clientDrawnCornerRadius);
+                                                const gui::CornerRadii& radii,
+                                                const FloatRect& crop);
         Transaction& setBackgroundBlurRadius(const sp<SurfaceControl>& sc,
                                              int backgroundBlurRadius);
         Transaction& setBackgroundBlurScale(const sp<SurfaceControl>& sc,
@@ -803,10 +806,28 @@ public:
 
         /**
          * Configures the relative importance of the contents of the layer with respect to the app's
-         * user experience. A lower priority value will give the layer preferred access to limited
-         * resources, such as picture processing, over a layer with a higher priority value.
+         * user experience. A higher priority value will give the layer preferred access to limited
+         * resources, such as picture processing, over a layer with a lower priority value.
          */
         Transaction& setContentPriority(const sp<SurfaceControl>& sc, int32_t contentPriority);
+
+        /**
+         * Configures the importance of the contents of the layers from the system's perspective. A
+         * higher priority value will give the layer preferred access to limited resource. This
+         * function is supposed to be called by the system server.
+         */
+        Transaction& setSystemContentPriority(const sp<SurfaceControl>& sc,
+                                              int32_t systemContentPriority);
+
+        /**
+         * Adds a barrier to the transaction.
+         *
+         * Transaction barriers are an interprocess synchronization mechanism.
+         * A transaction with a WAIT barrier will remain queued until a SIGNAL
+         * transaction for this barrier is applied.  In this way, transactions
+         * can be reliably sequenced.
+         */
+        Transaction& addTransactionBarrier(gui::TransactionBarrier barrier);
 
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
@@ -895,6 +916,8 @@ public:
     status_t removeWindowInfosListener(const sp<gui::WindowInfosListener>& windowInfosListener);
 
     static void notifyShutdown();
+
+    void removeBufferFromLocalCache(uint64_t bufferId);
 
 protected:
     ReleaseCallbackThread mReleaseCallbackThread;
@@ -1084,7 +1107,7 @@ public:
     // BnTransactionCompletedListener overrides
     void onTransactionCompleted(ListenerStats stats) override;
     void onReleaseBuffer(ReleaseCallbackId, sp<Fence> releaseFence,
-                         uint32_t currentMaxAcquiredBufferCount) override;
+                         uint32_t currentMaxAcquiredBufferCount, bool removeFromCache) override;
 
     void removeReleaseBufferCallback(const ReleaseCallbackId& callbackId);
 

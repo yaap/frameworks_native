@@ -34,7 +34,7 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-static const SkString kMixString(R"(
+const SkString kEffectSource_BlurFilter_MixEffect(R"(
     uniform shader blurredInput;
     uniform shader originalInput;
     uniform float mixFactor;
@@ -70,13 +70,7 @@ static SkMatrix getShaderTransform(const SkCanvas* canvas, const SkRect& blurRec
 
 BlurFilter::BlurFilter(RuntimeEffectManager& effectManager, const float maxCrossFadeRadius)
       : mMaxCrossFadeRadius(maxCrossFadeRadius),
-        mMixEffect(
-                maxCrossFadeRadius > 0
-                        ? effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
-                                                                            kBlurFilter_MixEffect,
-                                                                    "BlurFilter_MixEffect",
-                                                                    kMixString)
-                        : nullptr) {}
+        mMixEffect(effectManager.mKnownEffects[kBlurFilter_MixEffect]) {}
 
 float BlurFilter::getMaxCrossFadeRadius() const {
     return mMaxCrossFadeRadius;

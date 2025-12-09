@@ -647,7 +647,7 @@ void GraphicsEnv::updateAngleFeatureOverrides() {
         return;
     }
 
-    mFeatureOverrides = gpuService->getFeatureOverrides();
+    gpuService->getFeatureOverrides(mFeatureOverrides);
 }
 
 void GraphicsEnv::getAngleFeatureOverrides(std::vector<const char*>& enabled,

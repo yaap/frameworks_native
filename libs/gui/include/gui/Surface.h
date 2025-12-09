@@ -132,6 +132,11 @@ public:
     explicit Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controlledByApp = false,
                      const sp<IBinder>& surfaceControlHandle = nullptr);
 
+    /*
+     * Get the underlying Surface from the given ANativeWindow.
+     */
+    static sp<Surface> from(ANativeWindow* anw);
+
     /* getIGraphicBufferProducer() returns the IGraphicBufferProducer this
      * Surface was created with. Usually it's an error to use the
      * IGraphicBufferProducer while the Surface is connected.
@@ -505,7 +510,9 @@ protected:
 
     void querySupportedTimestampsLocked() const;
 
-    void freeAllBuffers();
+    void clearBuffersForDisconnectLocked() REQUIRES(mMutex);
+    void freeUndequeuedBuffersLocked() REQUIRES(mMutex);
+
     int getSlotFromBufferLocked(const sp<GraphicBuffer>& buffer) const;
 
     void getDequeueBufferInputLocked(IGraphicBufferProducer::DequeueBufferInput* dequeueInput);
@@ -521,11 +528,15 @@ protected:
             const IGraphicBufferProducer::QueueBufferInput& queueBufferInput);
 
     void onBufferQueuedLocked(int slot, sp<Fence> fence,
-            const IGraphicBufferProducer::QueueBufferOutput& output);
+                              const IGraphicBufferProducer::QueueBufferOutput& output)
+            REQUIRES(mMutex);
 
     struct BufferSlot {
         sp<GraphicBuffer> buffer;
         Region dirtyRegion;
+        // This buffer/slot was dequeued when the underlying IGBP sent a RELEASE_ALL_BUFFERS flag,
+        // and we must release this buffer on detach/cancel/queue.
+        bool requiresFreeOnReturn = false;
     };
 
     // mSurfaceTexture is the interface to the surface texture server. All
@@ -550,6 +561,17 @@ protected:
 #else
     BufferSlot mSlots[NUM_BUFFER_SLOTS];
 #endif
+
+    struct BufferHash {
+        std::size_t operator()(const sp<GraphicBuffer>& buffer) const {
+            return std::hash<GraphicBuffer*>{}(buffer.get());
+        }
+    };
+
+    // mLeakedBuffers holds references to buffers that were dequeued at the time of a disconnection.
+    // The contract for ANW's dequeue implies that a reference is held onto these until they're
+    // given back to the Surface via queue or cancel.
+    std::unordered_set<sp<GraphicBuffer>, BufferHash> mLeakedBuffers;
 
     // mReqWidth is the buffer width that will be requested at the next dequeue
     // operation. It is initialized to 1.
@@ -662,6 +684,7 @@ protected:
     // must be used from the lock/unlock thread
     sp<GraphicBuffer>           mLockedBuffer;
     sp<GraphicBuffer>           mPostedBuffer;
+    bool                        mIsConnected;
     bool                        mConnectedToCpu;
 
     // When a CPU producer is attached, this reflects the region that the

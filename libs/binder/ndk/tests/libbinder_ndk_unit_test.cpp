@@ -25,6 +25,7 @@
 #include <android/binder_process.h>
 #include <gtest/gtest.h>
 #include <iface/iface.h>
+#include <selinux/selinux.h>
 #include <utils/Looper.h>
 
 // warning: this is assuming that libbinder_ndk is using the same copy
@@ -256,7 +257,7 @@ int lazyService(const char* instance) {
 bool isServiceRunning(const char* serviceName) {
     static const sp<android::IServiceManager> sm(android::defaultServiceManager());
     const Vector<String16> services = sm->listServices();
-    for (const auto service : services) {
+    for (const auto& service : services) {
         if (service == String16(serviceName)) return true;
     }
     return false;
@@ -1098,9 +1099,10 @@ TEST(NdkBinder, CheckServiceAccessOk) {
 }
 
 TEST(NdkBinder, CheckServiceAccessNotOk) {
-    EXPECT_FALSE(AServiceManager_checkServiceAccess(
-            "u:r:some_unknown_sid:s0", 0, 0, "adb",
-            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
+    bool is_enforcing = security_getenforce() == 1;
+    EXPECT_NE(is_enforcing, AServiceManager_checkServiceAccess(
+                                    "u:r:some_unknown_sid:s0", 0, 0, "adb",
+                                    AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
 }
 
 TEST(NdkBinder, InvalidCheckServiceAccessArgs) {
@@ -1116,6 +1118,19 @@ TEST(NdkBinder, InvalidCheckServiceAccessArgs) {
                          "u:r:su:s0", 0, 0, nullptr,
                          AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND),
                  "nullptr");
+}
+
+TEST(NdkBinder, SetMinThreads) {
+    ndk::SpAIBinder binder = ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder();
+    EXPECT_EQ(STATUS_OK, AIBinder_setMinRpcThreads(binder.get(), 10));
+}
+
+TEST(NdkBinder, SetMinThreadsNull) {
+    EXPECT_EQ(STATUS_UNEXPECTED_NULL, AIBinder_setMinRpcThreads(nullptr, 10));
+}
+
+TEST(NdkBinder, SetMinThreadsZero) {
+    EXPECT_EQ(STATUS_BAD_VALUE, AIBinder_setMinRpcThreads(nullptr, 0));
 }
 
 static void addOne(int* to) {

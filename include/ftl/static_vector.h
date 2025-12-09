@@ -373,7 +373,7 @@ class StaticVector final : details::ArrayTraits<T>,
   }
 
   size_type size_ = 0;
-  std::aligned_storage_t<sizeof(value_type), alignof(value_type)> data_[N];
+  struct { alignas(value_type) std::byte data[sizeof(value_type)]; } data_[N];
 };
 
 // Deduction guide for array constructor.

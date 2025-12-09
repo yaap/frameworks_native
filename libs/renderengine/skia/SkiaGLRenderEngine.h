@@ -60,6 +60,7 @@ protected:
     // rendering backend
     virtual SkiaRenderEngine::Contexts createContexts();
     bool supportsForwardPixelKill() const override;
+    bool supportsFastRotatedClipRRectAA() const override;
     bool supportsProtectedContentImpl() const override;
     bool useProtectedContextImpl(GrProtected isProtected) override;
     void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;

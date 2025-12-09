@@ -16,9 +16,6 @@
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
-#undef LOG_TAG
-#define LOG_TAG "VsyncModulator"
-
 #include "VsyncModulator.h"
 
 #include <android/gui/EarlyWakeupInfo.h>

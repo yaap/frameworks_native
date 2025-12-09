@@ -56,7 +56,7 @@ void addRawMotionRange(InputDeviceInfo& deviceInfo, int32_t androidAxis,
 
 CapturedTouchpadEventConverter::CapturedTouchpadEventConverter(
         InputReaderContext& readerContext, const InputDeviceContext& deviceContext,
-        MultiTouchMotionAccumulator& motionAccumulator, int32_t deviceId)
+        MultiTouchMotionAccumulator& motionAccumulator, DeviceId deviceId)
       : mDeviceId(deviceId),
         mReaderContext(readerContext),
         mDeviceContext(deviceContext),

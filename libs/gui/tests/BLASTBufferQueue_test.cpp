@@ -197,6 +197,10 @@ public:
 
     void dropBbq() { mBlastBufferQueueAdapter.clear(); }
 
+    void setCornerRadiiCallback(std::function<void(const gui::CornerRadii)> callback) {
+        mBlastBufferQueueAdapter->setCornerRadiiCallback(callback);
+    }
+
 private:
     sp<TestBLASTBufferQueue> mBlastBufferQueueAdapter;
 };
@@ -1440,6 +1444,42 @@ TEST_F(BLASTBufferQueueTest, TransformHint) {
     ASSERT_EQ(ui::Transform::ROT_0, static_cast<ui::Transform::RotationFlags>(transformHint));
 
     adapter.waitForCallbacks();
+}
+
+TEST_F(BLASTBufferQueueTest, SetCornerRadiiCallback) {
+    gui::CornerRadii capturedRadii;
+    bool callbackInvoked = false;
+    std::mutex mutex;
+    std::condition_variable cv;
+
+    auto callback = [&](const gui::CornerRadii& radii) {
+        std::unique_lock<std::mutex> lock(mutex);
+        capturedRadii = radii;
+        callbackInvoked = true;
+        cv.notify_one();
+    };
+    BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+    adapter.setCornerRadiiCallback(callback);
+
+    gui::CornerRadii expectedRadii(10.0f, 20.0f, 30.0f, 40.0f);
+
+    sp<IGraphicBufferProducer> igbProducer;
+    setUpProducer(adapter, igbProducer);
+
+    Transaction syncTransaction;
+    syncTransaction.setCornerRadius(mSurfaceControl, expectedRadii);
+    adapter.setSyncTransaction(syncTransaction, true /* acquireSingleBuffer */);
+    queueBuffer(igbProducer, 255, 0, 0, 0);
+    syncTransaction.apply();
+
+    std::unique_lock<std::mutex> lock(mutex);
+    if (!callbackInvoked) {
+        ASSERT_NE(cv.wait_for(lock, std::chrono::seconds(3)), std::cv_status::timeout)
+                << "did not receive callback";
+    }
+
+    ASSERT_TRUE(callbackInvoked);
+    ASSERT_EQ(capturedRadii, expectedRadii);
 }
 
 // Verifies that we don't deadlock if BufferQueueProducer::cancelBuffer is called on a thread

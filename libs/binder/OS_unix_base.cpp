@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.OS_unix_base"
 
 #include "OS.h"
 #include "Utils.h"
@@ -125,8 +126,7 @@ ssize_t receiveMessageFromSocket(const RpcTransportFd& socket, iovec* iovs, int 
                 .msg_control = msgControlBuf,
                 .msg_controllen = sizeof(msgControlBuf),
         };
-        ssize_t processSize =
-                TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, MSG_NOSIGNAL | MSG_CMSG_CLOEXEC));
+        ssize_t processSize = TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, MSG_CMSG_CLOEXEC));
         if (processSize < 0) {
             return -1;
         }
@@ -160,7 +160,7 @@ ssize_t receiveMessageFromSocket(const RpcTransportFd& socket, iovec* iovs, int 
             .msg_iovlen = static_cast<decltype(msg.msg_iovlen)>(niovs),
     };
 
-    return TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, MSG_NOSIGNAL));
+    return TEMP_FAILURE_RETRY(recvmsg(socket.fd.get(), &msg, 0));
 }
 
 } // namespace android::binder::os

@@ -16,8 +16,6 @@
 // #define LOG_NDEBUG 0
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
 
 #include <common/trace.h>
 #include <log/log.h>
@@ -110,8 +108,9 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     dataspaceRequested = false;
     hdrMetadata.validTypes = 0;
     mNotDefCmpState.surfaceDamageRegion = Region::INVALID_REGION;
-    cornerRadius = 0.0f;
-    clientDrawnCornerRadius = 0.0f;
+    cornerRadii = {};
+    clientDrawnCornerRadii = {};
+    clientDrawnCornerRadiusCrop = {0, 0, 0, 0};
     backgroundBlurRadius = 0;
     api = -1;
     hasColorTransform = false;
@@ -354,7 +353,8 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
     }
 
     if (clientState.what & layer_state_t::eClientDrawnCornerRadiusChanged) {
-        clientDrawnCornerRadius = clientState.clientDrawnCornerRadius;
+        clientDrawnCornerRadii = clientState.clientDrawnCornerRadii;
+        clientDrawnCornerRadiusCrop = clientState.clientDrawnCornerRadiusCrop;
         changes |= RequestedLayerState::Changes::Geometry;
     }
 

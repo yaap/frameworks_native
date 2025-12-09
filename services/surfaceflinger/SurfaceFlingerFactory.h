@@ -57,7 +57,6 @@ class VsyncController;
 namespace surfaceflinger {
 
 struct LayerCreationArgs;
-class NativeWindowSurface;
 
 // The interface that SurfaceFlinger uses to create all of the implementations
 // of each interface.
@@ -71,12 +70,6 @@ public:
     virtual sp<GraphicBuffer> createGraphicBuffer(uint32_t width, uint32_t height,
                                                   PixelFormat format, uint32_t layerCount,
                                                   uint64_t usage, std::string requestorName) = 0;
-    virtual void createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
-                                   sp<IGraphicBufferConsumer>* outConsumer,
-                                   bool consumerIsSurfaceFlinger) = 0;
-
-    virtual std::unique_ptr<surfaceflinger::NativeWindowSurface> createNativeWindowSurface(
-            const sp<IGraphicBufferProducer>&) = 0;
 
     virtual std::unique_ptr<compositionengine::CompositionEngine> createCompositionEngine() = 0;
 

@@ -293,7 +293,9 @@ TEST_F(OutputLayerDisplayFrameTest, correctForSimpleDefaultCase) {
 
 TEST_F(OutputLayerDisplayFrameTest, fullActiveTransparentRegionReturnsEmptyFrame) {
     mLayerFEState.transparentRegionHint = Region{Rect{0, 0, 1920, 1080}};
-    const Rect expected{0, 0, 0, 0};
+    const Rect expected = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? Rect(0, 0, 1920, 1080)
+            : Rect(0, 0, 0, 0);
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 

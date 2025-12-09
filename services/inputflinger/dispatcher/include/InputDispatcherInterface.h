@@ -25,6 +25,7 @@
 #include <gui/InputApplication.h>
 #include <gui/WindowInfo.h>
 #include <input/DisplayTopologyGraph.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/InputTransport.h>
 #include <unordered_map>
@@ -202,7 +203,7 @@ public:
      *
      * InputDispatcher is the source of truth of Pointer Capture.
      */
-    virtual void requestPointerCapture(const sp<IBinder>& windowToken, bool enabled) = 0;
+    virtual void requestPointerCapture(const sp<IBinder>& windowToken, PointerCaptureMode mode) = 0;
 
     /**
      * Sets the eligibility of a given display to enable pointer capture. If a display is marked

@@ -19,6 +19,8 @@
 #include <com_android_graphics_libgui_flags.h>
 #include <utils/StrongPointer.h>
 
+struct ANativeWindow;
+
 namespace android {
 
 class IGraphicBufferProducer;
@@ -59,6 +61,7 @@ typedef android::sp<android::IGraphicBufferProducer> MediaParcelableSurfaceType;
 #endif
 
 namespace mediaflagtools {
+sp<MediaSurfaceType> nativeWindowToSurfaceType(ANativeWindow* anw);
 sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp);
 sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<MediaSurfaceType>& mst);
 sp<SurfaceType> mediaSurfaceToCameraSurfaceType(const sp<MediaSurfaceType>& mst,

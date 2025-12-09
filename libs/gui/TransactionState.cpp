@@ -16,40 +16,13 @@
 
 #define LOG_TAG "TransactionState"
 #include <gui/LayerState.h>
-#include <gui/SimpleTransactionState.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/TransactionState.h>
 #include <private/gui/ParcelUtils.h>
 #include <algorithm>
+#include <numeric>
 
 namespace android {
-
-void SimpleTransactionState::clear() {
-    *this = SimpleTransactionState();
-}
-
-void SimpleTransactionState::merge(const SimpleTransactionState& other) {
-    // TODO(b/385156191) Consider merging desired present time.
-    mFlags |= other.mFlags;
-}
-
-status_t SimpleTransactionState::writeToParcel(Parcel* parcel) const {
-    SAFE_PARCEL(parcel->writeUint64, mId);
-    SAFE_PARCEL(parcel->writeUint32, mFlags);
-    SAFE_PARCEL(parcel->writeInt64, mDesiredPresentTime);
-    SAFE_PARCEL(parcel->writeBool, mIsAutoTimestamp);
-
-    return NO_ERROR;
-}
-
-status_t SimpleTransactionState::readFromParcel(const Parcel* parcel) {
-    SAFE_PARCEL(parcel->readUint64, &mId);
-    SAFE_PARCEL(parcel->readUint32, &mFlags);
-    SAFE_PARCEL(parcel->readInt64, &mDesiredPresentTime);
-    SAFE_PARCEL(parcel->readBool, &mIsAutoTimestamp);
-
-    return NO_ERROR;
-}
 
 void TransactionListenerCallbacks::clear() {
     *this = TransactionListenerCallbacks();
@@ -83,7 +56,12 @@ status_t TransactionListenerCallbacks::readFromParcel(const Parcel* parcel) {
     return NO_ERROR;
 }
 
-status_t ComplexTransactionState::writeToParcel(Parcel* parcel) const {
+status_t TransactionState::writeToParcel(Parcel* parcel) const {
+    SAFE_PARCEL(parcel->writeUint64, mId);
+    SAFE_PARCEL(parcel->writeUint32, mFlags);
+    SAFE_PARCEL(parcel->writeInt64, mDesiredPresentTime);
+    SAFE_PARCEL(parcel->writeBool, mIsAutoTimestamp);
+
     SAFE_PARCEL(parcel->writeParcelable, mFrameTimelineInfo);
 
     SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mUncacheBuffers.size()));
@@ -99,11 +77,27 @@ status_t ComplexTransactionState::writeToParcel(Parcel* parcel) const {
     for (const auto& e : mEarlyWakeupInfos) {
         e.writeToParcel(parcel);
     }
+    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mComposerStates.size()));
+    for (const auto& s : mComposerStates) {
+        SAFE_PARCEL(s.write, *parcel);
+    }
+
+    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mDisplayStates.size()));
+    for (const auto& d : mDisplayStates) {
+        SAFE_PARCEL(d.write, *parcel);
+    }
+
+    SAFE_PARCEL(parcel->writeParcelableVector, mBarriers);
 
     return NO_ERROR;
 }
 
-status_t ComplexTransactionState::readFromParcel(const Parcel* parcel) {
+status_t TransactionState::readFromParcel(const Parcel* parcel) {
+    SAFE_PARCEL(parcel->readUint64, &mId);
+    SAFE_PARCEL(parcel->readUint32, &mFlags);
+    SAFE_PARCEL(parcel->readInt64, &mDesiredPresentTime);
+    SAFE_PARCEL(parcel->readBool, &mIsAutoTimestamp);
+
     SAFE_PARCEL(parcel->readParcelable, &mFrameTimelineInfo);
 
     uint32_t count;
@@ -133,97 +127,33 @@ status_t ComplexTransactionState::readFromParcel(const Parcel* parcel) {
     }
     mEarlyWakeupInfos = std::move(earlyWakeupInfos);
 
-    return NO_ERROR;
-}
-
-status_t MutableTransactionState::writeToParcel(Parcel* parcel) const {
-    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mComposerStates.size()));
-    for (const auto& s : mComposerStates) {
-        SAFE_PARCEL(s.write, *parcel);
-    }
-
-    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mDisplayStates.size()));
-    for (const auto& d : mDisplayStates) {
-        SAFE_PARCEL(d.write, *parcel);
-    }
-
-    return NO_ERROR;
-}
-
-status_t MutableTransactionState::readFromParcel(const Parcel* parcel) {
-    uint32_t count = 0;
     SAFE_PARCEL_READ_SIZE(parcel->readUint32, &count, parcel->dataSize());
-    mComposerStates.setCapacity(count);
-    for (size_t i = 0; i < count; i++) {
-        ComposerState s;
-        SAFE_PARCEL(s.read, *parcel);
-        mComposerStates.add(s);
-    }
-
-    SAFE_PARCEL_READ_SIZE(parcel->readUint32, &count, parcel->dataSize());
-    DisplayState d;
-    mDisplayStates.setCapacity(count);
-    for (size_t i = 0; i < count; i++) {
-        SAFE_PARCEL(d.read, *parcel);
-        mDisplayStates.add(d);
-    }
-
-    return NO_ERROR;
-}
-
-status_t TransactionState::writeToParcel(Parcel* parcel) const {
-    SAFE_PARCEL(mSimpleState.writeToParcel, parcel);
-    SAFE_PARCEL(mComplexState.writeToParcel, parcel);
-    SAFE_PARCEL(parcel->writeStrongBinder, mApplyToken);
-    SAFE_PARCEL(parcel->writeBool, mMayContainBuffer);
-    SAFE_PARCEL(parcel->writeBool, mLogCallPoints);
-
-    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mDisplayStates.size()));
-    for (auto const& displayState : mDisplayStates) {
-        displayState.write(*parcel);
-    }
-    SAFE_PARCEL(parcel->writeUint32, static_cast<uint32_t>(mComposerStates.size()));
-    for (auto const& composerState : mComposerStates) {
-        composerState.write(*parcel);
-    }
-
-    return NO_ERROR;
-}
-
-status_t TransactionState::readFromParcel(const Parcel* parcel) {
-    SAFE_PARCEL(mSimpleState.readFromParcel, parcel);
-    SAFE_PARCEL(mComplexState.readFromParcel, parcel);
-    SAFE_PARCEL(parcel->readNullableStrongBinder, &mApplyToken);
-    SAFE_PARCEL(parcel->readBool, &mMayContainBuffer);
-    SAFE_PARCEL(parcel->readBool, &mLogCallPoints);
-
-    uint32_t count;
-    SAFE_PARCEL_READ_SIZE(parcel->readUint32, &count, parcel->dataSize())
-    mDisplayStates.clear();
-    mDisplayStates.reserve(count);
-    for (size_t i = 0; i < count; i++) {
-        DisplayState displayState;
-        if (displayState.read(*parcel) == BAD_VALUE) {
-            return BAD_VALUE;
-        }
-        mDisplayStates.emplace_back(std::move(displayState));
-    }
-
-    SAFE_PARCEL_READ_SIZE(parcel->readUint32, &count, parcel->dataSize())
     mComposerStates.clear();
     mComposerStates.reserve(count);
     for (size_t i = 0; i < count; i++) {
-        ComposerState composerState;
-        if (composerState.read(*parcel) == BAD_VALUE) {
-            return BAD_VALUE;
-        }
-        mComposerStates.emplace_back(std::move(composerState));
+        ComposerState s;
+        SAFE_PARCEL(s.read, *parcel);
+        mComposerStates.emplace_back(std::move(s));
     }
 
+    SAFE_PARCEL_READ_SIZE(parcel->readUint32, &count, parcel->dataSize());
+    mDisplayStates.clear();
+    mDisplayStates.reserve(count);
+    for (size_t i = 0; i < count; i++) {
+        DisplayState d;
+        SAFE_PARCEL(d.read, *parcel);
+        mDisplayStates.emplace_back(std::move(d));
+    }
+
+    mBarriers.clear();
+    SAFE_PARCEL(parcel->readParcelableVector, &mBarriers);
     return NO_ERROR;
 }
 
-void ComplexTransactionState::merge(ComplexTransactionState& other) {
+void TransactionState::merge(TransactionState&& other,
+                             const std::function<void(const layer_state_t&)>& onBufferOverwrite) {
+    // TODO(b/385156191) Consider merging desired present time.
+    mFlags |= other.mFlags;
     while (mMergedTransactionIds.size() + other.mMergedTransactionIds.size() >
                    MAX_MERGE_HISTORY_LENGTH - 1 &&
            mMergedTransactionIds.size() > 0) {
@@ -250,12 +180,8 @@ void ComplexTransactionState::merge(ComplexTransactionState& other) {
     for (gui::EarlyWakeupInfo& op : other.mEarlyWakeupInfos) {
         mEarlyWakeupInfos.emplace_back(std::move(op));
     }
-}
 
-void MutableTransactionState::merge(
-        const MutableTransactionState& other,
-        const std::function<void(const layer_state_t&)>& onBufferOverwrite) {
-    for (auto const& otherState : other.mComposerStates) {
+    for (auto& otherState : other.mComposerStates) {
         if (auto it = std::find_if(mComposerStates.begin(), mComposerStates.end(),
                                    [&otherState](const auto& composerState) {
                                        return composerState.state.surface ==
@@ -267,11 +193,11 @@ void MutableTransactionState::merge(
             }
             it->state.merge(otherState.state);
         } else {
-            mComposerStates.add(otherState);
+            mComposerStates.emplace_back(std::move(otherState));
         }
     }
 
-    for (auto const& state : other.mDisplayStates) {
+    for (auto& state : other.mDisplayStates) {
         if (auto it = std::find_if(mDisplayStates.begin(), mDisplayStates.end(),
                                    [&state](const auto& displayState) {
                                        return displayState.token == state.token;
@@ -279,56 +205,32 @@ void MutableTransactionState::merge(
             it != mDisplayStates.end()) {
             it->merge(state);
         } else {
-            mDisplayStates.add(state);
-        }
-    }
-}
-
-void TransactionState::merge(TransactionState&& other,
-                             const std::function<void(layer_state_t&)>& onBufferOverwrite) {
-    mSimpleState.merge(other.mSimpleState);
-    mComplexState.merge(other.mComplexState);
-    mComplexState.mMergedTransactionIds.insert(mComplexState.mMergedTransactionIds.begin(),
-                                               other.mSimpleState.mId);
-
-    for (auto const& otherState : other.mComposerStates) {
-        if (auto it = std::find_if(mComposerStates.begin(), mComposerStates.end(),
-                                   [&otherState](const auto& composerState) {
-                                       return composerState.state.surface ==
-                                               otherState.state.surface;
-                                   });
-            it != mComposerStates.end()) {
-            if (otherState.state.what & layer_state_t::eBufferChanged) {
-                onBufferOverwrite(it->state);
-            }
-            it->state.merge(otherState.state);
-        } else {
-            mComposerStates.push_back(otherState);
+            mDisplayStates.emplace_back(std::move(state));
         }
     }
 
-    for (auto const& state : other.mDisplayStates) {
-        if (auto it = std::find_if(mDisplayStates.begin(), mDisplayStates.end(),
-                                   [&state](const auto& displayState) {
-                                       return displayState.token == state.token;
-                                   });
-            it != mDisplayStates.end()) {
-            it->merge(state);
-        } else {
-            mDisplayStates.push_back(state);
-        }
+    mMergedTransactionIds.insert(mMergedTransactionIds.begin(), other.mId);
+
+    mBarriers.insert(mBarriers.end(), std::make_move_iterator(other.mBarriers.begin()),
+                     std::make_move_iterator(other.mBarriers.end()));
+    if (mBarriers.size() > MAX_BARRIERS_LENGTH) {
+        int numToRemove = mBarriers.size() - MAX_BARRIERS_LENGTH;
+        std::string droppedBarriers =
+                std::accumulate(mBarriers.begin(), mBarriers.begin() + numToRemove, std::string(),
+                                [](std::string&& s,
+                                   const gui::TransactionBarrier& barrier) -> std::string {
+                                    s += barrier.toString() + ",";
+                                    return s;
+                                });
+        ALOGE("Dropping %d transaction barriers: %s", numToRemove, droppedBarriers.c_str());
+        mBarriers.erase(mBarriers.begin(), mBarriers.begin() + numToRemove);
     }
 
-    mMayContainBuffer |= other.mMayContainBuffer;
-    mLogCallPoints |= other.mLogCallPoints;
-
-    // mApplyToken is explicitly not merged. Token should be set before applying the transactions to
-    // make synchronization decisions a bit simpler.
     other.clear();
 }
 
 // copied from FrameTimelineInfo::merge()
-void ComplexTransactionState::mergeFrameTimelineInfo(const FrameTimelineInfo& other) {
+void TransactionState::mergeFrameTimelineInfo(const FrameTimelineInfo& other) {
     // When merging vsync Ids we take the oldest valid one
     if (mFrameTimelineInfo.vsyncId != FrameTimelineInfo::INVALID_VSYNC_ID &&
         other.vsyncId != FrameTimelineInfo::INVALID_VSYNC_ID) {
@@ -340,47 +242,20 @@ void ComplexTransactionState::mergeFrameTimelineInfo(const FrameTimelineInfo& ot
     }
 }
 
-void ComplexTransactionState::clear() {
+void TransactionState::clear() {
+    mId = 0;
+    mFlags = 0;
+    mDesiredPresentTime = 0;
+    mIsAutoTimestamp = true;
     mCallbacks.clear();
     mUncacheBuffers.clear();
     mFrameTimelineInfo = {};
     mMergedTransactionIds.clear();
     mInputWindowCommands.clear();
     mEarlyWakeupInfos.clear();
-}
-
-void MutableTransactionState::clear() {
     mComposerStates.clear();
     mDisplayStates.clear();
-}
-
-void TransactionState::clear() {
-    mSimpleState.clear();
-    mComplexState.clear();
-    mComposerStates.clear();
-    mDisplayStates.clear();
-    mApplyToken = nullptr;
-    mMayContainBuffer = false;
-    mLogCallPoints = false;
-}
-
-layer_state_t* MutableTransactionState::getLayerState(const sp<SurfaceControl>& sc) {
-    auto handle = sc->getLayerStateHandle();
-    if (auto it = std::find_if(mComposerStates.begin(), mComposerStates.end(),
-                               [&handle](const auto& composerState) {
-                                   return composerState.state.surface == handle;
-                               });
-        it != mComposerStates.end()) {
-        return &it->state;
-    }
-
-    // we don't have it, add an initialized layer_state to our list
-    ComposerState s;
-    s.state.surface = handle;
-    s.state.layerId = sc->getLayerId();
-    mComposerStates.add(s);
-
-    return &mComposerStates.editItemAt(mComposerStates.size() - 1).state;
+    mBarriers.clear();
 }
 
 layer_state_t* TransactionState::getLayerState(const sp<SurfaceControl>& sc) {
@@ -397,23 +272,9 @@ layer_state_t* TransactionState::getLayerState(const sp<SurfaceControl>& sc) {
     ComposerState s;
     s.state.surface = handle;
     s.state.layerId = sc->getLayerId();
-    mComposerStates.push_back(s);
+    mComposerStates.emplace_back(std::move(s));
 
     return &mComposerStates.back().state;
-}
-
-DisplayState& MutableTransactionState::getDisplayState(const sp<IBinder>& token) {
-    if (auto it = std::find_if(mDisplayStates.begin(), mDisplayStates.end(),
-                               [token](const auto& display) { return display.token == token; });
-        it != mDisplayStates.end()) {
-        return *it;
-    }
-
-    // If display state doesn't exist, add a new one.
-    DisplayState s;
-    s.token = token;
-    mDisplayStates.add(s);
-    return mDisplayStates.editItemAt(mDisplayStates.size() - 1);
 }
 
 DisplayState& TransactionState::getDisplayState(const sp<IBinder>& token) {
@@ -426,7 +287,7 @@ DisplayState& TransactionState::getDisplayState(const sp<IBinder>& token) {
     // If display state doesn't exist, add a new one.
     DisplayState s;
     s.token = token;
-    mDisplayStates.push_back(s);
+    mDisplayStates.emplace_back(std::move(s));
     return mDisplayStates.back();
 }
 

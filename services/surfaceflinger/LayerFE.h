@@ -60,6 +60,8 @@ public:
     void setReleaseFence(const FenceResult& releaseFence) override;
     LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() override;
     void setReleasedBuffer(sp<GraphicBuffer> buffer) override;
+    void setLastClientTargetAcquireFence(const FenceResult&) override;
+    sp<Fence> getAndClearLastClientTargetAcquireFence() override;
     void onPictureProfileCommitted() override;
 
     // Used for debugging purposes, e.g. perfetto tracing, dumpsys.
@@ -103,6 +105,7 @@ private:
     ReleaseFencePromiseStatus mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::UNINITIALIZED;
     HwcLayerDebugState mLastHwcState;
     wp<GraphicBuffer> mReleasedBuffer;
+    FenceResult mLastClientCompositionAcquireFence = Fence::NO_FENCE;
 };
 
 } // namespace android

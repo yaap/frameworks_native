@@ -18,6 +18,8 @@
 
 #include <android/gui/BorderSettings.h>
 #include <android/gui/BoxShadowSettings.h>
+#include <com_android_graphics_surfaceflinger_flags.h>
+#include <gui/CornerRadii.h>
 #include <gui/DisplayLuts.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
@@ -89,13 +91,14 @@ struct Geometry {
     // rectangle to figure out how to apply the radius for this layer. The crop rectangle will be
     // in local layer coordinate space, so we have to take the layer transform into account when
     // walking up the tree.
-    vec2 roundedCornersRadius = vec2(0.0f, 0.0f);
+    gui::CornerRadii roundedCornersRadii = {};
 
     // Rectangle within which corners will be rounded.
     FloatRect roundedCornersCrop = FloatRect();
 
     // Crop geometry in local space, used for cropping outset rendering, e.g. shadows.
-    vec2 otherRoundedCornersRadius = vec2(0.0f, 0.0f);
+    gui::CornerRadii otherRoundedCornersRadii = {};
+
     FloatRect otherCrop = FloatRect();
 };
 
@@ -177,7 +180,7 @@ static inline bool operator==(const Buffer& lhs, const Buffer& rhs) {
 
 static inline bool operator==(const Geometry& lhs, const Geometry& rhs) {
     return lhs.boundaries == rhs.boundaries && lhs.positionTransform == rhs.positionTransform &&
-            lhs.roundedCornersRadius == rhs.roundedCornersRadius &&
+            lhs.roundedCornersRadii == rhs.roundedCornersRadii &&
             lhs.roundedCornersCrop == rhs.roundedCornersCrop;
 }
 
@@ -228,15 +231,14 @@ static inline void PrintTo(const Geometry& settings, ::std::ostream* os) {
     *os << "Geometry {";
     *os << "\n    .boundaries = ";
     PrintTo(settings.boundaries, os);
+    *os << "\n    .originalBounds = ";
+    PrintTo(settings.originalBounds, os);
     *os << "\n    .positionTransform = ";
     PrintMatrix(settings.positionTransform, os);
-    *os << "\n    .roundedCornersRadiusX = " << settings.roundedCornersRadius.x;
-    *os << "\n    .roundedCornersRadiusY = " << settings.roundedCornersRadius.y;
+    *os << "\n    .roundedCornersRadii = " << settings.roundedCornersRadii;
     *os << "\n    .roundedCornersCrop = ";
     PrintTo(settings.roundedCornersCrop, os);
-
-    *os << "\n    .otherRoundedCornersRadiusX = " << settings.otherRoundedCornersRadius.x;
-    *os << "\n    .otherRoundedCornersRadiusY = " << settings.otherRoundedCornersRadius.y;
+    *os << "\n    .otherRoundedCornersRadii = " << settings.otherRoundedCornersRadii;
     *os << "\n    .otherCrop = ";
     PrintTo(settings.otherCrop, os);
 
@@ -328,6 +330,10 @@ static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os) {
         *os << "\n    .luts = ";
         PrintTo(settings.luts, os);
     }
+
+    *os << "\n    .borderSettings = " << settings.borderSettings.toString();
+    *os << "\n    .boxShadowSettings = " << settings.boxShadowSettings.toString();
+
     *os << "\n}";
 }
 

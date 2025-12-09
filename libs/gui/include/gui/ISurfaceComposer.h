@@ -66,9 +66,7 @@ struct DisplayState;
 struct InputWindowCommands;
 class HdrCapabilities;
 class Rect;
-struct SimpleTransactionState;
-struct ComplexTransactionState;
-struct MutableTransactionState;
+class TransactionState;
 
 using gui::FrameTimelineInfo;
 using gui::IDisplayEventConnection;
@@ -109,9 +107,7 @@ public:
     };
 
     /* open/close transactions. requires ACCESS_SURFACE_FLINGER permission */
-    virtual status_t setTransactionState(SimpleTransactionState simpleState,
-                                         const ComplexTransactionState& complexState,
-                                         MutableTransactionState& mutableState,
+    virtual status_t setTransactionState(TransactionState&& state,
                                          const sp<IBinder>& applyToken) = 0;
 };
 

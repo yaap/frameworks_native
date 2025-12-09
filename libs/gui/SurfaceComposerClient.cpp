@@ -489,10 +489,10 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
          * for all the callbackIds to generate one super map that contains all the sp<IBinder> to
          * sp<SurfaceControl> that could possibly exist for the callbacks.
          */
-        callbacksMap = mCallbacks;
         for (const auto& transactionStats : listenerStats.transactionStats) {
             for (auto& callbackId : transactionStats.callbackIds) {
-                mCallbacks.erase(callbackId);
+                auto node = mCallbacks.extract(callbackId);
+                callbacksMap.insert(std::move(node));
             }
         }
     }
@@ -515,7 +515,8 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
                                       transactionStats.presentFence,
                                       surfaceStats.previousReleaseFence, surfaceStats.transformHint,
                                       surfaceStats.eventStats,
-                                      surfaceStats.currentMaxAcquiredBufferCount);
+                                      surfaceStats.currentMaxAcquiredBufferCount,
+                                      surfaceStats.cornerRadii);
             }
 
             callbackFunction(transactionStats.latchTime, transactionStats.presentFence,
@@ -546,7 +547,8 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
                                       transactionStats.presentFence,
                                       surfaceStats.previousReleaseFence, surfaceStats.transformHint,
                                       surfaceStats.eventStats,
-                                      surfaceStats.currentMaxAcquiredBufferCount);
+                                      surfaceStats.currentMaxAcquiredBufferCount,
+                                      surfaceStats.cornerRadii);
                 if (callbacksMap[callbackId].surfaceControls[surfaceStats.surfaceControl] &&
                     surfaceStats.transformHint.has_value()) {
                     callbacksMap[callbackId]
@@ -637,7 +639,8 @@ void TransactionCompletedListener::removeQueueStallListener(void* id) {
 
 void TransactionCompletedListener::onReleaseBuffer(ReleaseCallbackId callbackId,
                                                    sp<Fence> releaseFence,
-                                                   uint32_t currentMaxAcquiredBufferCount) {
+                                                   uint32_t currentMaxAcquiredBufferCount,
+                                                   bool removeFromCache) {
     ReleaseBufferCallback callback;
     {
         std::scoped_lock<std::mutex> lock(mMutex);
@@ -647,6 +650,10 @@ void TransactionCompletedListener::onReleaseBuffer(ReleaseCallbackId callbackId,
         ALOGE("Could not call release buffer callback, buffer not found %s",
               callbackId.to_string().c_str());
         return;
+    }
+    if (removeFromCache) {
+        ALOGV("Dropping buffer %" PRIu64 " from cache", callbackId.bufferId);
+        SurfaceComposerClient::getDefault()->removeBufferFromLocalCache(callbackId.bufferId);
     }
     std::optional<uint32_t> optionalMaxAcquiredBufferCount =
             currentMaxAcquiredBufferCount == UINT_MAX
@@ -677,7 +684,7 @@ void TransactionCompletedListener::removeReleaseBufferCallback(
 
 SurfaceComposerClient::PresentationCallbackRAII::PresentationCallbackRAII(
         TransactionCompletedListener* tcl, int id) {
-    mTcl = tcl;
+    mTcl = sp<TransactionCompletedListener>::fromExisting(tcl);
     mId = id;
 }
 
@@ -776,9 +783,9 @@ public:
         return buffer->getId();
     }
 
-    void uncache(uint64_t cacheId) {
+    void uncache(uint64_t cacheId, bool uncacheInSf) {
         std::lock_guard<std::mutex> lock(mMutex);
-        if (mBuffers.erase(cacheId)) {
+        if (mBuffers.erase(cacheId) && uncacheInSf) {
             SurfaceComposerClient::doUncacheBufferTransaction(cacheId);
         }
     }
@@ -818,20 +825,18 @@ ANDROID_SINGLETON_STATIC_INSTANCE(BufferCache);
 
 void removeDeadBufferCallback(void* /*context*/, uint64_t graphicBufferId) {
     // GraphicBuffer id's are used as the cache ids.
-    BufferCache::getInstance().uncache(graphicBufferId);
+    BufferCache::getInstance().uncache(graphicBufferId, true /* uncacheInSf */);
 }
 
 // ---------------------------------------------------------------------------
 
 SurfaceComposerClient::Transaction::Transaction() {
-    mSimpleState.mId = generateId();
+    mState.mId = generateId();
     mTransactionCompletedListener = TransactionCompletedListener::getInstance();
 }
 
 SurfaceComposerClient::Transaction::Transaction(const Transaction& other)
-      : mSimpleState(other.mSimpleState),
-        mComplexState(other.mComplexState),
-        mMutableState(other.mMutableState),
+      : mState(other.mState),
         mMayContainBuffer(other.mMayContainBuffer),
         mApplyToken(other.mApplyToken) {
     mListenerCallbacks = other.mListenerCallbacks;
@@ -839,14 +844,15 @@ SurfaceComposerClient::Transaction::Transaction(const Transaction& other)
 }
 
 void SurfaceComposerClient::Transaction::sanitize(int pid, int uid) {
+    // TODO(b/356936695) move to TransactionState.
     uint32_t permissions = LayerStatePermissions::getTransactionPermissions(pid, uid);
-    for (auto& composerState : mMutableState.mComposerStates) {
+    for (auto& composerState : mState.mComposerStates) {
         composerState.state.sanitize(permissions);
     }
-    if (!mComplexState.mInputWindowCommands.empty() &&
+    if (!mState.mInputWindowCommands.empty() &&
         (permissions & layer_state_t::Permission::ACCESS_SURFACE_FLINGER) == 0) {
         ALOGE("Only privileged callers are allowed to send input commands.");
-        mComplexState.mInputWindowCommands.clear();
+        mState.mInputWindowCommands.clear();
     }
 }
 
@@ -860,12 +866,8 @@ SurfaceComposerClient::Transaction::createFromParcel(const Parcel* parcel) {
 }
 
 status_t SurfaceComposerClient::Transaction::readFromParcel(const Parcel* parcel) {
-    SimpleTransactionState simpleState;
-    SAFE_PARCEL(simpleState.readFromParcel, parcel);
-    ComplexTransactionState complexState;
-    SAFE_PARCEL(complexState.readFromParcel, parcel);
-    MutableTransactionState mutableState;
-    SAFE_PARCEL(mutableState.readFromParcel, parcel);
+    TransactionState state;
+    SAFE_PARCEL(state.readFromParcel, parcel);
     const bool logCallPoints = parcel->readBool();
 
     sp<IBinder> applyToken;
@@ -900,9 +902,8 @@ status_t SurfaceComposerClient::Transaction::readFromParcel(const Parcel* parcel
     }
 
     // Parsing was successful. Update the object.
-    mSimpleState = std::move(simpleState);
-    mComplexState = std::move(complexState);
-    mMutableState = std::move(mutableState);
+    mLogCallPoints = logCallPoints;
+    mState = std::move(state);
     mListenerCallbacks = listenerCallbacks;
     mApplyToken = applyToken;
     return NO_ERROR;
@@ -922,9 +923,7 @@ status_t SurfaceComposerClient::Transaction::writeToParcel(Parcel* parcel) const
 
     const_cast<SurfaceComposerClient::Transaction*>(this)->cacheBuffers();
 
-    SAFE_PARCEL(mSimpleState.writeToParcel, parcel);
-    SAFE_PARCEL(mComplexState.writeToParcel, parcel);
-    SAFE_PARCEL(mMutableState.writeToParcel, parcel);
+    SAFE_PARCEL(mState.writeToParcel, parcel);
     parcel->writeBool(mLogCallPoints);
     parcel->writeStrongBinder(mApplyToken);
 
@@ -945,22 +944,31 @@ status_t SurfaceComposerClient::Transaction::writeToParcel(Parcel* parcel) const
 }
 
 void SurfaceComposerClient::Transaction::releaseBufferIfOverwriting(const layer_state_t& state) {
-    if (!(state.what & layer_state_t::eBufferChanged) || !state.bufferData->hasBuffer()) {
+    if (!(state.what & layer_state_t::eBufferChanged)) {
         return;
     }
 
     auto listener = state.bufferData->releaseBufferListener;
     sp<Fence> fence =
             state.bufferData->acquireFence ? state.bufferData->acquireFence : Fence::NO_FENCE;
+    // Tell the owning process to remove the buffer from the cache if the buffer being dropped was
+    // going to be added to the SurfaceFlinger cache. Without this, it causes issues where the
+    // client thinks it's cached the buffer correctly, but it was never cached in SF causing
+    // subsequent look ups to fail.
+    bool removeFromCache =
+            (state.bufferData->hasBuffer() && state.bufferData->cachedBuffer.isValid());
+    ReleaseCallbackId releaseCallbackId = state.bufferData->generateReleaseCallbackId();
+    ALOGV("dropping buffer=%" PRIu64 " and removeFromCache=%d", releaseCallbackId.bufferId,
+          removeFromCache);
     if (state.bufferData->releaseBufferEndpoint ==
         IInterface::asBinder(TransactionCompletedListener::getIInstance())) {
         // if the callback is in process, run on a different thread to avoid any lock contigency
         // issues in the client.
         SurfaceComposerClient::getDefault()
-                ->mReleaseCallbackThread
-                .addReleaseCallback(state.bufferData->generateReleaseCallbackId(), fence);
-    } else {
-        listener->onReleaseBuffer(state.bufferData->generateReleaseCallbackId(), fence, UINT_MAX);
+                ->mReleaseCallbackThread.addReleaseCallback(releaseCallbackId, fence,
+                                                            removeFromCache);
+    } else if (listener) {
+        listener->onReleaseBuffer(releaseCallbackId, fence, UINT_MAX, removeFromCache);
     }
 }
 
@@ -988,12 +996,8 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
         }
     }
 
-    mSimpleState.merge(other.mSimpleState);
-    mComplexState.merge(other.mComplexState);
-    mComplexState.mMergedTransactionIds.insert(mComplexState.mMergedTransactionIds.begin(),
-                                               other.mSimpleState.mId);
-    mMutableState.merge(other.mMutableState,
-                        [this](const auto& state) { releaseBufferIfOverwriting(state); });
+    mState.merge(std::move(other.mState),
+                 [this](const layer_state_t& state) { releaseBufferIfOverwriting(state); });
     mMayContainBuffer |= other.mMayContainBuffer;
     mApplyToken = other.mApplyToken;
 
@@ -1001,7 +1005,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
     if (mLogCallPoints) {
         ALOG(LOG_DEBUG, LOG_SURFACE_CONTROL_REGISTRY,
              "Transaction %" PRIu64 " merged with transaction %" PRIu64, other.getId(),
-             mSimpleState.mId);
+             mState.getId());
     }
 
     other.clear();
@@ -1010,9 +1014,8 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
 }
 
 void SurfaceComposerClient::Transaction::clear() {
-    mSimpleState.clear();
-    mComplexState.clear();
-    mMutableState.clear();
+    mState.clear();
+    mState.mId = generateId();
     mListenerCallbacks.clear();
     mMayContainBuffer = false;
     mApplyToken = nullptr;
@@ -1020,27 +1023,23 @@ void SurfaceComposerClient::Transaction::clear() {
 }
 
 uint64_t SurfaceComposerClient::Transaction::getId() {
-    return mSimpleState.mId;
+    return mState.getId();
 }
 
 std::vector<uint64_t> SurfaceComposerClient::Transaction::getMergedTransactionIds() {
-    return mComplexState.mMergedTransactionIds;
+    return mState.mMergedTransactionIds;
 }
 
 void SurfaceComposerClient::doUncacheBufferTransaction(uint64_t cacheId) {
     sp<ISurfaceComposer> sf(ComposerService::getComposerService());
 
-    ComplexTransactionState complexState;
+    TransactionState state(generateId(), ISurfaceComposer::eOneWay, systemTime(), true);
     client_cache_t uncacheBuffer;
     uncacheBuffer.token = BufferCache::getInstance().getToken();
     uncacheBuffer.id = cacheId;
-    complexState.mUncacheBuffers.emplace_back(std::move(uncacheBuffer));
-    MutableTransactionState mutableState;
+    state.mUncacheBuffers.emplace_back(std::move(uncacheBuffer));
     status_t status =
-            sf->setTransactionState(SimpleTransactionState(generateId(), ISurfaceComposer::eOneWay,
-                                                           systemTime(), true),
-                                    complexState, mutableState,
-                                    Transaction::getDefaultApplyToken());
+            sf->setTransactionState(std::move(state), Transaction::getDefaultApplyToken());
     if (status != NO_ERROR) {
         ALOGE_AND_TRACE("SurfaceComposerClient::doUncacheBufferTransaction - %s",
                         strerror(-status));
@@ -1053,7 +1052,7 @@ void SurfaceComposerClient::Transaction::cacheBuffers() {
     }
 
     size_t count = 0;
-    for (auto& cs : mMutableState.mComposerStates) {
+    for (auto& cs : mState.mComposerStates) {
         layer_state_t* s = &cs.state;
         if (!(s->what & layer_state_t::eBufferChanged)) {
             continue;
@@ -1081,7 +1080,7 @@ void SurfaceComposerClient::Transaction::cacheBuffers() {
             std::optional<client_cache_t> uncacheBuffer;
             cacheId = BufferCache::getInstance().cache(s->bufferData->buffer, uncacheBuffer);
             if (uncacheBuffer) {
-                mComplexState.mUncacheBuffers.push_back(*uncacheBuffer);
+                mState.mUncacheBuffers.push_back(*uncacheBuffer);
             }
         }
         s->bufferData->flags |= BufferData::BufferDataChange::cachedBufferChanged;
@@ -1150,7 +1149,7 @@ status_t SurfaceComposerClient::Transaction::apply(bool synchronous, bool oneWay
                                         /*callbackContext=*/nullptr);
     }
 
-    TransactionListenerCallbacks& listenerCallbacks = mComplexState.mCallbacks;
+    TransactionListenerCallbacks& listenerCallbacks = mState.mCallbacks;
     listenerCallbacks.clear();
     listenerCallbacks.mHasListenerCallbacks = !mListenerCallbacks.empty();
     // For every listener with registered callbacks
@@ -1187,33 +1186,32 @@ status_t SurfaceComposerClient::Transaction::apply(bool synchronous, bool oneWay
             ALOGE("Transaction attempted to set synchronous and one way at the same time"
                   " this is an invalid request. Synchronous will win for safety");
         } else {
-            mSimpleState.mFlags |= ISurfaceComposer::eOneWay;
+            mState.mFlags |= ISurfaceComposer::eOneWay;
         }
     }
 
     // If both ISurfaceComposer::eEarlyWakeupStart and ISurfaceComposer::eEarlyWakeupEnd are set
     // it is equivalent for none
     uint32_t wakeupFlags = ISurfaceComposer::eEarlyWakeupStart | ISurfaceComposer::eEarlyWakeupEnd;
-    if ((mSimpleState.mFlags & wakeupFlags) == wakeupFlags) {
-        mSimpleState.mFlags &= ~(wakeupFlags);
+    if ((mState.mFlags & wakeupFlags) == wakeupFlags) {
+        mState.mFlags &= ~(wakeupFlags);
     }
     sp<IBinder> applyToken = mApplyToken ? mApplyToken : getDefaultApplyToken();
 
     sp<ISurfaceComposer> sf(ComposerService::getComposerService());
-    status_t binderStatus =
-            sf->setTransactionState(mSimpleState, mComplexState, mMutableState, applyToken);
-    mSimpleState.mId = generateId();
+    TransactionState state = std::move(mState);
+    status_t binderStatus = sf->setTransactionState(std::move(state), applyToken);
+
+    if (mLogCallPoints) {
+        ALOG(LOG_DEBUG, LOG_SURFACE_CONTROL_REGISTRY, "Transaction %" PRIu64 " applied",
+             mState.mId);
+    }
 
     // Clear the current states and flags
     clear();
 
     if (synchronous && binderStatus == OK) {
         syncCallback->wait();
-    }
-
-    if (mLogCallPoints) {
-        ALOG(LOG_DEBUG, LOG_SURFACE_CONTROL_REGISTRY, "Transaction %" PRIu64 " applied",
-             mSimpleState.mId);
     }
 
     mStatus = NO_ERROR;
@@ -1315,23 +1313,23 @@ std::optional<gui::StalledTransactionInfo> SurfaceComposerClient::getStalledTran
 }
 
 void SurfaceComposerClient::Transaction::setAnimationTransaction() {
-    mSimpleState.mFlags |= ISurfaceComposer::eAnimation;
+    mState.mFlags |= ISurfaceComposer::eAnimation;
 }
 
 void SurfaceComposerClient::Transaction::setEarlyWakeupStart(gui::EarlyWakeupInfo earlyWakeupInfo) {
     earlyWakeupInfo.isStartRequest = true;
-    mComplexState.mEarlyWakeupInfos.push_back(std::move(earlyWakeupInfo));
-    mSimpleState.mFlags |= ISurfaceComposer::eEarlyWakeupStart;
+    mState.mEarlyWakeupInfos.push_back(std::move(earlyWakeupInfo));
+    mState.mFlags |= ISurfaceComposer::eEarlyWakeupStart;
 }
 
 void SurfaceComposerClient::Transaction::setEarlyWakeupEnd(gui::EarlyWakeupInfo earlyWakeupInfo) {
     earlyWakeupInfo.isStartRequest = false;
-    mComplexState.mEarlyWakeupInfos.push_back(std::move(earlyWakeupInfo));
-    mSimpleState.mFlags |= ISurfaceComposer::eEarlyWakeupEnd;
+    mState.mEarlyWakeupInfos.push_back(std::move(earlyWakeupInfo));
+    mState.mFlags |= ISurfaceComposer::eEarlyWakeupEnd;
 }
 
 layer_state_t* SurfaceComposerClient::Transaction::getLayerState(const sp<SurfaceControl>& sc) {
-    return mMutableState.getLayerState(sc);
+    return mState.getLayerState(sc);
 }
 
 void SurfaceComposerClient::Transaction::registerSurfaceControlForCallback(
@@ -1522,25 +1520,31 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCrop(
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCornerRadius(
         const sp<SurfaceControl>& sc, float cornerRadius) {
+    return setCornerRadius(sc, gui::CornerRadii(cornerRadius));
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCornerRadius(
+        const sp<SurfaceControl>& sc, const gui::CornerRadii& radii) {
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
         return *this;
     }
     s->what |= layer_state_t::eCornerRadiusChanged;
-    s->cornerRadius = cornerRadius;
+    s->cornerRadii = radii;
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setClientDrawnCornerRadius(
-        const sp<SurfaceControl>& sc, float clientDrawnCornerRadius) {
+        const sp<SurfaceControl>& sc, const gui::CornerRadii& radii, const FloatRect& crop) {
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
         return *this;
     }
     s->what |= layer_state_t::eClientDrawnCornerRadiusChanged;
-    s->clientDrawnCornerRadius = clientDrawnCornerRadius;
+    s->clientDrawnCornerRadii = radii;
+    s->clientDrawnCornerRadiusCrop = crop;
     return *this;
 }
 
@@ -1715,8 +1719,8 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setBuffe
         setReleaseBufferCallback(bufferData.get(), callback);
     }
 
-    if (mSimpleState.mIsAutoTimestamp) {
-        mSimpleState.mDesiredPresentTime = systemTime();
+    if (mState.mIsAutoTimestamp) {
+        mState.mDesiredPresentTime = systemTime();
     }
     s->what |= layer_state_t::eBufferChanged;
     s->bufferData = std::move(bufferData);
@@ -1910,8 +1914,8 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setSideb
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setDesiredPresentTime(
         nsecs_t desiredPresentTime) {
-    mSimpleState.mDesiredPresentTime = desiredPresentTime;
-    mSimpleState.mIsAutoTimestamp = false;
+    mState.mDesiredPresentTime = desiredPresentTime;
+    mState.mIsAutoTimestamp = false;
     return *this;
 }
 
@@ -1994,20 +1998,20 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setInput
         mStatus = BAD_INDEX;
         return *this;
     }
-    s->updateInputWindowInfo(std::move(info));
+    s->updateInputWindowInfo(*info->getInfo());
     return *this;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFocusedWindow(
         const FocusRequest& request) {
-    mComplexState.mInputWindowCommands.addFocusRequest(request);
+    mState.mInputWindowCommands.addFocusRequest(request);
     return *this;
 }
 
 SurfaceComposerClient::Transaction&
 SurfaceComposerClient::Transaction::addWindowInfosReportedListener(
         sp<gui::IWindowInfosReportedListener> windowInfosReportedListener) {
-    mComplexState.mInputWindowCommands.addWindowInfosReportedListener(windowInfosReportedListener);
+    mState.mInputWindowCommands.addWindowInfosReportedListener(windowInfosReportedListener);
     return *this;
 }
 
@@ -2209,7 +2213,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFixed
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrameTimelineInfo(
         const FrameTimelineInfo& frameTimelineInfo) {
-    mComplexState.mergeFrameTimelineInfo(frameTimelineInfo);
+    mState.mergeFrameTimelineInfo(frameTimelineInfo);
     return *this;
 }
 
@@ -2373,10 +2377,29 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setConte
     return *this;
 }
 
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setSystemContentPriority(
+        const sp<SurfaceControl>& sc, int32_t priority) {
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eSystemContentPriorityChanged;
+    s->systemContentPriority = priority;
+    registerSurfaceControlForCallback(sc);
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::addTransactionBarrier(
+        gui::TransactionBarrier barrier) {
+    mState.mBarriers.emplace_back(std::move(barrier));
+    return *this;
+}
+
 // ---------------------------------------------------------------------------
 
 DisplayState& SurfaceComposerClient::Transaction::getDisplayState(const sp<IBinder>& token) {
-    return mMutableState.getDisplayState(token);
+    return mState.getDisplayState(token);
 }
 
 status_t SurfaceComposerClient::Transaction::setDisplaySurface(
@@ -2578,7 +2601,8 @@ status_t SurfaceComposerClient::createSurfaceChecked(const String8& name, uint32
         }
         ALOGE_IF(err, "SurfaceComposerClient::createSurface error %s", strerror(-err));
         if (err == NO_ERROR) {
-            *outSurface = sp<SurfaceControl>::make(this, result.handle, result.layerId,
+            *outSurface = sp<SurfaceControl>::make(sp<SurfaceComposerClient>::fromExisting(this),
+                                                   result.handle, result.layerId,
                                                    toString(result.layerName), w, h, format,
                                                    result.transformHint, flags);
         }
@@ -2600,8 +2624,8 @@ sp<SurfaceControl> SurfaceComposerClient::mirrorSurface(SurfaceControl* mirrorFr
     const binder::Status status = mClient->mirrorSurface(mirrorFromHandle, stopAtHandle, &result);
     const status_t err = statusTFromBinderStatus(status);
     if (err == NO_ERROR) {
-        return sp<SurfaceControl>::make(this, result.handle, result.layerId,
-                                        toString(result.layerName));
+        return sp<SurfaceControl>::make(sp<SurfaceComposerClient>::fromExisting(this),
+                                        result.handle, result.layerId, toString(result.layerName));
     }
     return nullptr;
 }
@@ -2613,8 +2637,8 @@ sp<SurfaceControl> SurfaceComposerClient::mirrorDisplay(DisplayId displayId) {
     const binder::Status status = mClient->mirrorDisplay(displayId.value, &result);
     const status_t err = statusTFromBinderStatus(status);
     if (err == NO_ERROR) {
-        return sp<SurfaceControl>::make(this, result.handle, result.layerId,
-                                        toString(result.layerName));
+        return sp<SurfaceControl>::make(sp<SurfaceComposerClient>::fromExisting(this),
+                                        result.handle, result.layerId, toString(result.layerName));
     }
     return nullptr;
 }
@@ -2743,6 +2767,7 @@ void SurfaceComposerClient::getDynamicDisplayInfoInternal(gui::DynamicDisplayInf
         outMode.sfVsyncOffset = mode.sfVsyncOffset;
         outMode.presentationDeadline = mode.presentationDeadline;
         outMode.group = mode.group;
+        outMode.outputType = static_cast<ui::OutputType>(mode.outputType);
         std::transform(mode.supportedHdrTypes.begin(), mode.supportedHdrTypes.end(),
                        std::back_inserter(outMode.supportedHdrTypes),
                        [](const int32_t& value) { return static_cast<ui::Hdr>(value); });
@@ -3303,6 +3328,11 @@ status_t SurfaceComposerClient::removeWindowInfosListener(
 void SurfaceComposerClient::notifyShutdown() {
     ComposerServiceAIDL::getComposerService()->notifyShutdown();
 }
+
+void SurfaceComposerClient::removeBufferFromLocalCache(uint64_t bufferId) {
+    BufferCache::getInstance().uncache(bufferId, false /* uncacheInSf */);
+}
+
 // ----------------------------------------------------------------------------
 
 status_t ScreenshotClient::captureDisplay(const DisplayCaptureArgs& captureArgs,
@@ -3343,20 +3373,20 @@ status_t ScreenshotClient::captureLayers(const LayerCaptureArgs& captureArgs,
 // ---------------------------------------------------------------------------------
 
 void ReleaseCallbackThread::addReleaseCallback(const ReleaseCallbackId callbackId,
-                                               sp<Fence> releaseFence) {
+                                               sp<Fence> releaseFence, bool removeFromCache) {
     std::scoped_lock<std::mutex> lock(mMutex);
     if (!mStarted) {
         mThread = std::thread(&ReleaseCallbackThread::threadMain, this);
         mStarted = true;
     }
 
-    mCallbackInfos.emplace(callbackId, std::move(releaseFence));
+    mCallbackInfos.emplace(callbackId, std::move(releaseFence), removeFromCache);
     mReleaseCallbackPending.notify_one();
 }
 
 void ReleaseCallbackThread::threadMain() {
     const auto listener = TransactionCompletedListener::getInstance();
-    std::queue<std::tuple<const ReleaseCallbackId, const sp<Fence>>> callbackInfos;
+    std::queue<std::tuple<const ReleaseCallbackId, const sp<Fence>, bool>> callbackInfos;
     while (true) {
         {
             std::unique_lock<std::mutex> lock(mMutex);
@@ -3366,8 +3396,9 @@ void ReleaseCallbackThread::threadMain() {
         }
 
         while (!callbackInfos.empty()) {
-            auto [callbackId, releaseFence] = callbackInfos.front();
-            listener->onReleaseBuffer(callbackId, std::move(releaseFence), UINT_MAX);
+            auto [callbackId, releaseFence, removeFromCache] = callbackInfos.front();
+            listener->onReleaseBuffer(callbackId, std::move(releaseFence), UINT_MAX,
+                                      removeFromCache);
             callbackInfos.pop();
         }
 

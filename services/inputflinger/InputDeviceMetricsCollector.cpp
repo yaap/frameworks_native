@@ -20,6 +20,7 @@
 #include "InputDeviceMetricsSource.h"
 
 #include <android-base/stringprintf.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 
 namespace android {
@@ -55,6 +56,8 @@ int32_t linuxBusToInputDeviceBusEnum(int32_t linuxBus, bool isUsiStylus) {
             return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USB;
         case BUS_BLUETOOTH:
             return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__BLUETOOTH;
+        case BUS_VIRTUAL:
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__VIRTUAL;
         default:
             return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__OTHER;
     }
@@ -102,7 +105,7 @@ class : public InputDeviceMetricsLogger {
     }
 } sStatsdLogger;
 
-bool isIgnoredInputDeviceId(int32_t deviceId) {
+bool isIgnoredInputDeviceId(DeviceId deviceId) {
     switch (deviceId) {
         case INVALID_INPUT_DEVICE_ID:
         case VIRTUAL_KEYBOARD_ID:

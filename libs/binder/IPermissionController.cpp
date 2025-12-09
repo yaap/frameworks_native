@@ -160,8 +160,8 @@ status_t BnPermissionController::onTransact(
         case GET_PACKAGE_UID_TRANSACTION: {
             CHECK_INTERFACE(IPermissionController, data, reply);
             String16 package = data.readString16();
-            int flags = data.readInt32();
-            const int uid = getPackageUid(package, flags);
+            int intFlags = data.readInt32();
+            const int uid = getPackageUid(package, intFlags);
             reply->writeNoException();
             reply->writeInt32(uid);
             return NO_ERROR;

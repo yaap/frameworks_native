@@ -21,8 +21,6 @@
 
 // #define LOG_NDEBUG 0
 
-#undef LOG_TAG
-#define LOG_TAG "HWComposer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "HWComposer.h"
@@ -312,6 +310,21 @@ DisplayConfiguration::Dpi HWComposer::getEstimatedDotsPerInchFromSize(
         }
     }
     return {-1, -1};
+}
+
+ui::DisplayConnectionType HWComposer::getHwcDisplayConnectionType(uint64_t hwcDisplayId) const {
+    using ConnectionType = Hwc2::IComposerClient::DisplayConnectionType;
+    ConnectionType connectionType;
+
+    if (const auto error = static_cast<hal::Error>(
+                mComposer->getDisplayConnectionType(hwcDisplayId, &connectionType));
+        error != hal::Error::NONE) {
+        LOG_HWC_DISPLAY_ERROR(hwcDisplayId, "Cannot get display connection type.");
+        return ui::DisplayConnectionType::Internal;
+    }
+
+    return connectionType == ConnectionType::INTERNAL ? ui::DisplayConnectionType::Internal
+                                                      : ui::DisplayConnectionType::External;
 }
 
 DisplayConfiguration::Dpi HWComposer::correctedDpiIfneeded(
@@ -1180,7 +1193,7 @@ std::optional<hal::HWDisplayId> HWComposer::fromPhysicalDisplayId(
 
 bool HWComposer::shouldIgnoreHotplugConnect(hal::HWDisplayId hwcDisplayId, uint8_t port,
                                             bool hasDisplayIdentificationData) const {
-    if (mActivePorts.contains(port)) {
+    if (mHasMultiDisplaySupport && mActivePorts.contains(port)) {
         ALOGE("Ignoring connection of display %" PRIu64 ". Port %" PRIu8
               " is already in active use.",
               hwcDisplayId, port);
@@ -1204,6 +1217,9 @@ bool HWComposer::shouldIgnoreHotplugConnect(hal::HWDisplayId hwcDisplayId, uint8
 
 std::optional<display::DisplayIdentificationInfo> HWComposer::onHotplugConnect(
         hal::HWDisplayId hwcDisplayId) {
+    const bool useStableEdidIds =
+            getHwcDisplayConnectionType(hwcDisplayId) == ui::DisplayConnectionType::External &&
+            FlagManager::getInstance().stable_edid_ids();
     std::optional<display::DisplayIdentificationInfo> info;
     if (const auto displayId = toPhysicalDisplayId(hwcDisplayId)) {
         info = display::DisplayIdentificationInfo{.id = *displayId,
@@ -1216,8 +1232,8 @@ std::optional<display::DisplayIdentificationInfo> HWComposer::onHotplugConnect(
             display::DisplayIdentificationData data;
             android::ScreenPartStatus screenPartStatus;
             getDisplayIdentificationData(hwcDisplayId, &port, &data, &screenPartStatus);
-            if (auto newInfo =
-                        display::parseDisplayIdentificationData(port, data, screenPartStatus)) {
+            if (auto newInfo = display::parseDisplayIdentificationData(port, data, screenPartStatus,
+                                                                       useStableEdidIds)) {
                 info->deviceProductInfo = std::move(newInfo->deviceProductInfo);
                 info->preferredDetailedTimingDescriptor =
                         std::move(newInfo->preferredDetailedTimingDescriptor);
@@ -1241,11 +1257,13 @@ std::optional<display::DisplayIdentificationInfo> HWComposer::onHotplugConnect(
             return {};
         }
 
-        info = [this, hwcDisplayId, &port, &data, &screenPartStatus, hasDisplayIdentificationData] {
+        info = [this, hwcDisplayId, useStableEdidIds, &port, &data, &screenPartStatus,
+                hasDisplayIdentificationData] {
             const bool isPrimary = !mPrimaryHwcDisplayId;
             if (mHasMultiDisplaySupport) {
                 if (auto info =
-                            display::parseDisplayIdentificationData(port, data, screenPartStatus)) {
+                            display::parseDisplayIdentificationData(port, data, screenPartStatus,
+                                                                    useStableEdidIds)) {
                     if (FlagManager::getInstance().stable_edid_ids() &&
                         hasDisplayWithId(info->id)) {
                         info->id = display::resolveDisplayIdCollision(info->id, info->port);

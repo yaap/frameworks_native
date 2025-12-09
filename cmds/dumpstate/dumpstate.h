@@ -202,6 +202,7 @@ class Dumpstate {
         BUGREPORT_TELEPHONY = android::os::IDumpstate::BUGREPORT_MODE_TELEPHONY,
         BUGREPORT_WIFI = android::os::IDumpstate::BUGREPORT_MODE_WIFI,
         BUGREPORT_ONBOARDING = android::os::IDumpstate::BUGREPORT_MODE_ONBOARDING,
+        BUGREPORT_BLUETOOTH = android::os::IDumpstate::BUGREPORT_MODE_BLUETOOTH,
         BUGREPORT_DEFAULT = android::os::IDumpstate::BUGREPORT_MODE_DEFAULT
     };
 
@@ -420,6 +421,7 @@ class Dumpstate {
         bool telephony_only = false;
         bool wifi_only = false;
         bool onboarding_only = false;
+        bool bluetooth_only = false;
         // Trimmed-down version of dumpstate to only include whitelisted logs.
         bool limited_only = false;
         // Whether progress updates should be published.

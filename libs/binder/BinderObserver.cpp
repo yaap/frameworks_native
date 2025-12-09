@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.BinderObserver"
+
 #include "BinderObserver.h"
 #include <mutex>
 
@@ -22,6 +24,58 @@
 
 namespace android {
 constexpr int kSendIntervalSec = 5;
+
+BinderObserver::CallInfo BinderObserver::onBeginTransaction(BBinder* binder, uint32_t code,
+                                                            uid_t callingUid) {
+    if (!mConfig->isEnabled()) {
+        return {};
+    }
+
+    // Sharding based on the pointer would be faster but would also increase the cardinality of
+    // the different AIDLs that we report. Ideally, we want something stable within the
+    // current boot session, so we use the interface descriptor.
+    [[clang::no_destroy]] static const StaticString16 kDeletedBinder(u"<deleted_binder>");
+    String16 interfaceDescriptor =
+            binder == nullptr ? kDeletedBinder : binder->getInterfaceDescriptor();
+
+    BinderObserverConfig::TrackingInfo trackingInfo =
+            mConfig->getTrackingInfo(interfaceDescriptor, code);
+
+    return {
+            .interfaceDescriptor = interfaceDescriptor,
+            .code = code,
+            .callingUid = callingUid,
+            .trackingInfo = trackingInfo,
+            .startTimeNanos = trackingInfo.isTracked() ? uptimeNanos() : 0,
+    };
+}
+
+void BinderObserver::onEndTransaction(std::shared_ptr<BinderStatsSpscQueue>& queue,
+                                      const CallInfo& callInfo) {
+    if (!mConfig->isEnabled() || !callInfo.trackingInfo.isTracked()) {
+        return;
+    }
+    if (queue == nullptr) {
+        queue = std::make_shared<BinderStatsSpscQueue>();
+        mBinderStatsCollector.registerQueue(queue);
+    }
+    BinderCallData observerData = {
+            .interfaceDescriptor = callInfo.interfaceDescriptor,
+            .transactionCode = callInfo.code,
+            .startTimeNanos = callInfo.startTimeNanos,
+            .endTimeNanos = callInfo.trackingInfo.trackLatency ? uptimeNanos() : 0,
+            .senderUid = callInfo.callingUid,
+    };
+    addStatMaybeFlush(queue, observerData);
+}
+
+void BinderObserver::deregisterThread(std::shared_ptr<BinderStatsSpscQueue>& queue) {
+    if (queue != nullptr) {
+        mBinderStatsCollector.deregisterQueue(queue);
+        queue = nullptr;
+    }
+}
+
 bool BinderObserver::isFlushRequired(int64_t nowSec) {
     int64_t previousFlushTimeSec = mLastFlushTimeSec.load();
     return nowSec - previousFlushTimeSec >= kSendIntervalSec;

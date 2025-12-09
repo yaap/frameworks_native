@@ -19,6 +19,7 @@
 #include <android-base/thread_annotations.h>
 #include <ftl/enum.h>
 #include <math/mat4.h>
+#include <renderengine/RenderEngine.h>
 
 #include <cstddef>
 
@@ -36,36 +37,41 @@ namespace skia {
  * Note: data that is lazily-initialized (e.g. SkRuntimeEffects for LinearEffects) must be
  * thread-safe, otherwise the rendering and precompilation threads may race.
  */
+
+enum KnownEffectId {
+#define X(name, id) k##name = id,
+#define Y(name, id) k##name = id,
+#include "RuntimeEffects.inl"
+    kEffectCount,
+};
+
+#define X(name, id) extern const SkString kEffectSource_##name;
+#define Y(name, id)
+#include "RuntimeEffects.inl"
+
+static const char* kEffectNames[] = {
+#define X(name, id) "RE_" #name,
+#define Y(name, id) "RE_" #name,
+#include "RuntimeEffects.inl"
+};
+
+static const SkString* const kEffectSources[] = {
+#define X(name, id) &kEffectSource_##name,
+#define Y(name, id) nullptr,
+#include "RuntimeEffects.inl"
+};
+
 class RuntimeEffectManager {
 public:
-    // Ordered alphabetically by overall filter, then by declaration order for filters with multiple
-    // effects.
-    // TODO(b/380159947): use macros to generate enum/name pair
-    enum class KnownId : size_t {
-        kBlurFilter_MixEffect,
-        kEdgeExtensionEffect,
-        kGainmapEffect,
-        kKawaseBlurDualFilter_LowSampleBlurEffect,
-        kKawaseBlurDualFilter_HighSampleBlurEffect,
-        kKawaseBlurEffect,
-        kLutEffect,
-        kMouriMap_CrossTalkAndChunk16x16Effect,
-        kMouriMap_Chunk8x8Effect,
-        kMouriMap_BlurEffect,
-        kMouriMap_TonemapEffect,
-        kStretchEffect,
+    RuntimeEffectManager(RenderEngine::BlurAlgorithm chosenBlurAlgorithm)
+          : mChosenBlurAlgorithm(chosenBlurAlgorithm) {
+        createAndStoreKnownEffects();
+    }
 
-        kLast,
-    };
+    RenderEngine::BlurAlgorithm getChosenBlurAlgorithm() const { return mChosenBlurAlgorithm; }
 
-    // Fatal error if a RuntimeEffect has already been created/stored for effectId, or if
-    // RuntimeEffect compilation fails.
-    // TODO(b/380159947): use macros to generate enum/name pair
-    sk_sp<SkRuntimeEffect> createAndStoreRuntimeEffect(KnownId effectId,
-                                                       const std::string& effectName,
-                                                       const SkString& effectSkSL);
     // Fatal error if a RuntimeEffect has not been created/stored yet for effectId.
-    sk_sp<SkRuntimeEffect> getKnownRuntimeEffect(KnownId effectId);
+    sk_sp<SkRuntimeEffect> getKnownRuntimeEffect(KnownEffectId effectId);
 
     sk_sp<SkRuntimeEffect> getOrCreateLinearRuntimeEffect(const shaders::LinearEffect& linearEffect)
             EXCLUDES(mMutex);
@@ -93,12 +99,18 @@ public:
             AHardwareBuffer* buffer,
             aidl::android::hardware::graphics::composer3::RenderIntent renderIntent);
 
+    std::array<sk_sp<SkRuntimeEffect>, kEffectCount> mKnownEffects;
+
 private:
+    void createAndStoreKnownEffects();
+
     static sk_sp<SkRuntimeEffect> buildLinearRuntimeEffect(
             const shaders::LinearEffect& linearEffect);
 
+    // Metadata
+    const RenderEngine::BlurAlgorithm mChosenBlurAlgorithm;
+    // State
     std::mutex mMutex;
-    std::array<sk_sp<SkRuntimeEffect>, static_cast<size_t>(KnownId::kLast)> mKnownRuntimeEffects{};
     std::unordered_map<shaders::LinearEffect, sk_sp<SkRuntimeEffect>, shaders::LinearEffectHasher>
             mLinearEffectMap GUARDED_BY(mMutex);
 };

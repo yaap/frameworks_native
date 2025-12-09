@@ -414,10 +414,10 @@ std::unique_ptr<MotionEntry> InputState::createCancelEntryForMemento(const Motio
                                          memento.displayId, memento.policyFlags, action,
                                          /*actionButton=*/0, flags, AMETA_NONE,
                                          /*buttonState=*/0, MotionClassification::NONE,
-                                         AMOTION_EVENT_EDGE_FLAG_NONE, memento.xPrecision,
-                                         memento.yPrecision, memento.xCursorPosition,
-                                         memento.yCursorPosition, memento.downTime,
-                                         memento.pointerProperties, memento.pointerCoords);
+                                         memento.xPrecision, memento.yPrecision,
+                                         memento.xCursorPosition, memento.yCursorPosition,
+                                         memento.downTime, memento.pointerProperties,
+                                         memento.pointerCoords);
 }
 
 std::vector<std::unique_ptr<EventEntry>> InputState::synthesizeCancelationEvents(
@@ -493,10 +493,10 @@ std::vector<std::unique_ptr<EventEntry>> InputState::synthesizePointerDownEvents
                                                   memento.displayId, memento.policyFlags, action,
                                                   /*actionButton=*/0, memento.flags, AMETA_NONE,
                                                   /*buttonState=*/0, MotionClassification::NONE,
-                                                  AMOTION_EVENT_EDGE_FLAG_NONE, memento.xPrecision,
-                                                  memento.yPrecision, memento.xCursorPosition,
-                                                  memento.yCursorPosition, memento.downTime,
-                                                  pointerProperties, pointerCoords));
+                                                  memento.xPrecision, memento.yPrecision,
+                                                  memento.xCursorPosition, memento.yCursorPosition,
+                                                  memento.downTime, pointerProperties,
+                                                  pointerCoords));
         }
 
         memento.firstNewPointerIdx = INVALID_POINTER_INDEX;
@@ -548,10 +548,9 @@ std::vector<std::unique_ptr<MotionEntry>> InputState::synthesizeCancelationEvent
                                               /*actionButton=*/0,
                                               memento.flags | MotionFlag::CANCELED, AMETA_NONE,
                                               /*buttonState=*/0, MotionClassification::NONE,
-                                              AMOTION_EVENT_EDGE_FLAG_NONE, memento.xPrecision,
-                                              memento.yPrecision, memento.xCursorPosition,
-                                              memento.yCursorPosition, memento.downTime,
-                                              pointerProperties, pointerCoords));
+                                              memento.xPrecision, memento.yPrecision,
+                                              memento.xCursorPosition, memento.yCursorPosition,
+                                              memento.downTime, pointerProperties, pointerCoords));
 
         // Cleanup pointer information
         pointerProperties.erase(pointerProperties.begin() + pointerIdx);

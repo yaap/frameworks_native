@@ -106,6 +106,11 @@ struct Span {
 
     iovec toIovec() { return {const_cast<std::remove_const_t<T>*>(data), byteSize()}; }
 
+    void clear() {
+        data = nullptr;
+        size = 0;
+    }
+
     // Truncates `this` to a length of `offset` and returns a span with the
     // remainder.
     //

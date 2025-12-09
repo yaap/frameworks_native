@@ -17,6 +17,7 @@
 #pragma once
 
 #include <chrono>
+#include <string>
 
 #include <fmt/chrono.h>  // NOLINT(misc-include-cleaner)
 #include <fmt/format.h>

@@ -92,7 +92,7 @@ public:
     sp<IBinder> getResponsiveWindowToken();
     void assertNotifyAnrWasNotCalled();
     PointerCaptureRequest assertSetPointerCaptureCalled(const sp<gui::WindowInfoHandle>& window,
-                                                        bool enabled);
+                                                        PointerCaptureMode mode);
     void assertSetPointerCaptureNotCalled();
     void assertDropTargetEquals(const InputDispatcherInterface& dispatcher,
                                 const sp<IBinder>& targetToken);
@@ -185,12 +185,12 @@ private:
             const std::shared_ptr<InputApplicationHandle>& applicationHandle) override;
     void notifyInputChannelBroken(const sp<IBinder>& connectionToken) override;
     void notifyFocusChanged(const sp<IBinder>&, const sp<IBinder>&) override;
-    void notifySensorEvent(int32_t deviceId, InputDeviceSensorType sensorType,
+    void notifySensorEvent(DeviceId deviceId, InputDeviceSensorType sensorType,
                            InputDeviceSensorAccuracy accuracy, nsecs_t timestamp,
                            const std::vector<float>& values) override;
-    void notifySensorAccuracy(int deviceId, InputDeviceSensorType sensorType,
+    void notifySensorAccuracy(DeviceId deviceId, InputDeviceSensorType sensorType,
                               InputDeviceSensorAccuracy accuracy) override;
-    void notifyVibratorState(int32_t deviceId, bool isOn) override;
+    void notifyVibratorState(DeviceId deviceId, bool isOn) override;
     bool filterInputEvent(const InputEvent& inputEvent, uint32_t policyFlags) override;
     void interceptKeyBeforeQueueing(const KeyEvent& inputEvent, uint32_t&) override;
     void interceptMotionBeforeQueueing(ui::LogicalDisplayId, uint32_t, int32_t, nsecs_t,

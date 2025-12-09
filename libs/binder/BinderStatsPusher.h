@@ -42,11 +42,15 @@ private:
 
     // timeout for checking the service.
     static const int32_t kCheckServiceTimeoutSec = 5;
+    static const int32_t kLatencyCountFirstWatermark = 10;
+    static const int32_t kLatencyCountSecondWatermark = 50;
     static const int32_t kSpamFirstWatermark = 125;
     static const int32_t kSpamSecondWatermark = 250;
-    // Time window to aggregate the data in. Once the data point's startTime
-    // is older than the Aggregation window, we will allow the data to be sent.
-    static const int64_t kSpamAggregationWindowSec = 5;
+    // Time window (in seconds) for aggregating per-second call counts.
+    // Data for a specific second (startTimeSec) is processed for spam detection
+    // and to update latency-related 'secondsWithAtLeastXCalls' counts
+    // once 'nowSec - startTimeSec >= kAggregationWindowSec'.
+    static const int64_t kAggregationWindowSec = 5;
 
     // KeyEqual function for Binder Spam aggregation of BinderCallData
     struct SpamStatsKeyEqual {
@@ -65,24 +69,31 @@ private:
         }
     };
 
-    using SpamStatsMap =
+    // Metrics aggregated for reporting.
+    struct AidlTargetMetrics {
+        AidlTargetMetrics() = default;
+        uint32_t totalCalls = 0;
+        uint32_t callsWithLatency = 0;
+        int64_t durationSumMicros = 0;
+    };
+
+    using StatsBufferMap =
             std::unordered_map<BinderCallData,
-                               std::unordered_map<int64_t /*startTimeSec*/, uint32_t /*count*/>,
+                               std::unordered_map<int64_t /*startTimeSec*/, AidlTargetMetrics>,
                                SpamStatsKeyHash,   // Hash
                                SpamStatsKeyEqual>; // KeyEqual
 
-    // TODO(b/299356196): replace with gSystemBootCompleted
-    bool mBootComplete = false;
     // If last service check was a success.
     bool mLastServiceCheckSucceeded = true;
     // time of last check
     int64_t mServiceCheckTimeSec = -kCheckServiceTimeoutSec - 1;
     // Aggregates binder transaction data into BinderSpamReport objects.
-    void aggregateBinderSpamLocked(const std::vector<BinderCallData>& data,
-                                   const sp<os::IStatsBootstrapAtomService>& service,
-                                   const int64_t nowSec);
+    void aggregateStatsLocked(const std::vector<BinderCallData>& data,
+                              const sp<os::IStatsBootstrapAtomService>& service,
+                              const int64_t nowSec);
+
     // The stats which are not sent to StatsBootStrap
-    SpamStatsMap mSpamStatsBuffer;
+    StatsBufferMap mStatsBuffer;
 };
 
 } // namespace android

@@ -140,6 +140,11 @@ public:
     void setTransactionHangCallback(std::function<void(const std::string&)> callback);
     void setApplyToken(sp<IBinder>);
 
+    void setCornerRadiiCallback(std::function<void(const gui::CornerRadii)>)
+            EXCLUDES(mCornerRadiiCallbackMutex);
+    std::function<void(const gui::CornerRadii)> getCornerRadiiCallback() const
+            EXCLUDES(mCornerRadiiCallbackMutex);
+
     void setWaitForBufferReleaseCallback(std::function<void(const nsecs_t)> callback)
             EXCLUDES(mWaitForBufferReleaseMutex);
     std::function<void(const nsecs_t)> getWaitForBufferReleaseCallback() const
@@ -157,9 +162,7 @@ private:
     friend class BLASTBufferQueueHelper;
     friend class BBQBufferQueueProducer;
     friend class TestBLASTBufferQueue;
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
     friend class BBQBufferQueueCore;
-#endif
 
     // can't be copied
     BLASTBufferQueue& operator = (const BLASTBufferQueue& rhs);
@@ -193,6 +196,7 @@ private:
     sp<SurfaceControl> mSurfaceControl GUARDED_BY(mMutex);
 
     mutable std::mutex mMutex;
+    mutable std::mutex mCornerRadiiCallbackMutex;
     mutable std::mutex mWaitForBufferReleaseMutex;
     std::condition_variable mCallbackCV;
 
@@ -231,6 +235,15 @@ private:
     ui::Size mRequestedSize GUARDED_BY(mMutex);
     int32_t mFormat GUARDED_BY(mMutex);
 
+    // Buffers may reach SurfaceFlinger out of order. Buffer barriers are used to ensure that
+    // a buffer with a given frame number is only applied in SurfaceFlinger once a previous buffer
+    // with a lower frame number is applied. Transactions that are not applied by BLASTBufferQueue
+    // always wait on the last buffer applied by BLASTBufferQueue using these barriers.
+    // Barriers are set on a layer, and are not shared across layers. This means if the layer
+    // backing this BLASTBufferQueue changes, the barrier will be invalid. This flag is used to
+    // track when the layer is changed so the barrier can be skipped.
+    bool mSetBufferBarrier GUARDED_BY(mMutex) = false;
+
     // Keep a copy of the current picture profile handle, so it can be moved to a new
     // SurfaceControl when BBQ migrates via ::update.
     std::optional<PictureProfileHandle> mPictureProfileHandle;
@@ -243,9 +256,10 @@ private:
         // This is used to check if we should update the blast layer size immediately or wait until
         // we get the next buffer. This will support scenarios where the layer can change sizes
         // and the buffer will scale to fit the new size.
-        uint32_t scalingMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
+        uint32_t scalingMode = com::android::graphics::libgui::flags::default_scaling_mode_freeze()
+                ? NATIVE_WINDOW_SCALING_MODE_FREEZE
+                : NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
         Rect crop;
-
         void update(bool hasBuffer, uint32_t width, uint32_t height, uint32_t transform,
                     uint32_t scalingMode, const Rect& crop) {
             this->hasBuffer = hasBuffer;
@@ -332,9 +346,12 @@ private:
 
     std::unordered_set<uint64_t> mSyncedFrameNumbers GUARDED_BY(mMutex);
 
+    std::function<void(const gui::CornerRadii)> mCornerRadiiCallback
+            GUARDED_BY(mCornerRadiiCallbackMutex);
+
     std::function<void(const nsecs_t)> mWaitForBufferReleaseCallback
             GUARDED_BY(mWaitForBufferReleaseMutex);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+
     // BufferReleaseChannel is used to communicate buffer releases from SurfaceFlinger to the
     // client.
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> mBufferReleaseProducer;
@@ -343,7 +360,6 @@ private:
     void drainBufferReleaseConsumer();
 
     std::shared_ptr<BufferReleaseReader> mBufferReleaseReader;
-#endif
 };
 
 } // namespace android

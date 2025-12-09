@@ -38,5 +38,8 @@ cc_benchmark {
     static_libs: [
         "libgtest",
     ],
+    header_libs: [
+        "liblocklessqueue_headers",
+    ],
     host_supported: true,
 }

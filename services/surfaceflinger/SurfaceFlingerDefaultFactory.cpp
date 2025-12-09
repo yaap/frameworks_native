@@ -25,7 +25,6 @@
 #include "DisplayDevice.h"
 #include "FrameTracer/FrameTracer.h"
 #include "Layer.h"
-#include "NativeWindowSurface.h"
 #include "SurfaceFlingerDefaultFactory.h"
 #include "SurfaceFlingerProperties.h"
 
@@ -60,17 +59,6 @@ sp<GraphicBuffer> DefaultFactory::createGraphicBuffer(uint32_t width, uint32_t h
                                                       PixelFormat format, uint32_t layerCount,
                                                       uint64_t usage, std::string requestorName) {
     return sp<GraphicBuffer>::make(width, height, format, layerCount, usage, requestorName);
-}
-
-void DefaultFactory::createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
-                                       sp<IGraphicBufferConsumer>* outConsumer,
-                                       bool consumerIsSurfaceFlinger) {
-    BufferQueue::createBufferQueue(outProducer, outConsumer, consumerIsSurfaceFlinger);
-}
-
-std::unique_ptr<surfaceflinger::NativeWindowSurface> DefaultFactory::createNativeWindowSurface(
-        const sp<IGraphicBufferProducer>& producer) {
-    return surfaceflinger::impl::createNativeWindowSurface(producer);
 }
 
 std::unique_ptr<compositionengine::CompositionEngine> DefaultFactory::createCompositionEngine() {

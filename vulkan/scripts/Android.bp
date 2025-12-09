@@ -17,6 +17,11 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+filegroup {
+    name: "vk_py_path",
+    srcs: ["vk.py"],
+}
+
 python_library_host {
     name: "native_vulkan_scripts_lib",
     srcs: ["*.py"],

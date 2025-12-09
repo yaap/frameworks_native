@@ -61,11 +61,9 @@ bool FdTrigger::isTriggered() {
 }
 
 status_t FdTrigger::triggerablePoll(const android::RpcTransportFd& transportFd, int16_t event) {
-#ifdef BINDER_RPC_SINGLE_THREADED
-    if (mTriggered) {
+    if (isTriggered()) {
         return DEAD_OBJECT;
     }
-#endif
 
     LOG_ALWAYS_FATAL_IF(event == 0, "triggerablePoll %d with event 0 is not allowed",
                         transportFd.fd.get());

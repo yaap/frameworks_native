@@ -142,6 +142,8 @@ status_t RpcSession::setupUnixDomainClient(const char* path) {
 }
 
 status_t RpcSession::setupUnixDomainSocketBootstrapClient(unique_fd bootstrapFd) {
+    if (status_t res = binder::os::setNonBlocking(bootstrapFd); res != OK) return res;
+
     mBootstrapTransport =
             mCtx->newTransport(RpcTransportFd(std::move(bootstrapFd)), mShutdownTrigger.get());
     return setupClient([&](const std::vector<uint8_t>& sessionId, bool incoming) {

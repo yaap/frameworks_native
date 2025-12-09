@@ -31,6 +31,13 @@
 #include "test_framework/hwc3/FakeComposer.h"
 #include "test_framework/hwc3/Hwc3Controller.h"
 #include "test_framework/hwc3/ObservingComposer.h"
+#include "test_framework/hwc3/events/BufferPendingDisplay.h"
+#include "test_framework/hwc3/events/BufferPendingRelease.h"
+#include "test_framework/hwc3/events/ClientDestroyed.h"
+#include "test_framework/hwc3/events/DisplayPresented.h"
+#include "test_framework/hwc3/events/PowerMode.h"
+#include "test_framework/hwc3/events/VSync.h"
+#include "test_framework/hwc3/events/VSyncEnabled.h"
 
 namespace android::surfaceflinger::tests::end2end::test_framework::hwc3 {
 
@@ -117,6 +124,33 @@ void Hwc3Controller::addDisplay(const core::DisplayConfiguration& config) {
 void Hwc3Controller::removeDisplay(core::DisplayConfiguration::Id displayId) {
     CHECK(mFakeComposer);
     mFakeComposer->removeDisplay(displayId);
+}
+
+void Hwc3Controller::onClientDestroyed(const events::ClientDestroyed& event) const {
+    mCallbacks.onClientDestroyed(event);
+}
+
+void Hwc3Controller::onPowerModeChanged(const events::PowerMode& event) const {
+    mCallbacks.onPowerModeChanged(event);
+}
+
+void Hwc3Controller::onVsyncEnabledChanged(const events::VSyncEnabled& event) const {
+    mCallbacks.onVsyncEnabledChanged(event);
+}
+
+void Hwc3Controller::onDisplayPresented(const events::DisplayPresented& event) const {
+    mCallbacks.onDisplayPresented(event);
+}
+
+void Hwc3Controller::onBufferPendingDisplay(const events::BufferPendingDisplay& event) const {
+    mCallbacks.onBufferPendingDisplay(event);
+}
+void Hwc3Controller::onBufferPendingRelease(const events::BufferPendingRelease& event) const {
+    mCallbacks.onBufferPendingRelease(event);
+}
+
+void Hwc3Controller::onVSyncCallbackSent(const events::VSync& event) const {
+    mCallbacks.onVSyncCallbackSent(event);
 }
 
 }  // namespace android::surfaceflinger::tests::end2end::test_framework::hwc3

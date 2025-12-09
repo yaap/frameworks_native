@@ -27,19 +27,24 @@ static constexpr uint32_t kAuthVersion = 2;
 static std::set<AdbdAuthFeature> supported_features = {
     AdbdAuthFeature::WifiLifeCycle};
 
-AdbdAuthContext::AdbdAuthContext(AdbdAuthCallbacksV1* callbacks)
+AdbdAuthContext::AdbdAuthContext(const AdbdAuthCallbacksV1* callbacks, std::optional<int> server_fd)
     : next_id_(0), callbacks_(*callbacks) {
   epoll_fd_.reset(epoll_create1(EPOLL_CLOEXEC));
   if (epoll_fd_ == -1) {
     PLOG(FATAL) << "adbd_auth: failed to create epoll fd";
   }
 
-  event_fd_.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
-  if (event_fd_ == -1) {
-    PLOG(FATAL) << "adbd_auth: failed to create eventfd";
+  interrupt_fd_.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+  if (interrupt_fd_ == -1) {
+    PLOG(FATAL) << "adbd_auth: failed to create interrupt_fd";
   }
 
-  sock_fd_.reset(android_get_control_socket("adbd"));
+  if (server_fd.has_value()) {
+    sock_fd_.reset(server_fd.value());
+  } else {
+    sock_fd_.reset(android_get_control_socket("adbd"));
+  }
+
   if (sock_fd_ == -1) {
     PLOG(ERROR) << "adbd_auth: failed to get adbd authentication socket";
   } else {
@@ -129,6 +134,7 @@ void AdbdAuthContext::ReplaceFrameworkFd(unique_fd new_fd) REQUIRES(mutex_) {
 void AdbdAuthContext::HandlePacket(std::string_view packet) EXCLUDES(mutex_) {
   LOG(INFO) << "adbd_auth: received packet: " << packet;
 
+  received_packets_++;
   if (packet.size() < 2) {
     LOG(ERROR) << "adbd_auth: received packet of invalid length";
     std::lock_guard<std::mutex> lock(mutex_);
@@ -145,8 +151,6 @@ void AdbdAuthContext::HandlePacket(std::string_view packet) EXCLUDES(mutex_) {
   }
   if (!handled_packet) {
     LOG(ERROR) << "adbd_auth: unhandled packet: " << packet;
-    std::lock_guard<std::mutex> lock(mutex_);
-    ReplaceFrameworkFd(unique_fd());
   }
 }
 
@@ -269,10 +273,12 @@ void AdbdAuthContext::Run() {
     event.events = EPOLLIN;
     event.data.u64 = kEpollConstEventFd;
     CHECK_EQ(
-        0, epoll_ctl(epoll_fd_.get(), EPOLL_CTL_ADD, event_fd_.get(), &event));
+        0, epoll_ctl(epoll_fd_.get(), EPOLL_CTL_ADD, interrupt_fd_.get(), &event));
   }
 
-  while (true) {
+  running_ = true;
+
+  while (running_) {
     struct epoll_event events[3];
     int rc = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd_.get(), events, 3, -1));
     if (rc == -1) {
@@ -310,7 +316,7 @@ void AdbdAuthContext::Run() {
           // We were woken up to write something.
           uint64_t dummy;
           int rc =
-              TEMP_FAILURE_RETRY(read(event_fd_.get(), &dummy, sizeof(dummy)));
+              TEMP_FAILURE_RETRY(read(interrupt_fd_.get(), &dummy, sizeof(dummy)));
           if (rc != 8) {
             PLOG(FATAL) << "adbd_auth: failed to read from eventfd (rc = " << rc
                         << ")";
@@ -350,6 +356,11 @@ void AdbdAuthContext::Run() {
       }
     }
   }
+}
+
+void AdbdAuthContext::Stop() {
+  running_ = false;
+  Interrupt();
 }
 
 static constexpr std::pair<const char*, bool> key_paths[] = {
@@ -450,11 +461,11 @@ void AdbdAuthContext::SendTLSServerPort(uint16_t port) {
 // Interrupt the worker thread to do some work.
 void AdbdAuthContext::Interrupt() {
   uint64_t value = 1;
-  ssize_t rc = write(event_fd_.get(), &value, sizeof(value));
+  ssize_t rc = write(interrupt_fd_.get(), &value, sizeof(value));
   if (rc == -1) {
-    PLOG(FATAL) << "adbd_auth: write to eventfd failed";
+    PLOG(FATAL) << "adbd_auth: write to interrupt_fd failed";
   } else if (rc != sizeof(value)) {
-    LOG(FATAL) << "adbd_auth: write to eventfd returned short (" << rc << ")";
+    LOG(FATAL) << "adbd_auth: write to interrupt_fd returned short (" << rc << ")";
   }
 }
 
@@ -476,8 +487,8 @@ void AdbdAuthContext::InitFrameworkHandlers() {
                                           std::placeholders::_1)});
 }
 
-AdbdAuthContextV2::AdbdAuthContextV2(AdbdAuthCallbacksV2* callbacks)
-    : AdbdAuthContext(callbacks), callbacks_v2_(*callbacks) {}
+AdbdAuthContextV2::AdbdAuthContextV2(const AdbdAuthCallbacksV2* callbacks, std::optional<int> server_fd)
+    : AdbdAuthContext(callbacks, server_fd), callbacks_v2_(*callbacks) {}
 
 void AdbdAuthContextV2::InitFrameworkHandlers() {
   AdbdAuthContext::InitFrameworkHandlers();

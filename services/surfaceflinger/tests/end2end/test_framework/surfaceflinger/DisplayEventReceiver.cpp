@@ -169,10 +169,6 @@ void DisplayEventReceiver::processReceivedEvents(std::span<Event> events) {
                                           fmt::underlying(event.header.type));
                 break;
 
-            case EventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
-                LOG(FATAL) << "Unexpected DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH event";
-                break;
-
             case EventType::DISPLAY_EVENT_VSYNC:
                 onVsync(event.header.displayId, timestamp, event.vsync.count,
                         event.vsync.vsyncData);
@@ -181,16 +177,6 @@ void DisplayEventReceiver::processReceivedEvents(std::span<Event> events) {
             case EventType::DISPLAY_EVENT_HOTPLUG:
                 onHotplug(event.header.displayId, timestamp, event.hotplug.connected,
                           event.hotplug.connectionError);
-                break;
-
-            case EventType::DISPLAY_EVENT_MODE_CHANGE:
-                onModeChange(event.header.displayId, timestamp, event.modeChange.modeId,
-                             std::chrono::nanoseconds(event.modeChange.vsyncPeriod));
-                break;
-
-            case EventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
-                onFrameRateOverride(event.header.displayId, timestamp, event.frameRateOverride.uid,
-                                    event.frameRateOverride.frameRateHz);
                 break;
 
             case EventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
@@ -265,22 +251,6 @@ void DisplayEventReceiver::onHotplug(DisplayId displayId, Timestamp timestamp, b
                 .connected = connected,
         });
     }
-}
-
-void DisplayEventReceiver::onModeChange(DisplayId displayId, Timestamp timestamp, int32_t modeId,
-                                        std::chrono::nanoseconds vsyncPeriod) {
-    ftl::ignore(displayId, timestamp, modeId, vsyncPeriod);
-    LOG(VERBOSE) << "onModeChange() display " << displayId << " timestamp "
-                 << timestamp.time_since_epoch() << " modeId " << modeId << " vsyncPeriod "
-                 << vsyncPeriod;
-}
-
-void DisplayEventReceiver::onFrameRateOverride(DisplayId displayId, Timestamp timestamp, uid_t uid,
-                                               float framerateHz) {
-    ftl::ignore(displayId, timestamp, uid, framerateHz);
-    LOG(VERBOSE) << "onFrameRateOverride() display " << displayId << " timestamp "
-                 << timestamp.time_since_epoch() << " uid " << uid << " framerateHz "
-                 << framerateHz;
 }
 
 void DisplayEventReceiver::onHdcpLevelsChange(DisplayId displayId, Timestamp timestamp,

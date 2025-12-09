@@ -402,7 +402,7 @@ std::optional<int> KeyEvent::getKeyCodeFromLabel(const char* label) {
     return InputEventLookup::getKeyCodeByLabel(label);
 }
 
-void KeyEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+void KeyEvent::initialize(int32_t id, DeviceId deviceId, uint32_t source,
                           ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
                           int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
                           int32_t metaState, int32_t repeatCount, nsecs_t downTime,
@@ -588,7 +588,7 @@ void PointerProperties::copyFrom(const PointerProperties& other) {
 
 // --- MotionEvent ---
 
-void MotionEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+void MotionEvent::initialize(int32_t id, DeviceId deviceId, uint32_t source,
                              ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
                              int32_t action, int32_t actionButton, ftl::Flags<MotionFlag> flags,
                              int32_t edgeFlags, int32_t metaState, int32_t buttonState,
@@ -662,9 +662,29 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
     //   the caller can know when the first event went down on the target.
     const nsecs_t splitDownTime = other.mDownTime;
 
-    auto [action, pointerProperties, pointerCoords] =
-            split(other.getAction(), other.getFlags(), other.getHistorySize(),
-                  other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+    auto result = split(other.getAction(), other.getFlags(), other.getHistorySize(),
+                        other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+    if (!result) {
+        LOG(ERROR) << "Could not split " << other << " into " << splitPointerIds
+                   << " with new id=" << newEventId << ": " << result.error();
+        // To maintain the previous behaviour of initializing the MotionEvent with *some* data, even
+        // when failure occurs, we proceed to initialize the MotionEvent with the other event's info
+        // as if splitting never occurred. The proper behaviour would be to convert this to an
+        // error and further propagate the failure up the stack, and not to initialize.
+        initialize(newEventId, other.mDeviceId, other.mSource, other.mDisplayId, /*hmac=*/{},
+                   other.getAction(), other.mActionButton, other.mFlags, other.mEdgeFlags,
+                   other.mMetaState, other.mButtonState, other.mClassification, other.mTransform,
+                   other.mXPrecision, other.mYPrecision, other.mRawXCursorPosition,
+                   other.mRawYCursorPosition, other.mRawTransform, splitDownTime,
+                   other.getEventTime(), /*pointerCount=*/0,
+                   /*pointerProperties=*/{}, /*pointerCoords=*/{});
+        mPointerProperties = other.mPointerProperties;
+        mSamplePointerCoords = other.mSamplePointerCoords;
+        mSampleEventTimes = other.mSampleEventTimes;
+        return;
+    }
+
+    auto [action, pointerProperties, pointerCoords] = *result;
 
     // Initialize the event with zero pointers, and manually set the split pointers.
     initialize(newEventId, other.mDeviceId, other.mSource, other.mDisplayId, /*hmac=*/{}, action,
@@ -672,7 +692,7 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
                other.mButtonState, other.mClassification, other.mTransform, other.mXPrecision,
                other.mYPrecision, other.mRawXCursorPosition, other.mRawYCursorPosition,
                other.mRawTransform, splitDownTime, other.getEventTime(), /*pointerCount=*/0,
-               pointerProperties.data(), pointerCoords.data());
+               /*pointerProperties=*/{}, /*pointerCoords=*/{});
     mPointerProperties = std::move(pointerProperties);
     mSamplePointerCoords = std::move(pointerCoords);
     mSampleEventTimes = other.mSampleEventTimes;
@@ -1041,11 +1061,11 @@ std::string MotionEvent::actionToString(int32_t action) {
     return android::base::StringPrintf("%" PRId32, action);
 }
 
-std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>> MotionEvent::split(
-        int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
-        const std::vector<PointerProperties>& pointerProperties,
-        const std::vector<PointerCoords>& pointerCoords,
-        std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
+base::Result<std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>>>
+MotionEvent::split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
+                   const std::vector<PointerProperties>& pointerProperties,
+                   const std::vector<PointerCoords>& pointerCoords,
+                   std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
     LOG_ALWAYS_FATAL_IF(!splitPointerIds.any());
     const auto pointerCount = pointerProperties.size();
     LOG_ALWAYS_FATAL_IF(pointerCoords.size() != (pointerCount * (historySize + 1)));
@@ -1069,16 +1089,17 @@ std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>> 
 
     if (CC_UNLIKELY(splitPointerProperties.size() != splitCount)) {
         // TODO(b/329107108): Promote this to a fatal check once bugs in the caller are resolved.
-        LOG(ERROR) << "Cannot split MotionEvent: Requested splitting " << splitCount
-                   << " pointers from the original event, but the original event only contained "
-                   << splitPointerProperties.size() << " of those pointers.";
+        return base::Error()
+                << "Cannot split MotionEvent: Requested splitting " << splitCount
+                << " pointers from the original event, but the original event only contained "
+                << splitPointerProperties.size() << " of those pointers.";
     }
 
     // TODO(b/327503168): Verify the splitDownTime here once it is used correctly.
 
     const auto splitAction = resolveActionForSplitMotionEvent(action, flags, pointerProperties,
                                                               splitPointerProperties);
-    return {splitAction, splitPointerProperties, splitPointerCoords};
+    return std::make_tuple(splitAction, splitPointerProperties, splitPointerCoords);
 }
 
 // Apply the given transformation to the point without checking whether the entire transform

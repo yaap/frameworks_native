@@ -23,11 +23,14 @@
 #include <android-base/stringprintf.h>
 #include <common/trace.h>
 #include <ftl/concat.h>
+#include <ftl/enum.h>
 #include <log/log.h>
 #include <math/mat4.h>
 #include <shaders/shaders.h>
 #include <ui/DebugUtils.h>
 #include <mutex>
+
+#include "skia/ColorSpaces.h"
 
 namespace android {
 namespace renderengine {
@@ -35,28 +38,9 @@ namespace skia {
 
 using base::StringAppendF;
 
-sk_sp<SkRuntimeEffect> RuntimeEffectManager::createAndStoreRuntimeEffect(
-        KnownId effectId, const std::string& effectName, const SkString& effectSkSL) {
-    SFTRACE_CALL();
-
+sk_sp<SkRuntimeEffect> RuntimeEffectManager::getKnownRuntimeEffect(KnownEffectId effectId) {
     auto effectIdValue = static_cast<size_t>(effectId);
-    LOG_ALWAYS_FATAL_IF(mKnownRuntimeEffects[effectIdValue],
-                        "RuntimeEffect already created for ID:%zu", effectIdValue);
-
-    std::string name = "RE_" + effectName;
-    SkRuntimeEffect::Options options;
-    options.fName = name;
-    auto [runtimeEffect, error] = SkRuntimeEffect::MakeForShader(effectSkSL, options);
-    LOG_ALWAYS_FATAL_IF(!runtimeEffect, "%s (ID:%zu) construction error: %s", name.c_str(),
-                        effectIdValue, error.c_str());
-
-    mKnownRuntimeEffects[effectIdValue] = runtimeEffect;
-    return runtimeEffect;
-}
-
-sk_sp<SkRuntimeEffect> RuntimeEffectManager::getKnownRuntimeEffect(KnownId effectId) {
-    auto effectIdValue = static_cast<size_t>(effectId);
-    sk_sp<SkRuntimeEffect> runtimeEffect = mKnownRuntimeEffects[effectIdValue];
+    sk_sp<SkRuntimeEffect> runtimeEffect = mKnownEffects[effectIdValue];
     LOG_ALWAYS_FATAL_IF(!runtimeEffect, "RuntimeEffect for ID:%zu has not been created yet",
                         effectIdValue);
     return runtimeEffect;
@@ -97,7 +81,66 @@ std::string dataspaceEnumString(ui::Dataspace dataspace) {
     }
 }
 
+void RuntimeEffectManager::createAndStoreKnownEffects() {
+    for (int i = 0; i < kEffectCount; i++) {
+        SkRuntimeEffect::Options options;
+        options.fName = kEffectNames[i];
+        const SkString* effectSource = kEffectSources[i];
+        if (effectSource) {
+            auto [effect, error] = SkRuntimeEffect::MakeForShader(*effectSource, options);
+            LOG_ALWAYS_FATAL_IF(!effect, "%s (ID:%d) construction error: %s", kEffectNames[i], i,
+                                error.c_str());
+            mKnownEffects[i] = effect;
+        }
+    }
+
+    mKnownEffects[kUNKNOWN__SRGB__false__UNKNOWN__Shader] = getOrCreateLinearRuntimeEffect({
+            .inputDataspace = ui::Dataspace::UNKNOWN, // Default
+            .outputDataspace = ui::Dataspace::SRGB,   // (deprecated) sRGB sRGB Full range
+            .undoPremultipliedAlpha = false,
+            .fakeOutputDataspace = ui::Dataspace::UNKNOWN, // Default
+            .type = shaders::LinearEffect::SkSLType::Shader,
+    });
+
+    mKnownEffects[kBT2020_ITU_PQ__BT2020__false__UNKNOWN__Shader] = getOrCreateLinearRuntimeEffect(
+            {.inputDataspace = ui::Dataspace::BT2020_ITU_PQ, // BT2020 SMPTE 2084 Limited range
+             .outputDataspace = ui::Dataspace::BT2020,       // BT2020 SMPTE_170M Full range
+             .undoPremultipliedAlpha = false,
+             .fakeOutputDataspace = ui::Dataspace::UNKNOWN, // Default
+             .type = shaders::LinearEffect::SkSLType::Shader});
+
+    mKnownEffects[k0x188a0000__DISPLAY_P3__false__0x90a0000__Shader] =
+            getOrCreateLinearRuntimeEffect({
+                    .inputDataspace =
+                            static_cast<ui::Dataspace>(0x188a0000), // DCI-P3 sRGB Extended range
+                    .outputDataspace = ui::Dataspace::DISPLAY_P3,   // DCI-P3 sRGB Full range
+                    .undoPremultipliedAlpha = false,
+                    .fakeOutputDataspace =
+                            static_cast<ui::Dataspace>(0x90a0000), // DCI-P3 gamma 2.2 Full range
+                    .type = shaders::LinearEffect::SkSLType::Shader,
+            });
+
+    mKnownEffects[kV0_SRGB__V0_SRGB__true__UNKNOWN__Shader] = getOrCreateLinearRuntimeEffect({
+            .inputDataspace = ui::Dataspace::V0_SRGB,
+            .outputDataspace = ui::Dataspace::V0_SRGB,
+            .undoPremultipliedAlpha = true,
+            .fakeOutputDataspace = ui::Dataspace::UNKNOWN, // Default
+            .type = shaders::LinearEffect::SkSLType::Shader,
+    });
+
+    mKnownEffects[k0x188a0000__V0_SRGB__true__0x9010000__Shader] = getOrCreateLinearRuntimeEffect({
+            .inputDataspace = static_cast<ui::Dataspace>(0x188a0000), // DCI-P3 sRGB Extended range
+            .outputDataspace = ui::Dataspace::V0_SRGB,
+            .undoPremultipliedAlpha = true,
+            .fakeOutputDataspace = static_cast<ui::Dataspace>(0x9010000),
+            .type = shaders::LinearEffect::SkSLType::Shader,
+    });
+}
+
 void RuntimeEffectManager::dump(std::string& result) {
+    StringAppendF(&result, "RenderEngine chosen blur algorithm: %s\n",
+                  ftl::enum_string(getChosenBlurAlgorithm()).c_str());
+
     // LinearEffects are ordered (by hash value) when dumped to reduce churn when iterating on the
     // set of precompiled effects.
     std::vector<shaders::LinearEffect> orderedLinearEffects;
@@ -176,7 +219,27 @@ sk_sp<SkShader> RuntimeEffectManager::createLinearEffectShader(
         effectBuilder.uniform(uniform.name.c_str()).set(uniform.value.data(), uniform.value.size());
     }
 
-    return effectBuilder.makeShader();
+    shader = effectBuilder.makeShader();
+    if (shader) {
+        // The linear effect SkSL assumes it operates in with a linear gamma in the source gamut.
+        // Wrapping it in a working color space shader satisfies this requirement and will
+        // automatically convert the linear effect's output (in the linear source space) to
+        // linearEffect.outputDataspace (which is assumed to be the dst CS of the SkSurface this
+        // shader will be drawn into).
+        //
+        // The only exception is when there is a custom OETF, in which case the working color space
+        // should be the final output data space, since the linear effect will manage converting to
+        // the output gamut and apply the custom OETF. Using the final output space disables Skia's
+        // color management post OETF.
+        sk_sp<SkColorSpace> inputSpace =
+                toSkColorSpace(linearEffect.inputDataspace)->makeLinearGamma();
+        sk_sp<SkColorSpace> outputSpace = nullptr;
+        if ((linearEffect.fakeOutputDataspace & HAL_DATASPACE_TRANSFER_MASK)) {
+            outputSpace = toSkColorSpace(linearEffect.fakeOutputDataspace);
+        }
+        shader = shader->makeWithWorkingColorSpace(inputSpace, outputSpace);
+    }
+    return shader;
 }
 
 } // namespace skia

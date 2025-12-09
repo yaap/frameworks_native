@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "HwcComposer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "AidlComposerHal.h"
@@ -305,7 +303,7 @@ bool AidlComposer::isSupported(OptionalFeature feature) const {
 }
 
 bool AidlComposer::isVrrSupported() const {
-    return mComposerInterfaceVersion >= 3 && FlagManager::getInstance().vrr_config();
+    return mComposerInterfaceVersion >= 3;
 }
 
 std::vector<Capability> AidlComposer::getCapabilities() {

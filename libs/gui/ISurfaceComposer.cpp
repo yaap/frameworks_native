@@ -26,7 +26,6 @@
 #include <gui/ISurfaceComposer.h>
 #include <gui/LayerState.h>
 #include <gui/SchedulingPolicy.h>
-#include <gui/SimpleTransactionState.h>
 #include <gui/TransactionState.h>
 #include <private/gui/ParcelUtils.h>
 #include <stdint.h>
@@ -58,19 +57,14 @@ public:
 
     virtual ~BpSurfaceComposer();
 
-    status_t setTransactionState(const SimpleTransactionState simpleState,
-                                 const ComplexTransactionState& complexState,
-                                 MutableTransactionState& mutableState,
-                                 const sp<IBinder>& applyToken) override {
+    status_t setTransactionState(TransactionState&& state, const sp<IBinder>& applyToken) override {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
 
-        SAFE_PARCEL(mutableState.writeToParcel, &data);
-        SAFE_PARCEL(simpleState.writeToParcel, &data);
-        SAFE_PARCEL(complexState.writeToParcel, &data);
+        SAFE_PARCEL(state.writeToParcel, &data);
         SAFE_PARCEL(data.writeStrongBinder, applyToken);
 
-        if (simpleState.mFlags & ISurfaceComposer::eOneWay) {
+        if (state.mFlags & ISurfaceComposer::eOneWay) {
             return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE, data, &reply,
                                       IBinder::FLAG_ONEWAY);
         } else {
@@ -93,17 +87,13 @@ status_t BnSurfaceComposer::onTransact(uint32_t code, const Parcel& data, Parcel
         case SET_TRANSACTION_STATE: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
 
-            MutableTransactionState mutableState;
-            SAFE_PARCEL(mutableState.readFromParcel, &data);
-            SimpleTransactionState simpleState;
-            SAFE_PARCEL(simpleState.readFromParcel, &data);
-            ComplexTransactionState complexState;
-            SAFE_PARCEL(complexState.readFromParcel, &data);
+            TransactionState state;
+            SAFE_PARCEL(state.readFromParcel, &data);
 
             sp<IBinder> applyToken;
             SAFE_PARCEL(data.readStrongBinder, &applyToken);
 
-            return setTransactionState(simpleState, complexState, mutableState, applyToken);
+            return setTransactionState(std::move(state), applyToken);
         }
         case GET_SCHEDULING_POLICY: {
             gui::SchedulingPolicy policy;

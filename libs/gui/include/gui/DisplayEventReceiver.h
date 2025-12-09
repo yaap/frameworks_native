@@ -58,16 +58,11 @@ static inline constexpr uint32_t fourcc(char c1, char c2, char c3, char c4) {
 enum class DisplayEventType : uint32_t {
     DISPLAY_EVENT_VSYNC = fourcc('v', 's', 'y', 'n'),
     DISPLAY_EVENT_HOTPLUG = fourcc('p', 'l', 'u', 'g'),
-    // TODO(b/399482301) Cleanup the DISPLAY_EVENT_MODE_CHANGE event
-    // with flag cleanup.
-    DISPLAY_EVENT_MODE_CHANGE = fourcc('m', 'o', 'd', 'e'),
+    DISPLAY_EVENT_SUPPORTED_REFRESH_RATE = fourcc('s', 'r', 'r', 'e'),
     DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE = fourcc('m', 'o', 'f', 'r'),
     DISPLAY_EVENT_MODE_REJECTION = fourcc('r', 'e', 'j', 'e'),
     DISPLAY_EVENT_NULL = fourcc('n', 'u', 'l', 'l'),
     DISPLAY_EVENT_FRAME_RATE_OVERRIDE = fourcc('r', 'a', 't', 'e'),
-    // TODO(b/399482301) Cleanup the DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH event
-    // with the flag cleanup.
-    DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH = fourcc('f', 'l', 's', 'h'),
     DISPLAY_EVENT_HDCP_LEVELS_CHANGE = fourcc('h', 'd', 'c', 'p'),
 };
 
@@ -104,6 +99,10 @@ public:
             nsecs_t presentationDeadline __attribute__((aligned(8)));
         };
 
+        struct SupportedRefreshRate {
+            float refreshRate __attribute__((aligned(8)));
+        };
+
         struct ModeRejection {
             int32_t modeId;
         };
@@ -127,6 +126,7 @@ public:
             VSync vsync;
             Hotplug hotplug;
             ModeChange modeChange;
+            SupportedRefreshRate supportedRefreshRate;
             FrameRateOverride frameRateOverride;
             HdcpLevelsChange hdcpLevelsChange;
             ModeRejection modeRejection;
@@ -205,6 +205,7 @@ private:
     sp<IDisplayEventConnection> mEventConnection;
     std::unique_ptr<gui::BitTube> mDataChannel;
     std::optional<status_t> mInitError;
+    bool mSurfaceflingerAlive;
 };
 
 inline bool operator==(DisplayEventReceiver::Event::FrameRateOverride lhs,

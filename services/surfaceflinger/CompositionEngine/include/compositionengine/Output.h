@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include <common/LayerFilter.h>
 #include <compositionengine/LayerFE.h>
 #include <renderengine/LayerSettings.h>
 #include <ui/Fence.h>
@@ -196,7 +197,7 @@ public:
     virtual ui::Transform::RotationFlags getTransformHint() const = 0;
 
     // Sets the filter for this output. See Output::includesLayer.
-    virtual void setLayerFilter(ui::LayerFilter) = 0;
+    virtual void setLayerFilter(LayerFilter) = 0;
 
     // Sets the output color mode
     virtual void setColorProfile(const ColorProfile&) = 0;
@@ -239,7 +240,7 @@ public:
 
     // Returns whether the output includes a layer, based on their respective filters.
     // See Output::setLayerFilter.
-    virtual bool includesLayer(ui::LayerFilter) const = 0;
+    virtual bool includesLayer(LayerFilter) const = 0;
     virtual bool includesLayer(const sp<LayerFE>&) const = 0;
     virtual bool includesLayer(LayerFE*) const = 0;
 

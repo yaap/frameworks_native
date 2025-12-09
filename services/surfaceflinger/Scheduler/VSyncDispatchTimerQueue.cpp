@@ -29,9 +29,6 @@
 #include "VSyncDispatchTimerQueue.h"
 #include "VSyncTracker.h"
 
-#undef LOG_TAG
-#define LOG_TAG "VSyncDispatch"
-
 namespace android::scheduler {
 
 using base::StringAppendF;

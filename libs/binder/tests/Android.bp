@@ -111,6 +111,34 @@ cc_test {
     require_root: true,
 }
 
+cc_test {
+    name: "binderObserverConfigUnitTest",
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
+    srcs: [
+        "binderObserverConfigUnitTest.cpp",
+        ":libbinder_observer_sources",
+    ],
+    shared_libs: [
+        "liblog",
+        "libbinder",
+        "libcutils",
+        "libutils",
+    ],
+    static_libs: [
+        "libgmock",
+    ],
+    header_libs: [
+        "jni_headers",
+    ],
+    test_suites: ["general-tests"],
+    host_supported: false,
+    require_root: false,
+}
+
 // unit test only, which can run on host and doesn't use /dev/binder
 cc_test {
     name: "binderUnitTest",
@@ -403,6 +431,11 @@ cc_defaults {
         // libcrypto_static is not visible to this module
         "libcrypto",
     ],
+    exclude_shared_libs: [
+        // mixing a static libbinder with libbinder_ndk.so
+        // will present ODR issues
+        "libbinder_ndk",
+    ],
     static_libs: [
         "libbase",
         "libcutils",
@@ -548,6 +581,17 @@ cc_test {
 }
 
 cc_test {
+    name: "binderRpcTestNoLegacy",
+    defaults: [
+        "binderRpcTest_defaults",
+        "binderRpcTest_static_defaults",
+    ],
+    static_libs: [
+        "libbinder_rpc_no_legacy",
+    ],
+}
+
+cc_test {
     name: "binderRpcTestNoKernelAtAll",
     defaults: [
         "binderRpcTest_defaults",
@@ -623,7 +667,7 @@ cc_test {
         "libtrusty",
     ],
 
-    test_suites: ["device-tests"],
+    test_suites: ["general-tests"],
     require_root: true,
 }
 
@@ -924,8 +968,8 @@ cc_test_host {
     static_libs: [
         "libgmock",
     ],
-    target_required: [
-        "binderHostDeviceTestService",
+    device_first_data: [
+        ":binderHostDeviceTestService",
     ],
     test_suites: ["general-tests"],
     target: {
@@ -940,9 +984,6 @@ cc_test_host {
 
 cc_test {
     name: "binderHostDeviceTestService",
-    // The binary is named differently from the module so that PushFilePreparer pushes the binary
-    // directly, not the test module directory.
-    stem: "binderHostDeviceTest-service",
     defaults: ["binder_test_defaults"],
     gtest: false,
     auto_gen_config: false,

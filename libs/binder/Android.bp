@@ -234,6 +234,7 @@ filegroup {
     name: "libbinder_observer_sources",
     srcs: [
         "BinderObserver.cpp",
+        "BinderObserverConfig.cpp",
         "BinderStatsPusher.cpp",
     ],
     visibility: [
@@ -244,6 +245,11 @@ filegroup {
 cc_defaults {
     name: "libbinder_common_defaults",
     host_supported: true,
+
+    defaults: [
+        "libbinder_bpbinder_decstrong_last_flag_default",
+        "libbinder_defer_bc_request_freeze_notification_flag_default",
+    ],
 
     srcs: [
         "Binder.cpp",
@@ -282,6 +288,7 @@ cc_defaults {
         "-Wunused-const-variable",
         "-Wunused-result",
         "-Wexit-time-destructors",
+        "-Wshadow",
         "-DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION",
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         // Hide symbols by default and set the BUILDING_LIBBINDER macro so that
@@ -331,6 +338,7 @@ cc_defaults {
             cflags: [
                 "-DBINDER_RPC_DEV_SERVERS",
                 "-DBINDER_ENABLE_RECORDING",
+                "-DBINDER_OBSERVER_DROIDFOOD_CONFIG",
             ],
         },
     },
@@ -338,6 +346,9 @@ cc_defaults {
     shared_libs: [
         "libcutils",
         "liblog",
+        "libutils",
+    ],
+    export_shared_lib_headers: [
         "libutils",
     ],
 
@@ -546,11 +557,55 @@ libbinder_addservice_cache_config {
 }
 
 cc_defaults {
+    name: "libbinder_bpbinder_decstrong_last_flag_default",
+    cflags: select(release_flag("RELEASE_LIBBINDER_BPBINDER_DECSTRONG_LAST"), {
+        true: ["-DLIBBINDER_BPBINDER_DECSTRONG_LAST"],
+        default: [],
+    }),
+}
+
+cc_defaults {
+    name: "libbinder_defer_bc_request_freeze_notification_flag_default",
+    cflags: select(release_flag("RELEASE_LIBBINDER_DEFER_BC_REQUEST_FREEZE_NOTIFICATION"), {
+        true: ["-DLIBBINDER_DEFER_BC_REQUEST_FREEZE_NOTIFICATION"],
+        default: [],
+    }),
+}
+
+cc_defaults {
+    name: "libbinder_fix_double_derefs_flag_default",
+    cflags: select(release_flag("RELEASE_LIBBINDER_FIX_RECURSIVE_DOUBLE_DEREFS"), {
+        true: ["-DLIBBINDER_FIX_RECURSIVE_DOUBLE_DEREFS"],
+        default: [],
+    }),
+}
+
+cc_defaults {
+    name: "libbinder_freeze_use_flush_if_needed_flag_default",
+    cflags: select(release_flag("RELEASE_LIBBINDER_FREEZE_USE_FLUSH_IF_NEEDED"), {
+        true: ["-DLIBBINDER_FREEZE_USE_FLUSH_IF_NEEDED"],
+        default: [],
+    }),
+}
+
+cc_defaults {
+    name: "libbinder_freeze_use_flush_eagerly_flag_default",
+    cflags: select(release_flag("RELEASE_LIBBINDER_FREEZE_USE_FLUSH_EAGERLY"), {
+        true: ["-DLIBBINDER_FREEZE_USE_FLUSH_EAGERLY"],
+        default: [],
+    }),
+}
+
+cc_defaults {
     name: "libbinder_kernel_defaults",
     defaults: [
         "libbinder_client_cache_flag",
+        "libbinder_defer_bc_request_freeze_notification_flag_default",
         "libbinder_addservice_cache_flag",
         "libbinder_remove_cache_static_list_flag",
+        "libbinder_fix_double_derefs_flag_default",
+        "libbinder_freeze_use_flush_if_needed_flag_default",
+        "libbinder_freeze_use_flush_eagerly_flag_default",
     ],
     srcs: [
         "BufferedTextOutput.cpp",
@@ -731,7 +786,7 @@ cc_library {
 }
 
 cc_library {
-    name: "libbinder_rpc_no_blob",
+    name: "libbinder_rpc_no_legacy",
     vendor_available: true,
     defaults: [
         "libbinder_common_defaults",
@@ -762,7 +817,7 @@ cc_library {
     ],
 }
 
-cc_library {
+cc_library_static {
     name: "libbinder_rpc_single_threaded",
     defaults: [
         "libbinder_common_defaults",
@@ -777,7 +832,7 @@ cc_library {
     ],
 }
 
-cc_library {
+cc_library_static {
     name: "libbinder_rpc_single_threaded_no_kernel",
     defaults: [
         "libbinder_common_defaults",
@@ -910,9 +965,12 @@ aidl_interface {
     local_include_dir: "aidl",
     host_supported: true,
     srcs: [
+        "aidl/android/content/pm/ApexStagedEvent.aidl",
         "aidl/android/content/pm/IPackageManagerNative.aidl",
         "aidl/android/content/pm/IStagedApexObserver.aidl",
-        "aidl/android/content/pm/ApexStagedEvent.aidl",
+        "aidl/android/content/pm/PackageInfoNative.aidl",
+        "aidl/android/content/pm/SignatureNative.aidl",
+        "aidl/android/content/pm/SigningInfoNative.aidl",
         "aidl/android/content/pm/StagedApexInfo.aidl",
     ],
     backend: {
@@ -922,6 +980,10 @@ aidl_interface {
                 "com.android.virt",
             ],
             enabled: true,
+            gen_mockall: true,
+            additional_rustlibs: [
+                "libmockall",
+            ],
         },
     },
 }
@@ -1034,7 +1096,6 @@ cc_library {
     name: "libprocessinfoservice_aidl",
     host_supported: true,
     srcs: [
-        "IProcessInfoService.cpp",
         "ProcessInfoService.cpp",
     ],
     export_include_dirs: ["include_processinfo"],
@@ -1042,6 +1103,7 @@ cc_library {
         "libbinder",
         "libutils",
         "liblog",
+        "process_info_service_aidl-cpp",
     ],
 }
 

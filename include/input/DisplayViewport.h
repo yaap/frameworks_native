@@ -66,6 +66,8 @@ struct DisplayViewport {
     std::optional<uint8_t> physicalPort;
     ViewportType type;
     int32_t densityDpi;
+    float xDpi;
+    float yDpi;
 
     DisplayViewport()
           : displayId(ui::LogicalDisplayId::INVALID),
@@ -124,7 +126,7 @@ struct DisplayViewport {
 
     std::string toString() const {
         return StringPrintf("Viewport %s: displayId=%s, uniqueId=%s, port=%s, orientation=%d, "
-                            "densityDpi=%d "
+                            "densityDpi=%d xDpi=%f, yDpi=%f, "
                             "logicalFrame=[%d, %d, %d, %d], "
                             "physicalFrame=[%d, %d, %d, %d], "
                             "deviceSize=[%d, %d], "
@@ -132,9 +134,9 @@ struct DisplayViewport {
                             ftl::enum_string(type).c_str(), displayId.toString().c_str(),
                             uniqueId.c_str(),
                             physicalPort ? ftl::to_string(*physicalPort).c_str() : "<none>",
-                            static_cast<int>(orientation), densityDpi, logicalLeft, logicalTop,
-                            logicalRight, logicalBottom, physicalLeft, physicalTop, physicalRight,
-                            physicalBottom, deviceWidth, deviceHeight, isActive);
+                            static_cast<int>(orientation), densityDpi, xDpi, yDpi, logicalLeft,
+                            logicalTop, logicalRight, logicalBottom, physicalLeft, physicalTop,
+                            physicalRight, physicalBottom, deviceWidth, deviceHeight, isActive);
     }
 };
 

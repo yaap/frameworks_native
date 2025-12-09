@@ -957,6 +957,8 @@ public:
         return mBase->setDequeueTimeout(timeout);
     }
 
+    status_t extendSlotCount(int size) override { return mBase->extendSlotCount(size); }
+
     status_t setLegacyBufferDrop(bool drop) override {
         return mBase->setLegacyBufferDrop(drop);
     }

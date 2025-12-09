@@ -74,11 +74,14 @@ float getHapticScaleFactor(HapticScale scale) {
 
 float applyHapticScale(float value, float scaleFactor) {
     if (android_os_vibrator_haptics_scale_v2_enabled()) {
-        if (scaleFactor <= 1 || value == 0) {
-            return value * scaleFactor;
+        // Using S * x / (1 + (S - 1) * x^2) as the scale up function to converge to 1.0.
+        float scaledValue = (scaleFactor <= 1 || value == 0)
+                ? (value * scaleFactor)
+                : (value * scaleFactor) / (1 + (scaleFactor - 1) * value * value);
+        if (android_os_vibrator_vibration_scale_bounds_fix_enabled()) {
+            return std::clamp(scaledValue, -1.0f, 1.0f);
         } else {
-            // Using S * x / (1 + (S - 1) * x^2) as the scale up function to converge to 1.0.
-            return (value * scaleFactor) / (1 + (scaleFactor - 1) * value * value);
+            return scaledValue;
         }
     }
     float scale = powf(scaleFactor, 1.0f / SCALE_GAMMA);
@@ -104,6 +107,24 @@ float applyHapticScale(float value, float scaleFactor) {
     return sign * std::clamp(a * fx, 0.0f, 1.0f);
 }
 
+// TODO(b/345186129): remove this once flag android_os_vibrator_haptics_scale_v2_enabled removed
+float applyHapticScale(float value, HapticScale scale, float scaleFactor) {
+    if (android_os_vibrator_vibration_scale_device_config_enabled()) {
+        if (scale.getScaleFactor() >= 0) {
+            // Has device configured scale factor, use scale v2 for it.
+            scaleFactor = scale.getScaleFactor();
+            float scaledValue = (scaleFactor <= 1 || value == 0)
+                    ? (value * scaleFactor)
+                    : (value * scaleFactor) / (1 + (scaleFactor - 1) * value * value);
+            return std::clamp(scaledValue, -1.0f, 1.0f);
+        } // else apply regular scaling
+    }
+    if (scale.getLevel() == HapticLevel::NONE) {
+        return value;
+    }
+    return applyHapticScale(value, scaleFactor);
+}
+
 void applyHapticScale(float* buffer, size_t length, HapticScale scale) {
     if (scale.isScaleMute()) {
         memset(buffer, 0, length * sizeof(float));
@@ -112,22 +133,31 @@ void applyHapticScale(float* buffer, size_t length, HapticScale scale) {
     if (scale.isScaleNone()) {
         return;
     }
-    HapticLevel hapticLevel = scale.getLevel();
     float scaleFactor = getHapticScaleFactor(scale);
     float adaptiveScaleFactor = scale.getAdaptiveScaleFactor();
 
     for (size_t i = 0; i < length; i++) {
-        if (hapticLevel != HapticLevel::NONE) {
-            buffer[i] = applyHapticScale(buffer[i], scaleFactor);
-        }
-
+        buffer[i] = applyHapticScale(buffer[i], scale, scaleFactor);
         if (adaptiveScaleFactor >= 0 && adaptiveScaleFactor != 1.0f) {
-            buffer[i] *= adaptiveScaleFactor;
+            if (android_os_vibrator_vibration_scale_bounds_fix_enabled()) {
+                buffer[i] = std::clamp(buffer[i] * adaptiveScaleFactor, -1.0f, 1.0f);
+            } else {
+                buffer[i] *= adaptiveScaleFactor;
+            }
         }
     }
 }
 
 void clipHapticData(float* buffer, size_t length, float limit) {
+    if (android_os_vibrator_vibration_scale_bounds_fix_enabled()) {
+        if (isnan(limit) || limit <= 0 || limit >= 1) {
+            return;
+        }
+        for (size_t i = 0; i < length; i++) {
+            buffer[i] = std::clamp(buffer[i], -limit, limit);
+        }
+        return;
+    }
     if (isnan(limit) || limit == 0) {
         return;
     }

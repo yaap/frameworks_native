@@ -76,10 +76,15 @@ struct HWComposerTest : testing::Test {
     impl::HWComposer mHwc{std::unique_ptr<Hwc2::Composer>(mHal)};
 
     void expectHotplugConnect(hal::HWDisplayId hwcDisplayId, uint8_t port = 255,
+                              IComposerClient::DisplayConnectionType connectionType =
+                                      IComposerClient::DisplayConnectionType::EXTERNAL,
                               const display::DisplayIdentificationData& data = getExternalEdid()) {
         EXPECT_CALL(*mHal, getDisplayIdentificationData(hwcDisplayId, _, _, _))
                 .WillOnce(DoAll(SetArgPointee<1>(port), SetArgPointee<2>(data),
                                 Return(HalError::NONE)));
+
+        EXPECT_CALL(*mHal, getDisplayConnectionType(hwcDisplayId, _))
+                .WillOnce(DoAll(SetArgPointee<1>(connectionType), Return(V2_4::Error::NONE)));
 
         EXPECT_CALL(*mHal, setClientTargetSlotCount(_));
         EXPECT_CALL(*mHal, setVsyncEnabled(hwcDisplayId, Hwc2::IComposerClient::Vsync::DISABLE));
@@ -256,111 +261,7 @@ TEST_F(HWComposerTest, getModesWithLegacyDisplayConfigs) {
     }
 }
 
-TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_OFF) {
-    // if vrr_config is off, getDisplayConfigurationsSupported() is off as well
-    // then getModesWithLegacyDisplayConfigs should be called instead
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::vrr_config, false);
-    ASSERT_FALSE(FlagManager::getInstance().vrr_config());
-
-    constexpr hal::HWDisplayId kHwcDisplayId = 2;
-    constexpr hal::HWConfigId kConfigId = 42;
-    constexpr int32_t kMaxFrameIntervalNs = 50000000; // 20Fps
-
-    expectHotplugConnect(kHwcDisplayId);
-    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
-    ASSERT_TRUE(info);
-
-    EXPECT_CALL(*mHal, isVrrSupported()).WillRepeatedly(Return(false));
-
-    {
-        EXPECT_CALL(*mHal, getDisplayConfigs(kHwcDisplayId, _))
-                .WillOnce(Return(HalError::BAD_DISPLAY));
-        EXPECT_TRUE(mHwc.getModes(info->id, kMaxFrameIntervalNs).empty());
-    }
-    {
-        constexpr int32_t kWidth = 480;
-        constexpr int32_t kHeight = 720;
-        constexpr int32_t kConfigGroup = 1;
-        constexpr int32_t kVsyncPeriod = 16666667;
-        constexpr float kMmPerInch = 25.4f;
-        const ui::Size size = info->preferredDetailedTimingDescriptor->physicalSizeInMm;
-        const float expectedDpiX = (kWidth * kMmPerInch / size.width);
-        const float expectedDpiY = (kHeight * kMmPerInch / size.height);
-
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId, IComposerClient::Attribute::WIDTH,
-                                        _))
-                .WillRepeatedly(DoAll(SetArgPointee<3>(kWidth), Return(HalError::NONE)));
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId,
-                                        IComposerClient::Attribute::HEIGHT, _))
-                .WillRepeatedly(DoAll(SetArgPointee<3>(kHeight), Return(HalError::NONE)));
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId,
-                                        IComposerClient::Attribute::CONFIG_GROUP, _))
-                .WillRepeatedly(DoAll(SetArgPointee<3>(kConfigGroup), Return(HalError::NONE)));
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId,
-                                        IComposerClient::Attribute::VSYNC_PERIOD, _))
-                .WillRepeatedly(DoAll(SetArgPointee<3>(kVsyncPeriod), Return(HalError::NONE)));
-
-        // Optional Parameters UNSUPPORTED
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId, IComposerClient::Attribute::DPI_X,
-                                        _))
-                .WillOnce(Return(HalError::UNSUPPORTED));
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId, IComposerClient::Attribute::DPI_Y,
-                                        _))
-                .WillOnce(Return(HalError::UNSUPPORTED));
-
-        EXPECT_CALL(*mHal, getDisplayConfigs(kHwcDisplayId, _))
-                .WillRepeatedly(DoAll(SetArgPointee<1>(std::vector<hal::HWConfigId>{kConfigId}),
-                                      Return(HalError::NONE)));
-
-        auto modes = mHwc.getModes(info->id, kMaxFrameIntervalNs);
-        EXPECT_EQ(modes.size(), size_t{1});
-        EXPECT_EQ(modes.front().hwcId, kConfigId);
-        EXPECT_EQ(modes.front().width, kWidth);
-        EXPECT_EQ(modes.front().height, kHeight);
-        EXPECT_EQ(modes.front().configGroup, kConfigGroup);
-        EXPECT_EQ(modes.front().vsyncPeriod, kVsyncPeriod);
-        if (!FlagManager::getInstance().correct_dpi_with_display_size()) {
-            EXPECT_EQ(modes.front().dpiX, -1);
-            EXPECT_EQ(modes.front().dpiY, -1);
-        } else {
-            EXPECT_EQ(modes.front().dpiX, expectedDpiX);
-            EXPECT_EQ(modes.front().dpiY, expectedDpiY);
-        }
-
-        // Optional parameters are supported
-        constexpr int32_t kDpi = 320;
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId, IComposerClient::Attribute::DPI_X,
-                                        _))
-                .WillOnce(DoAll(SetArgPointee<3>(kDpi), Return(HalError::NONE)));
-        EXPECT_CALL(*mHal,
-                    getDisplayAttribute(kHwcDisplayId, kConfigId, IComposerClient::Attribute::DPI_Y,
-                                        _))
-                .WillOnce(DoAll(SetArgPointee<3>(kDpi), Return(HalError::NONE)));
-
-        modes = mHwc.getModes(info->id, kMaxFrameIntervalNs);
-        EXPECT_EQ(modes.size(), size_t{1});
-        EXPECT_EQ(modes.front().hwcId, kConfigId);
-        EXPECT_EQ(modes.front().width, kWidth);
-        EXPECT_EQ(modes.front().height, kHeight);
-        EXPECT_EQ(modes.front().configGroup, kConfigGroup);
-        EXPECT_EQ(modes.front().vsyncPeriod, kVsyncPeriod);
-        // DPI values are scaled by 1000 in the legacy implementation.
-        EXPECT_EQ(modes.front().dpiX, kDpi / 1000.f);
-        EXPECT_EQ(modes.front().dpiY, kDpi / 1000.f);
-    }
-}
-
-TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::vrr_config, true);
-    ASSERT_TRUE(FlagManager::getInstance().vrr_config());
-
+TEST_F(HWComposerTest, getModesWithDisplayConfigurations) {
     constexpr hal::HWDisplayId kHwcDisplayId = 2;
     constexpr hal::HWConfigId kConfigId = 42;
     constexpr int32_t kMaxFrameIntervalNs = 50000000; // 20Fps
@@ -385,7 +286,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
         const ui::Size size = info->preferredDetailedTimingDescriptor->physicalSizeInMm;
         const float expectedDpiX = (kWidth * kMmPerInch / size.width);
         const float expectedDpiY = (kHeight * kMmPerInch / size.height);
-        const OutputType hdrOutputType = OutputType::SYSTEM;
+        const composer3::OutputType hdrOutputType = composer3::OutputType::SYSTEM;
         const hal::VrrConfig vrrConfig =
                 hal::VrrConfig{.minFrameIntervalNs = static_cast<Fps>(120_Hz).getPeriodNsecs(),
                                .notifyExpectedPresentConfig = hal::VrrConfig::
@@ -480,7 +381,7 @@ TEST_F(HWComposerTest, onVsyncInvalid) {
 TEST_F(HWComposerTest, propagateHotplugReconnectStatus) {
     constexpr hal::HWDisplayId kHwcDisplayId = 1;
     constexpr uint8_t kPort = 0;
-    expectHotplugConnect(kHwcDisplayId, kPort, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId, kPort);
 
     const auto info1 = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info1);
@@ -489,6 +390,9 @@ TEST_F(HWComposerTest, propagateHotplugReconnectStatus) {
     // Emit another hotplug event on the same display, but with a different EDID. This should
     // trigger a hotplug reconnect. Display identification data should not be fetched.
     EXPECT_CALL(*mHal, getDisplayIdentificationData(kHwcDisplayId, _, _, _)).Times(0);
+    EXPECT_CALL(*mHal, getDisplayConnectionType(kHwcDisplayId, _))
+            .WillOnce(DoAll(SetArgPointee<1>(IComposerClient::DisplayConnectionType::EXTERNAL),
+                            Return(V2_4::Error::NONE)));
     const auto info2 = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info2);
 
@@ -505,7 +409,7 @@ TEST_F(HWComposerTest, displayIdConflictResolution) {
     // First display is assigned a display ID with no issues.
     constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
     constexpr uint8_t kPort1 = 1;
-    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId1, kPort1);
 
     const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info1);
@@ -517,7 +421,7 @@ TEST_F(HWComposerTest, displayIdConflictResolution) {
     // Second display's ID has to be modified due to conflict.
     constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
     constexpr uint8_t kPort2 = 2;
-    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId2, kPort2);
 
     const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info2);
@@ -540,7 +444,7 @@ TEST_F(HWComposerTest, displayIdConflictResolutionWithInvertedPortBits) {
     // First display is assigned a display ID with no issues.
     constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
     constexpr uint8_t kPort1 = 1;
-    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId1, kPort1);
 
     const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info1);
@@ -554,7 +458,7 @@ TEST_F(HWComposerTest, displayIdConflictResolutionWithInvertedPortBits) {
     // the port ID.
     constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
     constexpr uint8_t kPort2 = 181;
-    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId2, kPort2);
 
     const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info2);
@@ -578,7 +482,7 @@ TEST_F(HWComposerTest, displayIdConflictResolutionFails) {
     // First display is assigned a display ID with no issues.
     constexpr hal::HWDisplayId kHwcDisplayId1 = 1;
     constexpr uint8_t kPort1 = 1;
-    expectHotplugConnect(kHwcDisplayId1, kPort1, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId1, kPort1);
 
     const auto info1 = mHwc.onHotplug(kHwcDisplayId1, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info1);
@@ -591,7 +495,7 @@ TEST_F(HWComposerTest, displayIdConflictResolutionFails) {
     // port value 74, which is the inverted value of 181.
     constexpr hal::HWDisplayId kHwcDisplayId2 = 2;
     constexpr uint8_t kPort2 = 74;
-    expectHotplugConnect(kHwcDisplayId2, kPort2, getExternalEdid());
+    expectHotplugConnect(kHwcDisplayId2, kPort2);
 
     const auto info2 = mHwc.onHotplug(kHwcDisplayId2, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info2);
@@ -612,6 +516,9 @@ TEST_F(HWComposerTest, displayIdConflictResolutionFails) {
     EXPECT_CALL(*mHal, getDisplayIdentificationData(kHwcDisplayId3, _, _, _))
             .WillOnce(DoAll(SetArgPointee<1>(kPort3), SetArgPointee<2>(getExternalEdid()),
                             Return(HalError::NONE)));
+    EXPECT_CALL(*mHal, getDisplayConnectionType(kHwcDisplayId3, _))
+            .WillOnce(DoAll(SetArgPointee<1>(IComposerClient::DisplayConnectionType::EXTERNAL),
+                            Return(V2_4::Error::NONE)));
 
     // Creation of the display should fail, since a display with an ID seeded with 74 in its 8 LSBs
     // already exists.

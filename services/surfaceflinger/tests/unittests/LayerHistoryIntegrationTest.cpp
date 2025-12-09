@@ -56,10 +56,19 @@ protected:
 
     static constexpr auto kVrrModeId = DisplayModeId(2);
 
+    static constexpr ui::LayerStack kLayerStack = ui::LayerStack::fromValue(1);
+    static constexpr LayerFilter kLayerFilter = {kLayerStack, false};
+
     LayerHistoryIntegrationTest() : LayerSnapshotTestBase() {
         mFlinger.resetScheduler(mScheduler);
         mLifecycleManager = {};
         mHierarchyBuilder = {};
+
+        frontend::DisplayInfo info;
+        info.info.logicalWidth = 1920;
+        info.info.logicalHeight = 1080;
+        mFrontEndDisplayInfos.emplace_or_replace(kLayerStack, info);
+        mSelector->setLayerFilter(kLayerFilter);
     }
 
     void updateLayerSnapshotsAndLayerHistory(nsecs_t now) {
@@ -81,6 +90,17 @@ protected:
         updateLayerSnapshotsAndLayerHistory(time);
     }
 
+    void setLayerStack(uint32_t id, ui::LayerStack layerStack) {
+        std::vector<QueuedTransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+
+        transactions.back().states.front().state.what = layer_state_t::eLayerStackChanged;
+        transactions.back().states.front().layerId = id;
+        transactions.back().states.front().state.layerStack = layerStack;
+        mLifecycleManager.applyTransactions(transactions);
+    }
+
     LayerHistory& history() { return mScheduler->mutableLayerHistory(); }
     const LayerHistory& history() const { return mScheduler->mutableLayerHistory(); }
 
@@ -88,7 +108,7 @@ protected:
         // LayerHistory::summarize makes no guarantee of the order of the elements in the summary
         // however, for testing only, a stable order is required, therefore we sort the list here.
         // Any tests requiring ordered results must create layers with names.
-        auto summary = history().summarize(*mScheduler->refreshRateSelector(), now);
+        auto summary = history().summarize(now);
         std::sort(summary.begin(), summary.end(),
                   [](const RefreshRateSelector::LayerRequirement& lhs,
                      const RefreshRateSelector::LayerRequirement& rhs) -> bool {
@@ -142,6 +162,7 @@ protected:
                                                   std::make_optional<uint32_t>(sequence)});
         mFlinger.injectLegacyLayer(layer);
         createRootLayer(sequence);
+        setLayerStack(sequence, kLayerStack);
         return layer;
     }
 
@@ -157,6 +178,7 @@ protected:
         const auto layer = sp<Layer>::make(args);
         mFlinger.injectLegacyLayer(layer);
         createRootLayerWithUid(sequence, uid);
+        setLayerStack(sequence, kLayerStack);
         return layer;
     }
 
@@ -578,8 +600,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitExactVote2) {
 }
 
 TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_vrr) {
-    // Set the test to be on a vrr mode.
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     mSelector->setActiveMode(kVrrModeId, HI_FPS);
 
     auto layer = createLegacyAndFrontedEndLayer(1);
@@ -618,8 +638,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_vrr) {
 // Test for MRR device with VRR features enabled.
 TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_nonVrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
-    // The vrr_config flag is explicitly not set false because this test for an MRR device
-    // should still work in a VRR-capable world.
 
     auto layer = createLegacyAndFrontedEndLayer(1);
     showLayer(1);
@@ -656,8 +674,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_nonVrr) {
 
 TEST_F(LayerHistoryIntegrationTest, oneLayerGteNoVote_arr) {
     SET_FLAG_FOR_TEST(flags::arr_setframerate_gte_enum, true);
-    // Set the test to be on a vrr mode.
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     mSelector->setActiveMode(kVrrModeId, HI_FPS);
 
     auto layer = createLegacyAndFrontedEndLayer(1);
@@ -689,8 +705,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerGteNoVote_arr) {
 
 TEST_F(LayerHistoryIntegrationTest, oneLayerGteNoVote_mrr) {
     SET_FLAG_FOR_TEST(flags::arr_setframerate_gte_enum, true);
-    // True by default on MRR devices as well, but the device is not set to VRR mode.
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
 
     auto layer = createLegacyAndFrontedEndLayer(1);
     showLayer(1);
@@ -785,7 +799,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference) {
 TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference_mrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
 
     const LayerHistory::LayerVoteType defaultVote = LayerHistory::LayerVoteType::Min;
 
@@ -818,7 +831,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference_mrr) {
 TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference_vrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     mSelector->setActiveMode(kVrrModeId, HI_FPS);
 
     const LayerHistory::LayerVoteType defaultVote = LayerHistory::LayerVoteType::Min;
@@ -850,7 +862,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference_vrr) {
 TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreferenceWithGameDefault_vrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     mSelector->setActiveMode(kVrrModeId, HI_FPS);
 
     const Fps gameDefaultFrameRate = Fps::fromValue(30.0f);
@@ -885,7 +896,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreferenceWithGameDefault_
 TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreferenceWithGameDefault_mrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
 
     const Fps gameDefaultFrameRate = Fps::fromValue(30.0f);
     const uid_t uid = 456;
@@ -919,7 +929,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreferenceWithGameDefault_
 TEST_F(LayerHistoryIntegrationTest, oneLayerNoVoteWithGameDefault_vrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     mSelector->setActiveMode(kVrrModeId, HI_FPS);
 
     const Fps gameDefaultFrameRate = Fps::fromValue(30.0f);
@@ -951,7 +960,6 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerNoVoteWithGameDefault_vrr) {
 TEST_F(LayerHistoryIntegrationTest, oneLayerNoVoteWithGameDefault_mrr) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
     SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
 
     const Fps gameDefaultFrameRate = Fps::fromValue(30.0f);
     const uid_t uid = 456;
@@ -1071,8 +1079,6 @@ TEST_F(LayerHistoryIntegrationTest, invisibleExplicitLayerDoesNotVote) {
 }
 
 TEST_F(LayerHistoryIntegrationTest, frontBufferedLayerVotesMax) {
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
-
     auto layer = createLegacyAndFrontedEndLayer(1);
     setFrontBuffer(1);
     showLayer(1);

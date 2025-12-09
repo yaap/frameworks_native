@@ -103,7 +103,8 @@ static InputDeviceInfo generateTestDeviceInfo() {
 
     auto info = InputDeviceInfo();
     info.initialize(DEVICE_ID, /*generation=*/1, /*controllerNumber=*/1, identifier, "alias",
-                    /*isExternal=*/false, /*hasMic=*/false, ui::LogicalDisplayId::INVALID);
+                    /*isExternal=*/false, /*isVirtualDevice=*/false, /*hasMic=*/false,
+                    ui::LogicalDisplayId::INVALID);
     info.addSource(AINPUT_SOURCE_TOUCHSCREEN);
     info.addMotionRange(AMOTION_EVENT_AXIS_X, AINPUT_SOURCE_TOUCHSCREEN, 0, 1599, /*flat=*/0,
                         /*fuzz=*/0, X_RESOLUTION);

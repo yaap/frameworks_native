@@ -17,9 +17,11 @@
 #pragma once
 
 #include <android-base/result.h>
+#include <android/configuration.h>
 #include <ftl/enum.h>
 #include <ui/FloatRect.h>
 #include <ui/LogicalDisplayId.h>
+#include <ui/Transform.h>
 
 #include <cinttypes>
 #include <unordered_map>
@@ -64,6 +66,9 @@ struct DisplayTopologyGraph {
 
     ui::LogicalDisplayId primaryDisplayId = ui::LogicalDisplayId::INVALID;
     std::unordered_map<ui::LogicalDisplayId, Properties> graph;
+
+    ui::Transform localPxToGlobalDpTransform(ui::LogicalDisplayId displayId) const;
+    ui::Transform globalDpToLocalPxTransform(ui::LogicalDisplayId displayId) const;
 
     DisplayTopologyGraph() = default;
     std::string dump() const;

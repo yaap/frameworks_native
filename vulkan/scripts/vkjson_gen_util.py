@@ -21,11 +21,12 @@ This file contains all supporting utility functions for vkjson_generator.py
 import dataclasses
 import re
 import vk as VK
-from typing import get_origin
+import generator_common as gencom
+from typing import List, get_origin, Tuple, Optional, get_args
 
 CONST_PHYSICAL_DEVICE_FEATURE_2 = "VkPhysicalDeviceFeatures2"
 CONST_PHYSICAL_DEVICE_PROPERTIES_2 = "VkPhysicalDeviceProperties2"
-
+PROPERTIES = "Properties"
 COPYRIGHT_WARNINGS = """///////////////////////////////////////////////////////////////////////////////
 //
 // Copyright (c) 2015-2016 The Khronos Group Inc.
@@ -187,6 +188,42 @@ def get_struct_name(struct_name):
 
     return special_cases.get(variable_name, variable_name)
 
+def get_dataclass_list_members(class_name: str) -> List[Tuple[str, str]]:
+    """Retrieves names and types of list members within a dataclass.
+        A list of tuples, where each tuple contains (list_variable_name, list_element_type).
+    """
+    dataclass_type = get_dataclass_type(class_name)
+
+    if not dataclass_type:
+        return []
+    """Catches the TypeError thrown by dataclasses.fields if dataclass_type
+    is not a valid dataclass class or instance.
+    """
+    try:
+        class_member_list = dataclasses.fields(dataclass_type)
+    except TypeError:
+        return []
+    return [
+        (field.name, get_args(field.type)[0].__name__)
+        for field in class_member_list
+        if get_origin(field.type) is list and get_args(field.type)
+    ]
+
+
+def get_class_name_from_alias(class_name):
+    dataclass_type = get_dataclass_type(class_name)
+
+    """Handles an exception that is thrown only when running unit tests.
+    """
+    if dataclass_type:
+        try:
+            return dataclass_type.__name__
+        except AttributeError:
+            return class_name
+    return class_name
+
+def get_dataclass_type(class_name):
+    return getattr(VK, class_name, None)
 
 def generate_extension_struct_definition(f):
     """Generates struct definition code for extension based structs
@@ -218,13 +255,23 @@ def generate_extension_struct_definition(f):
             for struct_name, _ in struct_map.items():
                 variable_name = get_struct_name(struct_name)
                 f.write(f"    memset(&{variable_name}, 0, sizeof({struct_name}));\n")
-                struct_entries.append(f"{struct_name} {variable_name}")
+                struct_entries.append([struct_name, variable_name])
 
         f.write("  }\n")  # End of constructor
         f.write("  bool reported;\n")
-        for entry in struct_entries:
-            f.write(f"  {entry};\n")
+        # Writing structure variables in vkjson_struct
+        for struct_type, variable_name in struct_entries:
+            variable_declaration = struct_type + " " + variable_name
+            f.write(f"  {variable_declaration};\n")
 
+        # Populating vkjson_struct with list variables from properties structure.
+        properties_and_feature_structures = [struct_name for struct_name, _ in struct_entries]
+        cpp_list_variables = get_dynamic_size_list_member_from_structures(
+            properties_and_feature_structures,
+        )
+        for list_type, variable_name in cpp_list_variables:
+            list_variable_declaration = "std::vector<" + list_type + ">" + " " + variable_name + ";"
+            f.write(f"  {list_variable_declaration}\n")
         f.write("};\n\n")  # End of struct
 
     return vkjson_entries
@@ -290,6 +337,28 @@ def generate_memset_statements(f):
 
     return entries
 
+def normalize_json_field_name(json_field_name):
+    if json_field_name[0].isdigit():
+        # This regex splits the name into three parts:
+        # 1. The leading number (e.g., "16")
+        # 2. The first "word" (e.g., "BIT" or "Bit")
+        # 3. The rest of the string (e.g., "Format")
+        pattern = re.compile(r"^(\d+)([A-Z]+(?=[A-Z]|$)|[A-Z][a-z]*)(.*)$")
+        match = pattern.match(json_field_name)
+        if not match:
+            return json_field_name # Failsafe
+        number, first_word, rest = match.groups()
+        result = f"{first_word}{number}{rest}"
+        is_acronym = len(first_word) > 1 and first_word.isupper()
+        if is_acronym:
+            return result
+        else:
+            return result[0].lower() + result[1:]
+    else:
+        if re.match(r"^[A-Z]{2,}", json_field_name):
+            return json_field_name
+        else:
+            return json_field_name[0].lower() + json_field_name[1:]
 
 def generate_extension_struct_template():
     """Generates templates for extensions
@@ -315,13 +384,7 @@ def generate_extension_struct_template():
         for struct_map in struct_mappings:
             for struct_name in struct_map:
                 json_field_name = struct_name.replace("VkPhysicalDevice", "")
-                json_field_name = json_field_name[0].lower() + json_field_name[1:]
-
-                # Move the leading digits after the first capitalized word
-                json_field_name = re.sub(r"^(\d+)([A-Z][a-z]*)", r"\2\1", json_field_name)
-                # Lowercase the first character
-                json_field_name = json_field_name[0].lower() + json_field_name[1:] if json_field_name else json_field_name
-
+                json_field_name = normalize_json_field_name(json_field_name)
                 visitor_calls.append(f'visitor->Visit("{json_field_name}", &structs->{get_struct_name(struct_name)})')
 
         template_code.append(" &&\n         ".join(visitor_calls) + ";")
@@ -487,6 +550,10 @@ def generate_vk_extension_structs_init_code(mapping, struct_category):
     next_pointer = struct_category.lower()
 
     for extension, struct_mappings in mapping.items():
+
+        if extension in gencom._VKJSON_BLOCKED_EXTENSIONS:
+            continue
+
         struct_var_name = get_vkjson_struct_variable_name(extension)
         extension_code = [f'  if (HasExtension("{extension}", device.extensions)) {{', f"    device.{struct_var_name}.reported = true;"]
         struct_count = 0
@@ -540,6 +607,160 @@ def generate_vk_version_structs_initialization(version_data, struct_type_keyword
 
     return "\n".join(struct_initialization_code)
 
+"""
+    A list of pairs, where each pair is (element_type, transformed_member_name).
+    [('VkQueueFamilyProperties', 'queue_families')]
+"""
+def get_dynamic_size_list_member_from_structures(properties_and_feature_set: List) -> List[Tuple[str, str]]:
+    entries: List[Tuple[str, str]] = []
+    for struct_name in properties_and_feature_set:
+        updated_struct_name = get_class_name_from_alias(struct_name)
+        if PROPERTIES in struct_name and updated_struct_name in VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING:
+            all_list_variables = get_dataclass_list_members(struct_name)
+            for list_name, list_type in all_list_variables:
+                if list_name in VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING[updated_struct_name]:
+                    name = transform_list_member_name(list_name)
+                    entries.append((list_type, name))
+    return entries
+
+
+
+def transform_list_member_name(member_name: str) -> str:
+    def convert_camel_to_snake_case(camel_case_string: str) -> str:
+        s1 = re.sub(r'(?<!^)([A-Z][a-z])', r'_\1', camel_case_string)
+        s2 = re.sub(r'(?<=[A-Z])([A-Z][a-z])', r'_\1', s1)
+        return s2.lower()
+
+    """Converts a list member name (e.g., 'pCopySrcLayouts') to a more
+    Pythonic snake_case variable name (e.g., 'copy_src_layouts').
+
+    Removes leading 'p_' if present after initial camel to snake conversion.
+    Examples:
+        'pCopySrcLayouts' -> 'copy_src_layouts'
+        'pDemoName' -> 'demo_name'
+        'TestName' -> 'test_name'
+    """
+    snake_case_name = convert_camel_to_snake_case(member_name)
+    if snake_case_name.startswith('p_'):
+        snake_case_name = snake_case_name[2:]
+    return snake_case_name
+
+
+def generate_ext_dependent_structs_list_resizing_logic(
+        vk_properties_setter_line: str,
+) -> str:
+    """
+    This function iterates through a mapping of Vulkan extensions to their associated
+    structs. For each relevant struct (e.g., properties structs that extend
+    VkPhysicalDeviceProperties2), it generates C++ 'if' blocks. These blocks
+    handle resizing of member arrays and assigning data pointers, then call
+    vkGetPhysicalDeviceProperties2.
+    """
+    generated_code_blocks: List[str] = []
+
+    for extension_name, struct_definitions_list in VK.VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING["extensions"].items():
+        device_extension_variable = get_vkjson_struct_variable_name(extension_name)
+        structures = [list(struct_definition.keys())[0] for struct_definition in struct_definitions_list]
+        code = generate_list_resizing_logic(structures,
+                                            vk_properties_setter_line,
+                                            device_extension_variable,
+                                            )
+        if code != "":
+            generated_code_blocks.append(code)
+    return "\n".join(generated_code_blocks)
+
+
+def generate_ext_independent_structs_list_resizing_logic(
+        vulkan_api_version_mapping: List[dict[str, str]],
+        vk_properties_setter_line: str,
+) -> str:
+    vulkan_api_version_structures = {structure for mapping in vulkan_api_version_mapping for structure in
+                                     mapping.keys()}
+    filtered_structures = []
+    for structure in VK.EXTENSION_INDEPENDENT_STRUCTS:
+        if structure in vulkan_api_version_structures:
+            filtered_structures.append(structure)
+
+    generated_code_blocks = generate_list_resizing_logic(filtered_structures,
+                                                         vk_properties_setter_line,
+                                                         )
+    return generated_code_blocks
+
+
+def generate_list_resizing_logic(
+        structures: List[str],
+        vk_properties_setter_line: str,
+        extension: Optional[str] = None
+) -> str:
+    def _generate_if_condition_codeblock(
+            if_condition: str,
+            list_resize_codeblock: str,
+            properties_setter_line: Optional[str] = None,
+    ) -> str:
+        vk_properties_setter_line_code = f"\n{properties_setter_line}" if properties_setter_line else ""
+        return f"""
+            if({if_condition}) {{
+                {list_resize_codeblock}{vk_properties_setter_line_code}
+            }}
+        """
+
+    def _generate_merged_if_blocks(
+            outer_if_conditions_list: List[str],
+            internal_resize_assignment_logic: List[str],
+            properties_setter_line: str,
+    ) -> str:
+        formatted_conditions = [f"{cond} > 0" for cond in outer_if_conditions_list]
+        combined_cpp_if_condition = " || ".join(formatted_conditions)
+        combined_internal_logic_body = "\n".join(internal_resize_assignment_logic)
+
+        return f"""{_generate_if_condition_codeblock(combined_cpp_if_condition,
+                                                     combined_internal_logic_body,
+                                                     properties_setter_line)}"""
+
+    generated_code_blocks: List[str] = []
+    dot_extension = f".{extension}" if extension else ""
+    for structure in structures:
+        struct_category_mapping = VK.STRUCT_EXTENDS_MAPPING.get(structure)
+        resolved_structure_name = get_class_name_from_alias(structure)
+        is_valid_struct = struct_category_mapping and (
+                CONST_PHYSICAL_DEVICE_PROPERTIES_2 in struct_category_mapping
+        ) and resolved_structure_name in VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING
+        if is_valid_struct:
+            dynamic_size_list_variables = VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING[resolved_structure_name]
+            struct_instance_name = get_struct_name(structure)
+            code_block_list = [] # list of pair(if condition logic, resizing code)
+            for list_name in dynamic_size_list_variables:
+                if list_name in VK.LIST_TYPE_FIELD_AND_SIZE_MAPPING:
+                    list_size_field_name = VK.LIST_TYPE_FIELD_AND_SIZE_MAPPING[list_name]
+                    condition_expression = f"device{dot_extension}.{struct_instance_name}.{list_size_field_name}"
+                    cpp_list_variable_name = transform_list_member_name(list_name)
+                    resize_code_block = f"""device{dot_extension}.{cpp_list_variable_name}.resize({condition_expression});
+device{dot_extension}.{struct_instance_name}.{list_name} = device{dot_extension}.{cpp_list_variable_name}.data();"""
+                    code_block_list.append((condition_expression, resize_code_block))
+
+            list_resize_code_blocks: List[str] = []
+            set_property_setter_line_inside = len(code_block_list) == 1
+            for condition, resize_code_block in code_block_list:
+                list_resize_code_blocks.append(
+                    _generate_if_condition_codeblock(
+                        f"{condition} > 0",
+                        resize_code_block,
+                        vk_properties_setter_line if set_property_setter_line_inside else None,
+                    )
+                )
+
+            if len(list_resize_code_blocks) == 1:
+                generated_code_blocks.append(list_resize_code_blocks[0])
+
+            elif len(list_resize_code_blocks) > 1:
+                generated_code_blocks.append(
+                    _generate_merged_if_blocks(
+                        [condition_expression for condition_expression, _ in code_block_list],
+                        list_resize_code_blocks,
+                        vk_properties_setter_line,
+                    )
+                )
+    return "\n".join(generated_code_blocks)
 
 def find_contiguous_ranges(format_data):
   """Finds contiguous ranges of format values from a list of enums for a given extension or Vulkan API version.

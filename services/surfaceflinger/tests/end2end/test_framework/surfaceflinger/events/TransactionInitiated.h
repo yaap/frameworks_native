@@ -26,12 +26,6 @@
 #include "test_framework/core/AsyncFunction.h"
 #include "test_framework/core/BufferId.h"
 
-namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger {
-
-class Surface;
-
-}  // namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger
-
 namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger::events {
 
 struct TransactionInitiated final {
@@ -39,24 +33,24 @@ struct TransactionInitiated final {
 
     using Timestamp = std::chrono::steady_clock::time_point;
 
-    Surface* surface{};
+    uintptr_t surfaceId{};
     uint64_t frameNumber{};
     core::BufferId bufferId{};
     Timestamp receivedAt{std::chrono::steady_clock::now()};
 
-    friend auto operator==(const TransactionInitiated&,
-                           const TransactionInitiated&) -> bool = default;
+    friend auto operator==(const TransactionInitiated&, const TransactionInitiated&)
+            -> bool = default;
 };
 
 inline auto toString(const TransactionInitiated& event) -> std::string {
     return fmt::format(
             "sfTransactionInitiated{{"
-            " surface: {},"
+            " surfaceId: 0x{:x},"
             " frameNumber: {},"
             " bufferId: {}"
             " receivedAt: {}"
             " }}",
-            static_cast<void*>(event.surface), event.frameNumber, toString(event.bufferId),
+            event.surfaceId, event.frameNumber, toString(event.bufferId),
             event.receivedAt.time_since_epoch());
 }
 

@@ -18,6 +18,8 @@
 #include <vector>
 
 #include <attestation/HmacKeyManager.h>
+#include <com_android_input_flags.h>
+#include <flag_macros.h>
 #include <gtest/gtest.h>
 #include <input/InputConsumer.h>
 #include <input/InputTransport.h>
@@ -28,12 +30,18 @@ namespace android {
 
 namespace {
 
+namespace input_flags = com::android::input::flags;
+
+const auto CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS =
+        ACONFIG_FLAG(input_flags, clear_relative_axes_in_resampled_coords);
+
 struct Pointer {
     int32_t id;
     float x;
     float y;
     ToolType toolType = ToolType::FINGER;
     bool isResampled = false;
+    std::map<int32_t /* axis */, float /* value */> axisValues = {};
 };
 
 struct InputEventEntry {
@@ -87,10 +95,9 @@ status_t TouchResamplingTest::publishSimpleMotionEventWithCoords(
     }
     return mPublisher->publishMotionEvent(mSeq++, InputEvent::nextId(), /*deviceId=*/1,
                                           AINPUT_SOURCE_TOUCHSCREEN, displayId, INVALID_HMAC,
-                                          action, /*actionButton=*/0, /*flags=*/0,
-                                          /*edgeFlags=*/0, AMETA_NONE, /*buttonState=*/0,
-                                          MotionClassification::NONE, identityTransform,
-                                          /*xPrecision=*/0, /*yPrecision=*/0,
+                                          action, /*actionButton=*/0, /*flags=*/0, AMETA_NONE,
+                                          /*buttonState=*/0, MotionClassification::NONE,
+                                          identityTransform, /*xPrecision=*/0, /*yPrecision=*/0,
                                           AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                           AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                           downTime, eventTime, properties.size(), properties.data(),
@@ -113,6 +120,9 @@ void TouchResamplingTest::publishSimpleMotionEvent(int32_t action, nsecs_t event
         coords.back().clear();
         coords.back().setAxisValue(AMOTION_EVENT_AXIS_X, pointer.x);
         coords.back().setAxisValue(AMOTION_EVENT_AXIS_Y, pointer.y);
+        for (const auto& [axis, value] : pointer.axisValues) {
+            coords.back().setAxisValue(axis, value);
+        }
     }
 
     status_t result =
@@ -204,6 +214,10 @@ void TouchResamplingTest::consumeInputEventEntries(const std::vector<InputEventE
                                                              motionEventPointerIndex, i));
             ASSERT_EQ(entry.pointers[p].isResampled,
                       motionEvent->isResampled(motionEventPointerIndex, i));
+            for (const auto& [axis, value] : entry.pointers[p].axisValues) {
+                ASSERT_EQ(value,
+                          motionEvent->getHistoricalAxisValue(axis, motionEventPointerIndex, i));
+            }
         }
     }
 
@@ -383,6 +397,66 @@ TEST_F(TouchResamplingTest, MouseEventIsResampled) {
 }
 
 /**
+ * Mouse pointer coordinates are resampled.
+ */
+TEST_F_WITH_FLAGS(TouchResamplingTest, MouseEventIsResampledClearingRelativeAxes,
+                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN should be separate, because the first consume event will only return
+    // InputEvent with a single action.
+    entries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20, .toolType = ToolType::MOUSE}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    expectedEntries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20, .toolType = ToolType::MOUSE}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+
+    // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y.
+    // In the resampled event, RELATIVE_X and RELATIVE_Y are cleared to zero.
+    entries = {
+            // id  x   y
+            {10ms,
+             {{0, 20, 30, .toolType = ToolType::MOUSE,
+               .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                              {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {20ms,
+             {{0, 30, 30, .toolType = ToolType::MOUSE,
+               .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                              {AMOTION_EVENT_AXIS_RELATIVE_Y, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 35ms;
+    expectedEntries = {
+            // id  x   y
+            {10ms,
+             {{0, 20, 30, .toolType = ToolType::MOUSE,
+               .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                              {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {20ms,
+             {{0, 30, 30, .toolType = ToolType::MOUSE,
+               .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                              {AMOTION_EVENT_AXIS_RELATIVE_Y, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {25ms,
+             {{0, 35, 30, .toolType = ToolType::MOUSE, .isResampled = true,
+               .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 0},
+                              {AMOTION_EVENT_AXIS_RELATIVE_Y, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+}
+
+/**
  * Motion events with palm tool type are not resampled.
  */
 TEST_F(TouchResamplingTest, PalmEventIsNotResampled) {
@@ -555,6 +629,7 @@ TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
     // from the event at 20ms, which is why the resampled event is at t = 25 ms.
 
     // We resampled the event to 25 ms. Now, an older 'real' event comes in.
+    // Resampled event is synthesized at 24 + (24 - 20) / 2 = 26 ms.
     entries = {
             //      id  x   y
             {24ms, {{0, 40, 30}}, AMOTION_EVENT_ACTION_MOVE},
@@ -569,6 +644,94 @@ TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
             {26ms,
              {{0, 45, 30, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE}, // resampled event, rewritten
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+}
+
+// Similar to OldEventReceivedAfterResampleOccurs, but axis values are set and verified.
+TEST_F_WITH_FLAGS(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerifyAxes,
+                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN should be separate, because the first consume event will only return
+    // InputEvent with a single action.
+    entries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    expectedEntries = {
+            //      id  x   y
+            {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+
+    // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
+    entries = {
+            // id  x   y
+            {10ms,
+             {{0, 20, 30,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 10}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {20ms,
+             {{0, 30, 30,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 35ms;
+    expectedEntries = {
+            // id  x   y
+            {10ms,
+             {{0, 20, 30,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 10}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {20ms,
+             {{0, 30, 30,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+            {25ms,
+             {{0, 35, 30, .isResampled = true,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 0},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime);
+    // Above, the resampled event is at 25ms rather than at 30 ms = 35ms - RESAMPLE_LATENCY
+    // because we are further bound by how far we can extrapolate by the "last time delta".
+    // That's 50% of (20 ms - 10ms) => 5ms. So we can't predict more than 5 ms into the future
+    // from the event at 20ms, which is why the resampled event is at t = 25 ms.
+
+    // We resampled the event to 25 ms. Now, an older 'real' event comes in.
+    // Resampled event is synthesized at 24 + (24 - 20) / 2 = 26 ms.
+    entries = {
+            // id  x   y
+            {24ms,
+             {{0, 40, 30,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 50ms;
+    expectedEntries = {
+            // id  x   y
+            {24ms,
+             {{0, 35, 30, .isResampled = true,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 10},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE}, // axis values are kept
+            {26ms,
+             {{0, 45, 30, .isResampled = true,
+               .axisValues = {{AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE, 0},
+                              {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
+             AMOTION_EVENT_ACTION_MOVE}, // axis values are cleared
     };
     consumeInputEventEntries(expectedEntries, frameTime);
 }

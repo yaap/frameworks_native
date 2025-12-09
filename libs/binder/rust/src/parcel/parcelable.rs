@@ -866,6 +866,7 @@ impl<T: FromIBinder + ?Sized> Deserialize for Strong<T> {
     }
 }
 
+#[allow(dead_code)]
 struct AssertIBinder;
 impl Interface for AssertIBinder {}
 impl FromIBinder for AssertIBinder {

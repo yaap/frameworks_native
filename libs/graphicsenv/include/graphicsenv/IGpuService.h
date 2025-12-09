@@ -61,7 +61,7 @@ public:
     virtual std::string getPersistGraphicsEgl() = 0;
 
     // Get the list of features to override.
-    virtual FeatureOverrides getFeatureOverrides() = 0;
+    virtual void getFeatureOverrides(FeatureOverrides& featureOverrides) = 0;
 };
 
 class BnGpuService : public BnInterface<IGpuService> {
@@ -84,6 +84,7 @@ public:
 
 protected:
     virtual status_t shellCommand(int in, int out, int err, std::vector<String16>& args) = 0;
+    virtual const FeatureOverrides& getCachedFeatureOverrides() = 0;
 };
 
 } // namespace android

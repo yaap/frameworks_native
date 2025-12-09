@@ -18,6 +18,7 @@
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
 #include <gui/view/Surface.h>
+#include <system/window.h>
 
 namespace android {
 namespace flagtools {
@@ -78,12 +79,26 @@ sp<SurfaceType> convertParcelableSurfaceTypeToSurface(const ParcelableSurfaceTyp
 }
 } // namespace flagtools
 namespace mediaflagtools {
+
+sp<MediaSurfaceType> nativeWindowToSurfaceType(ANativeWindow* anw) {
+    if (anw == nullptr) {
+        return nullptr;
+    }
+
+    sp<Surface> surface = Surface::from(anw);
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+    return surface;
+#else
+    return surface->getIGraphicBufferProducer();
+#endif
+}
+
 sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp) {
     if (igbp == nullptr) {
         return nullptr;
     }
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
-    return new Surface(igbp);
+    return sp<Surface>::make(igbp);
 #else
     return igbp;
 #endif
@@ -109,7 +124,7 @@ sp<SurfaceType> mediaSurfaceToCameraSurfaceType(const sp<MediaSurfaceType>& mst,
 #if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
     return mst;
 #else
-    return mst->getGraphicBufferProducer();
+    return mst->getIGraphicBufferProducer();
 #endif
 #else
 #if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES

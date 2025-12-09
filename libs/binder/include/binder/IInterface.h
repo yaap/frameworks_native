@@ -254,7 +254,6 @@ constexpr const char* const kManualInterfaces[] = {
         "android.media.IRemoteDisplay",
         "android.media.IRemoteDisplayClient",
         "android.os.IPermissionController",
-        "android.os.IProcessInfoService",
         "android.os.ISchedulingPolicyService",
         "android.os.storage.IObbActionListener",
         "android.os.storage.IStorageEventListener",

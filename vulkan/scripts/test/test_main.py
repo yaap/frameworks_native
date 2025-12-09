@@ -17,12 +17,14 @@
 import unittest
 import test_vkjson_gen_util
 import test_vkjson_generator
+import test_vkparser_output
 
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     testsuite = unittest.suite.TestSuite()
     testsuite.addTest(loader.loadTestsFromModule(test_vkjson_gen_util))
     testsuite.addTest(loader.loadTestsFromModule(test_vkjson_generator))
+    testsuite.addTest(loader.loadTestsFromModule(test_vkparser_output))
     assert testsuite.countTestCases()
 
     # To avoid python logs parser failing due to high verbosity

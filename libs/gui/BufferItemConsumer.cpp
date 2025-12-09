@@ -54,33 +54,38 @@ sp<BufferItemConsumer> BufferItemConsumer::create(const sp<IGraphicBufferConsume
 
 BufferItemConsumer::BufferItemConsumer(uint64_t consumerUsage, int bufferCount,
                                        bool controlledByApp, bool isConsumerSurfaceFlinger)
-      : ConsumerBase(controlledByApp, isConsumerSurfaceFlinger) {
-    initialize(consumerUsage, bufferCount);
-}
+      : ConsumerBase(controlledByApp, isConsumerSurfaceFlinger),
+        mConsumerUsage(consumerUsage),
+        mBufferCount(bufferCount) {}
 
 BufferItemConsumer::BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
                                        const sp<IGraphicBufferConsumer>& consumer,
                                        uint64_t consumerUsage, int bufferCount,
                                        bool controlledByApp)
-      : ConsumerBase(producer, consumer, controlledByApp) {
-    initialize(consumerUsage, bufferCount);
+      : ConsumerBase(producer, consumer, controlledByApp),
+        mConsumerUsage(consumerUsage),
+        mBufferCount(bufferCount) {}
+
+BufferItemConsumer::BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer,
+                                       uint64_t consumerUsage, int bufferCount,
+                                       bool controlledByApp)
+      : ConsumerBase(consumer, controlledByApp),
+        mConsumerUsage(consumerUsage),
+        mBufferCount(bufferCount) {}
+
+void BufferItemConsumer::onFirstRef() {
+    ConsumerBase::onFirstRef();
+    initializeConsumer();
 }
 
-BufferItemConsumer::BufferItemConsumer(
-        const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-        int bufferCount, bool controlledByApp) :
-    ConsumerBase(consumer, controlledByApp)
-{
-    initialize(consumerUsage, bufferCount);
-}
-
-void BufferItemConsumer::initialize(uint64_t consumerUsage, int bufferCount) {
-    status_t err = mConsumer->setConsumerUsageBits(consumerUsage);
-    LOG_ALWAYS_FATAL_IF(err != OK, "Failed to set consumer usage bits to %#" PRIx64, consumerUsage);
-    if (bufferCount != DEFAULT_MAX_BUFFERS) {
-        err = mConsumer->setMaxAcquiredBufferCount(bufferCount);
+void BufferItemConsumer::initializeConsumer() {
+    status_t err = mConsumer->setConsumerUsageBits(mConsumerUsage);
+    LOG_ALWAYS_FATAL_IF(err != OK, "Failed to set consumer usage bits to %#" PRIx64,
+                        mConsumerUsage);
+    if (mBufferCount != DEFAULT_MAX_BUFFERS) {
+        err = mConsumer->setMaxAcquiredBufferCount(mBufferCount);
         LOG_ALWAYS_FATAL_IF(err != OK, "Failed to set max acquired buffer count to %d",
-                            bufferCount);
+                            mBufferCount);
     }
 }
 

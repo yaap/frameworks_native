@@ -33,7 +33,7 @@ class LutShader {
 public:
     LutShader(RuntimeEffectManager& effectManager);
     sk_sp<SkShader> lutShader(sk_sp<SkShader>& input, std::shared_ptr<gui::DisplayLuts> displayLuts,
-                              ui::Dataspace srcDataspace, sk_sp<SkColorSpace> outColorSpace);
+                              ui::Dataspace srcDataspace);
 
 private:
     sk_sp<SkShader> generateLutShader(sk_sp<SkShader> input, const std::vector<float>& buffers,

@@ -194,13 +194,11 @@ void GpuWork::dump(const Vector<String16>& /* args */, std::string* result) {
         // thus the returned value is not being concurrently accessed by the BPF
         // program (no atomic reads needed below).
 
-        mGpuWorkMap.iterateWithValue(
-                [&dumpMap](const GpuIdUid& key, const UidTrackingInfo& value,
-                           const android::bpf::BpfMap<GpuIdUid, UidTrackingInfo>&)
-                        -> base::Result<void> {
-                    dumpMap[key] = value;
-                    return {};
-                });
+        mGpuWorkMap.forAll(
+            [&dumpMap](const GpuIdUid& key, const UidTrackingInfo& value) {
+                dumpMap[key] = value;
+            }
+        );
     }
 
     // Dump work information.
@@ -295,12 +293,11 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullWorkAtoms(AStatsEventList* dat
     // the returned value is not being concurrently accessed by the BPF program
     // (no atomic reads needed below).
 
-    mGpuWorkMap.iterateWithValue([&workMap](const GpuIdUid& key, const UidTrackingInfo& value,
-                                            const android::bpf::BpfMap<GpuIdUid, UidTrackingInfo>&)
-                                         -> base::Result<void> {
-        workMap[key] = value;
-        return {};
-    });
+    mGpuWorkMap.forAll(
+        [&workMap](const GpuIdUid& key, const UidTrackingInfo& value) {
+            workMap[key] = value;
+        }
+    );
 
     // Get a list of just the UIDs; the order does not matter.
     std::vector<Uid> uids;

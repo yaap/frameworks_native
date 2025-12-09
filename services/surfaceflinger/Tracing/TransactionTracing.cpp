@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "TransactionTracing"
-
 #include <android-base/stringprintf.h>
 #include <common/trace.h>
 #include <log/log.h>

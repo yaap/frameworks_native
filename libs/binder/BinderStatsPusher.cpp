@@ -13,9 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.BinderStatsPusher"
+
 #include "BinderStatsPusher.h"
+
 #include <android-base/properties.h>
 #include <android/os/IStatsBootstrapAtomService.h>
+#include <binder/Functional.h>
+#include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 #include <utils/SystemClock.h>
 #include "BinderStatsUtils.h"
@@ -24,6 +29,7 @@
 namespace android {
 // defined in stats/atoms/framework/framework_extension_atoms.proto
 constexpr int32_t kBinderSpamAtomId = 1064;
+constexpr int32_t kBinderLatencyAtomId = 1090;
 [[clang::no_destroy]] static const StaticString16 kStatsBootstrapServiceName(u"statsbootstrap");
 
 sp<os::IStatsBootstrapAtomService> BinderStatsPusher::getBootstrapAtomServiceLocked(
@@ -34,14 +40,6 @@ sp<os::IStatsBootstrapAtomService> BinderStatsPusher::getBootstrapAtomServiceLoc
     if (!mLastServiceCheckSucceeded && (mServiceCheckTimeSec + kCheckServiceTimeoutSec > nowSec)) {
         return nullptr;
     };
-    if (!mBootComplete) {
-        // TODO(b/299356196): use gSystemBootCompleted instead
-        if (android::base::GetIntProperty("sys.boot_completed", 0) == 0) {
-            return nullptr;
-        }
-    }
-    // store a boolean to reduce GetProperty calls
-    mBootComplete = true;
     auto sm = defaultServiceManager();
     if (!sm) {
         LOG_ALWAYS_FATAL("defaultServiceManager() returned nullptr.");
@@ -57,47 +55,105 @@ sp<os::IStatsBootstrapAtomService> BinderStatsPusher::getBootstrapAtomServiceLoc
     return service;
 }
 
-void BinderStatsPusher::aggregateBinderSpamLocked(const std::vector<BinderCallData>& data,
-                                                  const sp<os::IStatsBootstrapAtomService>& service,
-                                                  const int64_t nowSec) {
+__attribute__((no_sanitize("signed-integer-overflow")))
+void BinderStatsPusher::aggregateStatsLocked(const std::vector<BinderCallData>& data,
+                                             const sp<os::IStatsBootstrapAtomService>& service,
+                                             const int64_t nowSec) {
     for (const auto& datum : data) {
-        int64_t timeSec = static_cast<int64_t>(datum.startTimeNanos) / 1000'000'000;
-        mSpamStatsBuffer[datum][timeSec]++;
+        int64_t startTimeSec = datum.startTimeNanos / 1000'000'000;
+        // Check if the buffer period has passed.
+        auto [it, inserted] = mStatsBuffer[datum].try_emplace(startTimeSec, AidlTargetMetrics());
+        it->second.totalCalls++;
+        if (datum.hasLatencyData()) {
+            it->second.callsWithLatency++;
+            it->second.durationSumMicros += (datum.endTimeNanos - datum.startTimeNanos) / 1000;
+        }
     }
+    if (!service) return;
     // Ensure that if this is a local binder and this thread isn't attached
     // to the VM then skip pushing. This is required since StatsBootstrap is
     // a Java service and needs a JNI interface to be called from native code.
-    // TODO(b/299356196): Ensure that mSpamStatsBuffer doesn't grow indefinitely.
-    if (!service || (IInterface::asBinder(service)->localBinder() && getJavaVM() == nullptr)) {
-        return;
+    bool isProcessSystemServer = IInterface::asBinder(service)->localBinder() != nullptr;
+    if (isProcessSystemServer) {
+        if (!isThreadAttachedToJVM()) {
+            return;
+        }
     }
+    // Clear calling identity if this is called from system server. This
+    // will allow libStatsBootstrap to verify calling uid correctly.
+    int64_t callingIdentity;
+    if (isProcessSystemServer) {
+        callingIdentity = IPCThreadState::self()->clearCallingIdentity();
+    }
+    auto callingIdentityGuard = binder::impl::make_scope_guard([&] {
+        if (isProcessSystemServer) {
+            IPCThreadState::self()->restoreCallingIdentity(callingIdentity);
+        }
+    });
 
-    for (auto outerIt = mSpamStatsBuffer.begin(); outerIt != mSpamStatsBuffer.end();
+    for (auto outerIt = mStatsBuffer.begin(); outerIt != mStatsBuffer.end();
          /* no increment */) {
-        bool hasSpam = false;
         int32_t secondsWithAtLeast125Calls = 0;
         int32_t secondsWithAtLeast250Calls = 0;
-        const BinderCallData& datum = outerIt->first;
-        std::unordered_map<int64_t, uint32_t>& innerMap = outerIt->second;
-        for (auto innerIt = innerMap.begin(); innerIt != innerMap.end(); /* no increment */) {
-            int64_t startTimeSec = innerIt->first;
-            uint32_t count = innerIt->second;
 
-            // Check if the delay period has passed.
-            if (nowSec - startTimeSec >= kSpamAggregationWindowSec) {
-                if (count >= kSpamFirstWatermark) {
-                    hasSpam = true;
+        uint64_t callsWithLatency = 0;
+        uint64_t durationSumMicros = 0;
+        uint32_t secondsWithAtLeast10Calls = 0;
+        uint32_t secondsWithAtLeast50Calls = 0;
+        for (auto innerIt = outerIt->second.begin(); innerIt != outerIt->second.end();
+             /* no increment */) {
+            // Check if the buffer period has passed.
+            int64_t startTimeSec = innerIt->first;
+            if (nowSec - startTimeSec >= kAggregationWindowSec) {
+                uint64_t totalCalls = innerIt->second.totalCalls;
+                if (totalCalls > kSpamFirstWatermark) {
                     secondsWithAtLeast125Calls++;
-                    if (count >= kSpamSecondWatermark) {
+                    if (totalCalls > kSpamSecondWatermark) {
                         secondsWithAtLeast250Calls++;
                     }
                 }
-                innerIt = innerMap.erase(innerIt);
+                if (innerIt->second.callsWithLatency > 0) {
+                    callsWithLatency += innerIt->second.callsWithLatency;
+                    durationSumMicros += innerIt->second.durationSumMicros;
+                    if (innerIt->second.callsWithLatency >= kLatencyCountFirstWatermark) {
+                        secondsWithAtLeast10Calls++;
+                        if (innerIt->second.callsWithLatency >= kLatencyCountSecondWatermark) {
+                            secondsWithAtLeast50Calls++;
+                        }
+                    }
+                }
+                // Erase the datum from the buffer so we don't aggregate it again
+                innerIt = outerIt->second.erase(innerIt);
             } else {
                 ++innerIt;
             }
         }
-        if (hasSpam) {
+        if (callsWithLatency > 0) {
+            auto datum = outerIt->first;
+            auto atom = os::StatsBootstrapAtom();
+            atom.atomId = kBinderLatencyAtomId;
+            std::vector<os::StatsBootstrapAtomValue> values;
+            atom.values.push_back(createPrimitiveValue(static_cast<int64_t>(datum.senderUid)));
+            atom.values.push_back(createPrimitiveValue(static_cast<int64_t>(getuid()))); // host uid
+            atom.values.push_back(createPrimitiveValue(datum.interfaceDescriptor));
+            // TODO (b/299356196): get actual method name.
+            atom.values.push_back(
+                    createPrimitiveValue(std::to_string(datum.transactionCode))); // aidl method
+            atom.values.push_back(
+                    createPrimitiveValue(static_cast<int64_t>(callsWithLatency))); // call count
+            atom.values.push_back(
+                    createPrimitiveValue(static_cast<int64_t>(durationSumMicros))); // dur sum in us
+            atom.values.push_back(createPrimitiveValue(static_cast<int32_t>(
+                    secondsWithAtLeast10Calls))); // seconds_with_at_least_10_calls
+            atom.values.push_back(createPrimitiveValue(static_cast<int32_t>(
+                    secondsWithAtLeast50Calls))); // seconds_with_at_least_50_calls
+
+            // TODO(b/414551350): combine multiple binder calls into one.
+            service->reportBootstrapAtom(atom);
+        }
+
+        if (secondsWithAtLeast125Calls > 0) {
+            auto datum = outerIt->first;
             auto atom = os::StatsBootstrapAtom();
             atom.atomId = kBinderSpamAtomId;
             std::vector<os::StatsBootstrapAtomValue> values;
@@ -114,9 +170,9 @@ void BinderStatsPusher::aggregateBinderSpamLocked(const std::vector<BinderCallDa
             // TODO(b/414551350): combine multiple binder calls into one.
             service->reportBootstrapAtom(atom);
         }
-        // If the inner map is now empty after removing expired entries, remove the outer entry.
-        if (innerMap.empty()) {
-            outerIt = mSpamStatsBuffer.erase(outerIt);
+
+        if (outerIt->second.empty()) {
+            outerIt = mStatsBuffer.erase(outerIt);
         } else {
             ++outerIt;
         }
@@ -125,7 +181,7 @@ void BinderStatsPusher::aggregateBinderSpamLocked(const std::vector<BinderCallDa
 
 void BinderStatsPusher::pushLocked(const std::vector<BinderCallData>& data, const int64_t nowSec) {
     auto service = getBootstrapAtomServiceLocked(nowSec);
-    aggregateBinderSpamLocked(data, service, nowSec);
+    aggregateStatsLocked(data, service, nowSec);
 }
 
 } // namespace android

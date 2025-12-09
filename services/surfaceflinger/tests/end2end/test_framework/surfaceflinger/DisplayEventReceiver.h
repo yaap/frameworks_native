@@ -108,10 +108,6 @@ class DisplayEventReceiver final {
                  VsyncEventData vsyncData);
     void onHotplug(DisplayId displayId, Timestamp timestamp, bool connected,
                    int32_t connectionError);
-    static void onModeChange(DisplayId displayId, Timestamp timestamp, int32_t modeId,
-                             std::chrono::nanoseconds vsyncPeriod);
-    static void onFrameRateOverride(DisplayId displayId, Timestamp timestamp, uid_t uid,
-                                    float framerateHz);
     static void onHdcpLevelsChange(DisplayId displayId, Timestamp timestamp, int32_t connectedLevel,
                                    int32_t maxLevel);
 

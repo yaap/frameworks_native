@@ -26,7 +26,7 @@
 
 namespace android::renderengine::skia {
 
-static const SkString kEdgeShaderString = SkString(R"(
+const SkString kEffectSource_EdgeExtensionEffect(R"(
     uniform shader uContentTexture;
     uniform vec2 uImgSize;
 
@@ -60,9 +60,7 @@ static const SkString kEdgeShaderString = SkString(R"(
 )");
 
 EdgeExtensionShaderFactory::EdgeExtensionShaderFactory(RuntimeEffectManager& effectManager) {
-    mEffect = effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::
-                                                                kEdgeExtensionEffect,
-                                                        "EdgeExtensionEffect", kEdgeShaderString);
+    mEffect = effectManager.mKnownEffects[kEdgeExtensionEffect];
 }
 
 sk_sp<SkShader> EdgeExtensionShaderFactory::createSkShader(const sk_sp<SkShader>& inputShader,

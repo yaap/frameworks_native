@@ -17,10 +17,28 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+genrule {
+    name: "vk_py_baseline_file_gen",
+    srcs: [":vk_py_path"],
+    out: ["vk_py_baseline.txt"],
+    cmd: "cp $(in) $(out)",
+}
+
+genrule {
+    name: "vk_xml_test_copy_gen",
+    srcs: [":vulkan_headers_registry"],
+    out: ["vk_xml_test_copy.xml"],
+    cmd: "cp $(in) $(out)",
+}
+
 python_test_host {
     name: "native_vulkan_scripts_test",
     main: "test_main.py",
     srcs: ["*.py"],
+    data: [
+        ":vk_py_baseline_file_gen",
+        ":vk_xml_test_copy_gen",
+    ],
     libs: ["native_vulkan_scripts_lib"],
     test_options: {
         unit_test: true,

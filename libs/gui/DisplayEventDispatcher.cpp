@@ -59,7 +59,8 @@ status_t DisplayEventDispatcher::initialize() {
     }
 
     if (mLooper != nullptr) {
-        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT, this, NULL);
+        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT,
+                                sp<DisplayEventDispatcher>::fromExisting(this), NULL);
         if (rc < 0) {
             return UNKNOWN_ERROR;
         }
@@ -164,6 +165,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
     while ((n = mReceiver.getEvents(buf, EVENT_BUFFER_SIZE)) > 0) {
         ALOGV("dispatcher %p ~ Read %d events.", this, int(n));
         mFrameRateOverrides.reserve(n);
+        mSupportedRefreshRates.reserve(n);
         for (ssize_t i = 0; i < n; i++) {
             const DisplayEventReceiver::Event& ev = buf[i];
             switch (ev.header.type) {
@@ -192,15 +194,6 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                        ev.hotplug.connectionError);
                     }
                     break;
-                case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
-                    LOG_ALWAYS_FATAL_IF(flags::unify_refresh_rate_callbacks(),
-                                        "dispatchModeChanged should not be sent when"
-                                        " refresh rate callbacks are unified");
-                    dispatchModeChanged(ev.header.timestamp, ev.header.displayId,
-                                        ev.modeChange.modeId, ev.modeChange.vsyncPeriod,
-                                        ev.modeChange.appVsyncOffset,
-                                        ev.modeChange.presentationDeadline);
-                    break;
                 case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
                     dispatchModeChangedWithFrameRateOverrides(ev.header.timestamp,
                                                               ev.header.displayId,
@@ -208,7 +201,8 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                               ev.modeChange.vsyncPeriod,
                                                               ev.modeChange.appVsyncOffset,
                                                               ev.modeChange.presentationDeadline,
-                                                              std::move(mFrameRateOverrides));
+                                                              std::move(mFrameRateOverrides),
+                                                              std::move(mSupportedRefreshRates));
                     break;
                 case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);
@@ -216,12 +210,8 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                 case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
                     mFrameRateOverrides.emplace_back(ev.frameRateOverride);
                     break;
-                case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
-                    LOG_ALWAYS_FATAL_IF(flags::unify_refresh_rate_callbacks(),
-                                        "dispatchFrameRateOverrides should not be sent when"
-                                        " refresh rate callbacks are unified");
-                    dispatchFrameRateOverrides(ev.header.timestamp, ev.header.displayId,
-                                               std::move(mFrameRateOverrides));
+                case DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE:
+                    mSupportedRefreshRates.emplace_back(ev.supportedRefreshRate);
                     break;
                 case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
                     dispatchHdcpLevelsChanged(ev.header.displayId,

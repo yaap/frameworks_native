@@ -140,7 +140,7 @@ private:
         void verifySurfaceControlStats(const SurfaceControlStats& surfaceControlStats,
                                        nsecs_t /* latchTime */) const {
             const auto& [surfaceControl, latch, acquireTimeOrFence, presentFence,
-                         previousReleaseFence, transformHint, frameEvents, ignore] =
+                         previousReleaseFence, transformHint, frameEvents, ignore, cornerRadii] =
                     surfaceControlStats;
 
             nsecs_t acquireTime = -1;

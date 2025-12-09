@@ -23,7 +23,10 @@ import copy
 import generator_common as gencom
 
 # --- FILE PATHS & OUTPUT CONFIGURATION ---
-VULKAN_XML_FILE_PATH = Path("../../../../external/vulkan-headers/registry/vk.xml")
+SCRIPT_DIR = Path(__file__).resolve().parent
+VULKAN_XML_FILE_PATH = SCRIPT_DIR / "../../../../external/vulkan-headers/registry/vk.xml"
+VULKAN_XML_FILE_PATH = VULKAN_XML_FILE_PATH.resolve()
+
 OUTPUT_VK_PY_PATH = Path("vk.py")
 
 # Output file initial content
@@ -36,7 +39,7 @@ import ctypes
 """
 
 INIT_CONSTANTS_CONTENT = """
-# --- Adding Pre-Defined Constants ---\n
+# --- Adding Pre-Defined Constants ---
 uint8_t = ctypes.c_uint8
 uint32_t = ctypes.c_uint32
 VkFlags = uint32_t
@@ -49,67 +52,65 @@ float_t = ctypes.c_float
 int64_t = ctypes.c_int64
 uint16_t = ctypes.c_uint16
 VkFlags64 = uint64_t
-
 """
 # TODO: b/415706521 (Refactor EXTRA_STRUCTURES_CONTENT Logic to Use XML Generation)
 EXTRA_STRUCTURES_CONTENT = """
 @dataclass
 class VkExtent3D:
-  width: uint32_t
-  height: uint32_t
-  depth: uint32_t
+    width: uint32_t
+    height: uint32_t
+    depth: uint32_t
 
 @dataclass
 class VkImageFormatProperties:
-  maxExtent: VkExtent3D
-  maxMipLevels: uint32_t
-  maxArrayLayers: uint32_t
-  sampleCounts: VkSampleCountFlags
-  maxResourceSize: VkDeviceSize
+    maxExtent: VkExtent3D
+    maxMipLevels: uint32_t
+    maxArrayLayers: uint32_t
+    sampleCounts: VkSampleCountFlags
+    maxResourceSize: VkDeviceSize
 
 @dataclass
 class VkExtensionProperties:
-  extensionName: str
-  specVersion: uint32_t
+    extensionName: str
+    specVersion: uint32_t
 
 @dataclass
 class VkFormatProperties:
-  linearTilingFeatures: VkFormatFeatureFlags
-  optimalTilingFeatures: VkFormatFeatureFlags
-  bufferFeatures: VkFormatFeatureFlags
+    linearTilingFeatures: VkFormatFeatureFlags
+    optimalTilingFeatures: VkFormatFeatureFlags
+    bufferFeatures: VkFormatFeatureFlags
 
 @dataclass
 class VkLayerProperties:
-  layerName: str
-  specVersion: uint32_t
-  implementationVersion: uint32_t
-  description: str
+    layerName: str
+    specVersion: uint32_t
+    implementationVersion: uint32_t
+    description: str
 
 @dataclass
 class VkQueueFamilyProperties:
-  queueFlags: VkQueueFlags
-  queueCount: uint32_t
-  timestampValidBits: uint32_t
-  minImageTransferGranularity: VkExtent3D
-\n\n"""
+    queueFlags: VkQueueFlags
+    queueCount: uint32_t
+    timestampValidBits: uint32_t
+    minImageTransferGranularity: VkExtent3D
+"""
 
 # TODO: b/415706507 (Find a way to identify this structs from vk.xml API_1_0 tag)
 VULKAN_API_1_0_STRUCTS_CONTENT = """# --- STRUCTS USED BY VULKAN_API_1_0 ---
-\nVULKAN_API_1_0_STRUCTS = [VkPhysicalDeviceProperties,
-VkPhysicalDeviceMemoryProperties,
-VkPhysicalDeviceSparseProperties,
-VkImageFormatProperties,
-VkQueueFamilyProperties,
-VkExtensionProperties,
-VkLayerProperties,
-VkFormatProperties,
-VkPhysicalDeviceLimits,
-VkPhysicalDeviceFeatures]"""
+VULKAN_API_1_0_STRUCTS = [
+    VkPhysicalDeviceProperties,
+    VkPhysicalDeviceMemoryProperties,
+    VkPhysicalDeviceSparseProperties,
+    VkImageFormatProperties,
+    VkQueueFamilyProperties,
+    VkExtensionProperties,
+    VkLayerProperties,
+    VkFormatProperties,
+    VkPhysicalDeviceLimits,
+    VkPhysicalDeviceFeatures]"""
 
 ADDITIONAL_EXTENSION_INDEPENDENT_STRUCTS_CONTENT = """# --- ADDITIONAL EXTENSION INDEPENDENT STRUCTS ---
-\nADDITIONAL_EXTENSION_INDEPENDENT_STRUCTS = ['VkPhysicalDeviceProperties',
-'VkPhysicalDeviceFeatures',
-'VkPhysicalDeviceMemoryProperties']"""
+ADDITIONAL_EXTENSION_INDEPENDENT_STRUCTS = ['VkPhysicalDeviceProperties', 'VkPhysicalDeviceFeatures', 'VkPhysicalDeviceMemoryProperties']"""
 
 # --- GENERAL CONSTANTS ---
 PRIMITIVE_DATA_TYPE = [
@@ -212,7 +213,7 @@ REQUIRED_DATA_MEMBERS = []
 # Mappings derived from parsing
 alias_map: Dict[str, str] = {}  # Maps alias name to original name
 feature_api_map: Dict[str, List[Dict[str, str]]] = defaultdict(list)  # Maps feature name to list of {struct: type_enum}
-disabled_structs = ["VkPhysicalDeviceHostImageCopyProperties"]  # TODO:- b/415705512 handle VkPhysicalDeviceHostImageCopyProperties
+disabled_structs = []
 structs_with_valid_extends = []
 enum_member_map = {}
 additional_vk_format_values = {}
@@ -320,10 +321,10 @@ def write_constants(root: ET.Element, vk_py_file_handle: IO[str]):
             # Skip aliased constants here; they aren't assigned values directly
             pass
 
-    content = "# --- API Constant values extracted from vk.xml ---\n\n"
+    content = "\n# --- API Constant values extracted from vk.xml ---\n"
     for name, value in api_constants.items():
         content += f"{name} = {value}\n"
-    content += "\n\n"
+    content += "\n"
     write_py_file(vk_py_file_handle, content)
 
 
@@ -363,11 +364,14 @@ def extract_make_api_versions(root: ET.Element):
 def write_api_constants(xml_root: ET.Element, vk_py_file_handle: IO[str]):
     """Extracts VK_API_VERSION defines, computes their integer values, and writes them to vk.py."""
     version_defines = extract_make_api_versions(xml_root)
-    version_content = "# --- Computed VK_API_VERSION Constants --- \n\n"
-    for name, version in version_defines.items():
-        packed_value = vk_make_api_version(version[0], version[1], version[2], version[3])
-        version_content += f"{name} = {packed_value}\n"
-    version_content += "\n\n"
+    version_content = "\n# --- Computed VK_API_VERSION Constants ---\n"
+    version_content += "VK_API_VERSION_MAP = {\n"
+    version_defines_items = list(version_defines.items())
+    if(len(version_defines_items)>1):
+        for name, version in version_defines_items[1:]:
+            packed_value = vk_make_api_version(version[0], version[1], version[2], version[3])
+            version_content += f'    "{name}": {packed_value},\n'
+    version_content += "}\n"
     write_py_file(vk_py_file_handle, version_content)
 
 
@@ -402,8 +406,7 @@ def write_aliases(
     filter_required_data_members: bool = False,
 ) -> None:
     """Writes extracted type aliases (VkFlags or struct aliases) as Python assignments to a file."""
-    content = ""
-    content += f"{comment}\n\n"
+    content = f"\n{comment}\n"
     if filter_required_data_members:
         content += "\n".join(f"{alias} = {original}" for alias, original in aliases.items() if alias in REQUIRED_DATA_MEMBERS)
     else:
@@ -454,7 +457,7 @@ def fetch_enums_with_type_attribute(root: ET.Element):
 
 def write_enums(vk_py_file_handle: IO[str], enums: dict[str, dict[str, Optional[str]]]) -> None:
     """Writes necessary enum definitions as Python Enum classes and generates C++ traits string."""
-    content = "# --- Enum Definitions ---\n"
+    content = "\n# --- Enum Definitions ---\n"
     # Iterate through all parsed enum types
     for enum_name, members in enums.items():
         # Only generate code for enums that were deemed necessary (used by structs)
@@ -478,7 +481,6 @@ def write_enums(vk_py_file_handle: IO[str], enums: dict[str, dict[str, Optional[
         else:
             content += "    pass\n"
         content += "\n"
-    content += "\n"
     write_py_file(vk_py_file_handle, content)
 
 
@@ -505,7 +507,7 @@ def fetch_struct_handles(root: ET.Element):
 def write_empty_dataclasses(dataclasses_list: List[str], vk_py_file_handle: IO[str]):
     """Generates empty Python dataclasses for Vulkan handle types and adds predefined common structs."""
     created_class_names = set()  # Track generated classes to avoid duplicates
-    content_to_append = "\n# --- Empty Handle Dataclasses ---\n\n"
+    content_to_append = "\n# --- Empty Handle Dataclasses ---\n"
 
     # Generate empty dataclasses only for handles that are dependencies of physical device structs
     for class_name in dataclasses_list:
@@ -520,6 +522,7 @@ def write_empty_dataclasses(dataclasses_list: List[str], vk_py_file_handle: IO[s
     # Add manually defined common Vulkan struct definitions
     content_to_append += "# --- Pre-defined Struct Definitions ---\n"
     content_to_append += EXTRA_STRUCTURES_CONTENT
+    content_to_append += "\n"
     write_py_file(vk_py_file_handle, content_to_append)
 
 
@@ -722,14 +725,13 @@ def fetch_all_structs_and_aliases(
 # --- Writing Struct Dataclasses ---
 def write_structs(vk_py_file_handle: IO[str], structs: Dict[str, List[Tuple[str, str, Optional[str]]]]) -> None:
     """Writes Python dataclass definitions for parsed structs, ensuring dependencies are written first."""
-    content = "# --- Vulkan Struct Definitions (Dependencies first, then PhysicalDevice structs) ---\n\n"
+    content = "\n# --- Vulkan Struct Definitions (Dependencies first, then PhysicalDevice structs) ---\n"
     local_content = ""
 
     # Helper function to generate the @dataclass string for a single struct
     def process_struct(class_name: str, member_list: List[Tuple[str, str, Optional[str]]]):
         nonlocal local_content
-        local_content += "@dataclass\n"
-        local_content += f"class {class_name}:\n"
+        local_content += f"@dataclass\nclass {class_name}:\n"
         if member_list:
             for member_name, member_type_c, size_val in member_list:
                 # Convert the C type to a Python type hint
@@ -753,12 +755,6 @@ def write_structs(vk_py_file_handle: IO[str], structs: Dict[str, List[Tuple[str,
 
     # Combine the initial comment with the generated struct definitions
     content += local_content
-    if not local_content.endswith("\n\n"):
-        if local_content.endswith("\n"):
-            content += "\n"
-        else:
-            content += "\n\n"
-
     write_py_file(vk_py_file_handle, content)
 
 
@@ -951,8 +947,8 @@ def extract_struct_extends_mapping(struct_elements: List[ET.Element]) -> Dict[st
 
 def write_structs_extends_mapping(struct_elements: List[ET.Element], vk_py_file_handle: IO[str]):
     struct_extends_mapping_dict = extract_struct_extends_mapping(struct_elements)
-    struct_extends_mapping_str = pprint.pformat(struct_extends_mapping_dict, indent=2, width=100)
-    content = f"\n# --- STRUCT EXTENDS MAPPINGS ---\n\nSTRUCT_EXTENDS_MAPPING = {struct_extends_mapping_str}\n\n"
+    struct_extends_mapping_str = pprint.pformat(struct_extends_mapping_dict, indent=4, width=100)
+    content = f"\n# --- STRUCT EXTENDS MAPPINGS ---\nSTRUCT_EXTENDS_MAPPING = {struct_extends_mapping_str}\n\n"
     write_py_file(vk_py_file_handle, content)
 
 
@@ -1047,7 +1043,7 @@ def extract_extension_struct_mapping(root: ET.Element, struct_to_type_map: Dict[
                     continue
 
                 # Process only relevant physical device structs not already added to the map
-                if type_name not in processed_structs and type_name in ALL_STRUCT_NAMES:
+                if type_name in ALL_STRUCT_NAMES:
                     if "Properties" not in type_name and "Features" not in type_name:
                         if type_name not in disabled_structs:
                             disabled_structs.append(type_name)
@@ -1108,12 +1104,12 @@ def generate_core_struct_mapping(struct_names: list[str], vk_py_file_handle: IO[
 # Struct Filters:
 # - Name matches "VkPhysicalDeviceVulkan<Version><Properties|Features>" (from CORE_MAPPING_STRUCT_LIST).
 # - sType is programmatically derived.
-# Format: {"versions": {core_version_key: [{struct_name: sType_enum_value}, ...]}}\n"""
+# Format: {"versions": {core_version_key: [{struct_name: sType_enum_value}, ...]}}"""
 
     allStructInfo = "\n# --- Vulkan Core Version to Struct Mappings ---\n"
     allStructInfo += core_comment + "\n"  # Add the comment
-    allStructInfo += """VULKAN_CORES_AND_STRUCTS_MAPPING = {"versions":"""
-    allStructInfo += f"{pprint.pformat(sorted_versions_map, indent=2, width=100)}\n"
+    allStructInfo += """VULKAN_CORES_AND_STRUCTS_MAPPING = {"versions": """
+    allStructInfo += f"{pprint.pformat(sorted_versions_map, indent=4, width=100)}"
     allStructInfo += "}\n\n"
     write_py_file(vk_py_file_handle, allStructInfo)
 
@@ -1121,9 +1117,10 @@ def generate_core_struct_mapping(struct_names: list[str], vk_py_file_handle: IO[
 
 
 # --- Ancillary Mappings & Lists for vk.py ---
-def extract_list_size_mapping(struct_elements: List[ET.Element]) -> Dict[str, str]:
+def extract_list_size_mapping(struct_elements: List[ET.Element]) :
     """Extracts mappings from list members to their corresponding size-indicating members within structs."""
     member_map = {}  # Stores {list_member_name: size_member_name}
+    struct_with_dynamic_size_list_variables = {} # Stores {struct_name: list of list variables}
     for type_element in struct_elements:
         struct_name = type_element.get(ATTR_NAME)
         # Skip invalid or non-physical device structs
@@ -1135,19 +1132,45 @@ def extract_list_size_mapping(struct_elements: List[ET.Element]) -> Dict[str, st
             len_attribute_value = member_element.get(ATTR_LEN)  # Name of the member holding the size
             name_tag = member_element.find(TAG_NAME)
             name_value = get_element_text(name_tag)  # Name of the list/array member
+            member_type_element = member_element.find(ATTR_TYPE)
+            is_pointer = '*' in member_type_element.tail if member_type_element.tail else False
+
             # Store the mapping if valid (names exist, len is not "null-terminated")
             if name_value and len_attribute_value and len_attribute_value.strip().lower() != "null-terminated":
                 member_map[name_value] = len_attribute_value.strip()
-    return member_map
+                if is_pointer:
+                    struct_with_dynamic_size_list_variables.setdefault(struct_name, []).append(name_value)
+    return member_map, struct_with_dynamic_size_list_variables
 
 
 def write_list_size_mapping(struct_elements: List[ET.Element], vk_py_file_handle: IO[str]):
+
+    def sort_dict_by_key_and_content(input_dict):
+        """
+        Sorts a dictionary first by its keys alphabetically,
+        and then sorts the elements within the sets associated with each key.
+        """
+        sorted_items_by_key = sorted(input_dict.items())
+        sorted_dict = {}
+        for key, value_set in sorted_items_by_key:
+            sorted_dict[key] = sorted(list(value_set))
+
+        return sorted_dict
+
+    def write_formatted_code(list_variable_name, list_data):
+        formatted_list_code = pprint.pformat(list_data, indent=4, width=100)
+        formatted_content = f"""{list_variable_name} = {formatted_list_code}\n\n"""
+        write_py_file(vk_py_file_handle, formatted_content)
+
     """Extracts and writes the list-member-to-size-member mapping to a Python file."""
-    list_size_map = extract_list_size_mapping(struct_elements)
-    content = "# --- List Size Mappings (Field name to size field name) ---\n\n"
-    list_size_str = pprint.pformat(list_size_map, indent=2, width=100)
-    content += f"""LIST_TYPE_FIELD_AND_SIZE_MAPPING = {list_size_str}\n\n"""
+    content = "# --- List Size Mappings (Field name to size field name) ---\n"
     write_py_file(vk_py_file_handle, content)
+
+    list_size_map, dynamic_list_variables = extract_list_size_mapping(struct_elements)
+    write_formatted_code("LIST_TYPE_FIELD_AND_SIZE_MAPPING", list_size_map)
+
+    sorted_dynamic_list_variables = sort_dict_by_key_and_content(dynamic_list_variables)
+    write_formatted_code("STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING", sorted_dynamic_list_variables)
 
 
 def write_all_structs(vk_py_file_handle: IO[str]) -> None:
@@ -1158,15 +1181,14 @@ def write_all_structs(vk_py_file_handle: IO[str]) -> None:
         "# Includes structs that:\n"
         "# 1. Are not in 'disabled_structs' (implicitly, via VK_PHYSICAL_STRUCT_NAMES population).\n"
         '# 2. Extend "VkPhysicalDeviceProperties2" or "VkPhysicalDeviceFeatures2"\n'
-        "#    (i.e., are in 'structs_with_valid_extends').\n\n"
+        "#    (i.e., are in 'structs_with_valid_extends')."
     )
-    allStructInfo = comment
-    allStructInfo += """ALL_STRUCTS_EXTENDING_FEATURES_OR_PROPERTIES = [\n"""
+    allStructInfo = comment + "\n"
+    allStructInfo += "ALL_STRUCTS_EXTENDING_FEATURES_OR_PROPERTIES = [\n"
     # Add each physical device struct name as a string element in the list
     for class_name in VK_PHYSICAL_STRUCT_NAMES:
-
         allStructInfo += f"    {class_name},\n"
-    allStructInfo += f"]\n\n"
+    allStructInfo += "]\n\n"
     write_py_file(vk_py_file_handle, allStructInfo)
 
 
@@ -1188,11 +1210,11 @@ def write_extension_independent_structs(structs_in_extensions: Set[str], vk_py_f
         "# 2. Not in the global 'disabled_structs' list.\n"
         '# 3. Extend "VkPhysicalDeviceProperties2" or "VkPhysicalDeviceFeatures2" (in \'structs_with_valid_extends\').\n'
         "# 4. Not core version-specific (not in CORE_MAPPING_STRUCT_LIST).\n"
-        "# 5. Not required by any enabled Vulkan extension (not in 'structs_in_extensions').\n\n"
+        "# 5. Not required by any enabled Vulkan extension (not in 'structs_in_extensions')."
     )
-    content = comment
-    independent_structs_str = pprint.pformat(independent_structs, indent=2, width=100)
-    content += f"""EXTENSION_INDEPENDENT_STRUCTS = {independent_structs_str}\n\n"""
+    content = comment + "\n"
+    independent_structs_str = pprint.pformat(independent_structs, indent=4, width=100)
+    content += f"EXTENSION_INDEPENDENT_STRUCTS = {independent_structs_str}\n\n"
     write_py_file(vk_py_file_handle, content)
 
 
@@ -1238,13 +1260,13 @@ def generate_vk_py_content(
 # Struct Filters (per extension):
 # - Not in global 'disabled_structs'.
 # - Extends "VkPhysicalDeviceProperties2" or "VkPhysicalDeviceFeatures2".
-# Format: {ext_name: [{struct_name: sType_enum_value}, ...]}\n"""
+# Format: {ext_name: [{struct_name: sType_enum_value}, ...]}"""
     content = "\n# --- Vulkan Extension to Struct Mappings ---\n"
     content += extension_comment + "\n"
     sorted_data = dict(sorted(extension_map.items()))
-    extension_map_str = pprint.pformat(sorted_data, indent=2, width=100)
-    content += """VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING = {"extensions": """
-    content += f"""{extension_map_str}"""
+    extension_map_str = pprint.pformat(sorted_data, indent=4, width=100)
+    content += """VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING = {"extensions":\n"""
+    content += f"{extension_map_str}"
     content += "}\n\n"
 
     # --- Vulkan Feature to Struct Mappings ---
@@ -1260,17 +1282,17 @@ def generate_vk_py_content(
 # NOTE:
 # VK_VERSION_1_0" is empty as it does not map to any structure which passes our structure-filter criteria.
 # We have hardcoded the code-block for VK_VERSION_1_0 in vkjson_generator.py
-# Format: {feature_name: [{struct_name: sType_enum_value}, ...]}\n"""
+# Format: {feature_name: [{struct_name: sType_enum_value}, ...]}"""
     content += "# --- Vulkan Feature to Struct Mappings ---\n"
     content += feature_comment + "\n"
-    feature_map_str = pprint.pformat(feature_map, indent=2, width=100)
-    content += f"""VULKAN_VERSIONS_AND_STRUCTS_MAPPING = {feature_map_str}\n\n"""
+    feature_map_str = pprint.pformat(feature_map, indent=4, width=100)
+    content += f"VULKAN_VERSIONS_AND_STRUCTS_MAPPING = {feature_map_str}\n\n"
     return content
 
 
 def write_initial_content(vk_py_file_handle: IO[str]):
     copyright_header = (
-        gencom.copyright_and_warning(datetime.now().year).replace("*/", "").replace("/*", "").replace("*", "#").replace("// WARNING: This file is generated. See ../README.md for instructions.", "").strip()
+        gencom.copyright_and_warning(datetime.now().year).replace("*/", "").replace("/*", "").replace(" *", "#").replace("// WARNING: This file is generated. See ../README.md for instructions.", "").strip()
     )
     write_py_file(vk_py_file_handle, copyright_header)
     write_py_file(vk_py_file_handle, INIT_CONTENT + INIT_CONSTANTS_CONTENT)
@@ -1352,6 +1374,7 @@ def extract_vkformat_enums(xml_root):
     # Remove duplicates from lists if any were introduced by multiple require tags
     for key in result_map:
         result_map[key] = list(set(result_map[key]))
+        result_map[key] = sorted(result_map[key], key=lambda x: x[0], reverse=True)
         result_map[key] = sorted(result_map[key], key=lambda x: x[1])
 
     return result_map
@@ -1368,7 +1391,7 @@ def copy_vulkan_1_0_enums(enums_data, vk_format_map):
 
 
 # --- CODEGEN EXECUTION ---
-def gen_vk():
+def gen_vk(xml_path = None, output_path = None):
     """
     Orchestrates parsing of Vulkan XML registry and generation of vk.py.
 
@@ -1379,12 +1402,18 @@ def gen_vk():
     4. Write all parsed and processed data into vk.py, including dataclasses,
        constants, aliases, and various mapping dictionaries.
     """
+    OUTPUT_VK_PY_PATH = output_path if output_path else SCRIPT_DIR / "vk.py"
     # Ensure output directory exists
     OUTPUT_VK_PY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     with open(OUTPUT_VK_PY_PATH, "w", encoding="utf-8") as vk_py_file_handle:
         write_initial_content(vk_py_file_handle)
-        xml_root = load_xml_registry(VULKAN_XML_FILE_PATH)
+        xml_root = None
+        if xml_path is None:
+            xml_root = load_xml_registry(VULKAN_XML_FILE_PATH)
+        else:
+            xml_root = load_xml_registry(xml_path)
+
         if xml_root is None:
             return
 
@@ -1405,16 +1434,16 @@ def gen_vk():
         write_aliases(vk_py_file_handle, aliases_vk_flags_data, "# --- VkFlags Type Aliases ---", filter_required_data_members=True)
         write_empty_dataclasses(empty_dataclass_names, vk_py_file_handle)
         write_structs(vk_py_file_handle, all_structs_data)
-        write_aliases(vk_py_file_handle, struct_alias_data, "\n# --- Physical Device Struct Aliases ---")
+        write_aliases(vk_py_file_handle, struct_alias_data, "# --- Physical Device Struct Aliases ---")
         write_all_structs(vk_py_file_handle)
         write_py_file(vk_py_file_handle, generate_vk_py_content(feature_map=feature_map_data, extension_map=extension_map_data))
         write_extension_independent_structs(structs_in_extensions, vk_py_file_handle)
         generate_core_struct_mapping(CORE_MAPPING_STRUCT_LIST, vk_py_file_handle)
         write_list_size_mapping(all_struct_type_elements, vk_py_file_handle)
-        write_py_file(vk_py_file_handle, "\n" + VULKAN_API_1_0_STRUCTS_CONTENT + "\n\n")
-        write_py_file(vk_py_file_handle, "\n" + ADDITIONAL_EXTENSION_INDEPENDENT_STRUCTS_CONTENT + "\n\n")
+        write_py_file(vk_py_file_handle, VULKAN_API_1_0_STRUCTS_CONTENT + "\n\n")
+        write_py_file(vk_py_file_handle, ADDITIONAL_EXTENSION_INDEPENDENT_STRUCTS_CONTENT + "\n")
         write_structs_extends_mapping(all_struct_type_elements, vk_py_file_handle)
-        enum_traits_content = f"\n# --- Enum Traits Mapping ---\n\nENUM_TRAITS_MAPPING = {pprint.pformat(enum_member_map, indent=2, width=100, sort_dicts=False)}\n\n"
+        enum_traits_content = f"\n# --- Enum Traits Mapping ---\nENUM_TRAITS_MAPPING = {pprint.pformat(enum_member_map, indent=4, width=100, sort_dicts=False)}\n\n"
         write_py_file(vk_py_file_handle, enum_traits_content)
-        vk_formats_content = f"\n# --- VK Format Mapping ---\n\nVK_FORMAT_MAPPING = {pprint.pformat(vk_format_map, indent=2, width=100, sort_dicts=False)}\n\n"
+        vk_formats_content = f"\n# --- VK Format Mapping ---\nVK_FORMAT_MAPPING = {pprint.pformat(vk_format_map, indent=4, width=100, sort_dicts=False)}"
         write_py_file(vk_py_file_handle, vk_formats_content)

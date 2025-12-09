@@ -254,10 +254,17 @@ enum AHardwareBuffer_Format {
 
     /**
      * Corresponding formats:
-     *   Vulkan: VK_FORMAT_A2A10G10B10_UNORM_PACK32
+     *   Vulkan: VK_FORMAT_A2R10G10B10_UNORM_PACK32
      *   OpenGL ES: N/A
      */
     AHARDWAREBUFFER_FORMAT_B10G10R10A2_UNORM        = 0x43,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_A2R10G10B10_UNORM_PACK32
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_B10G10R10X2_UNORM        = 0x44,
 
 };
 

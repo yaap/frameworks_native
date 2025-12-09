@@ -33,7 +33,7 @@ class BaseCodeAssertTest(unittest.TestCase):
             for line in code.splitlines()
         ]
 
-    def assertCodeEqual(self, expected_code_str: str, actual_code_str: str):
+    def assertCodeEqual(self, expected_code_str: str, actual_code_str: str, msg=None):
         """
         This code comparator lacks semantic awareness and performs a naive normalization by
         stripping all whitespace characters, without distinguishing between executable code,
@@ -68,7 +68,7 @@ class BaseCodeAssertTest(unittest.TestCase):
                 f"---------------------------------------------------"
             )
 
-            failure_message = self._formatMessage(None, standard_message)
+            failure_message = self._formatMessage(msg, standard_message)
             self.fail(failure_message)
 
 

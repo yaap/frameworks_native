@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "FrontEnd/Caching/MergeableHierarchyManager.h"
 #include "FrontEnd/DisplayInfo.h"
 #include "FrontEnd/LayerLifecycleManager.h"
 #include "LayerHierarchy.h"
@@ -59,6 +60,7 @@ public:
         const std::unordered_map<std::string, uint32_t>& genericLayerMetadataKeyMap;
         bool skipRoundCornersWhenProtected = false;
         LayerSnapshot rootSnapshot = getRootSnapshot();
+        caching::MergeableHierarchyManager* mergeableHierarchyManager = nullptr;
     };
     LayerSnapshotBuilder();
 
@@ -89,13 +91,16 @@ public:
     typedef std::function<bool(const LayerSnapshot& snapshot)> ConstPredicate;
     // Visit each snapshot that satisfies the predicate and move the snapshot if needed with visible
     // snapshots in z-order
-    void forEachSnapshot(const Visitor& visitor, const ConstPredicate& predicate);
+    void forEachNonNullSnapshot(const Visitor& visitor, const ConstPredicate& predicate);
 
     // Visit each snapshot
     void forEachSnapshot(const ConstVisitor& visitor) const;
 
     // Visit each snapshot interesting to input reverse z-order
     void forEachInputSnapshot(const ConstVisitor& visitor) const;
+
+    uint32_t getPrimaryDisplayRotationFlags(
+            const ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo>& displays) const;
 
 private:
     friend class LayerSnapshotTest;
@@ -109,7 +114,7 @@ private:
     const LayerSnapshot& updateSnapshotsInHierarchy(
             const Args&, const LayerHierarchy& hierarchy,
             const LayerHierarchy::TraversalPath& traversalPath, const LayerSnapshot& parentSnapshot,
-            int depth);
+            int depth, std::optional<caching::MergeableHierarchy::Accumulator>& accumulator);
     void updateSnapshot(LayerSnapshot&, const Args&, const RequestedLayerState&,
                         const LayerSnapshot& parentSnapshot, const LayerHierarchy::TraversalPath&);
     static void updateRelativeState(LayerSnapshot& snapshot, const LayerSnapshot& parentSnapshot,
@@ -117,6 +122,13 @@ private:
     static void resetRelativeState(LayerSnapshot& snapshot);
     static void updateRoundedCorner(LayerSnapshot& snapshot, const RequestedLayerState& layerState,
                                     const LayerSnapshot& parentSnapshot, const Args& args);
+    static void scaleRadii(gui::CornerRadii& radii, float scaleX, float scaleY);
+    static gui::CornerRadii getClippedClientRadii(const gui::CornerRadii& requestedRadii,
+                                                  const FloatRect& layerCropRect,
+                                                  const FloatRect& layerBounds);
+    static bool childOverlapsParentCornerRegion(const FloatRect& childCropRect,
+                                                const FloatRect& parentCropRect,
+                                                const gui::CornerRadii& parentRadii);
     static void updateBoundsForEdgeExtension(LayerSnapshot& snapshot);
     void updateLayerBounds(LayerSnapshot& snapshot, const RequestedLayerState& layerState,
                            const LayerSnapshot& parentSnapshot, uint32_t displayRotationFlags);

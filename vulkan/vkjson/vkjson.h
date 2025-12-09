@@ -111,6 +111,27 @@ struct VkJsonANDROIDExternalFormatResolve {
       external_format_resolve_properties_android;
 };
 
+struct VkJsonARMFormatPack {
+  VkJsonARMFormatPack() {
+    reported = false;
+    memset(&format_pack_features_arm, 0,
+           sizeof(VkPhysicalDeviceFormatPackFeaturesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceFormatPackFeaturesARM format_pack_features_arm;
+};
+
+struct VkJsonARMPipelineOpacityMicromap {
+  VkJsonARMPipelineOpacityMicromap() {
+    reported = false;
+    memset(&pipeline_opacity_micromap_features_arm, 0,
+           sizeof(VkPhysicalDevicePipelineOpacityMicromapFeaturesARM));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineOpacityMicromapFeaturesARM
+      pipeline_opacity_micromap_features_arm;
+};
+
 struct VkJsonARMRasterizationOrderAttachmentAccess {
   VkJsonARMRasterizationOrderAttachmentAccess() {
     reported = false;
@@ -175,6 +196,26 @@ struct VkJsonARMShaderCoreProperties {
   }
   bool reported;
   VkPhysicalDeviceShaderCorePropertiesARM shader_core_properties_arm;
+};
+
+struct VkJsonARMTensors {
+  VkJsonARMTensors() {
+    reported = false;
+    memset(&tensor_properties_arm, 0,
+           sizeof(VkPhysicalDeviceTensorPropertiesARM));
+    memset(&tensor_features_arm, 0, sizeof(VkPhysicalDeviceTensorFeaturesARM));
+    memset(&descriptor_buffer_tensor_features_arm, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferTensorFeaturesARM));
+    memset(&descriptor_buffer_tensor_properties_arm, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferTensorPropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceTensorPropertiesARM tensor_properties_arm;
+  VkPhysicalDeviceTensorFeaturesARM tensor_features_arm;
+  VkPhysicalDeviceDescriptorBufferTensorFeaturesARM
+      descriptor_buffer_tensor_features_arm;
+  VkPhysicalDeviceDescriptorBufferTensorPropertiesARM
+      descriptor_buffer_tensor_properties_arm;
 };
 
 struct VkJsonExt4444Formats {
@@ -316,15 +357,14 @@ struct VkJsonExtDepthBiasControl {
   VkPhysicalDeviceDepthBiasControlFeaturesEXT depth_bias_control_features_ext;
 };
 
-struct VkJsonExtDepthClampZeroOne {
-  VkJsonExtDepthClampZeroOne() {
+struct VkJsonExtDepthClampControl {
+  VkJsonExtDepthClampControl() {
     reported = false;
-    memset(&depth_clamp_zero_one_features_ext, 0,
-           sizeof(VkPhysicalDeviceDepthClampZeroOneFeaturesEXT));
+    memset(&depth_clamp_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceDepthClampControlFeaturesEXT));
   }
   bool reported;
-  VkPhysicalDeviceDepthClampZeroOneFeaturesEXT
-      depth_clamp_zero_one_features_ext;
+  VkPhysicalDeviceDepthClampControlFeaturesEXT depth_clamp_control_features_ext;
 };
 
 struct VkJsonExtDepthClipControl {
@@ -398,6 +438,21 @@ struct VkJsonExtDeviceFault {
   }
   bool reported;
   VkPhysicalDeviceFaultFeaturesEXT fault_features_ext;
+};
+
+struct VkJsonExtDeviceGeneratedCommands {
+  VkJsonExtDeviceGeneratedCommands() {
+    reported = false;
+    memset(&device_generated_commands_features_ext, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT));
+    memset(&device_generated_commands_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT
+      device_generated_commands_features_ext;
+  VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT
+      device_generated_commands_properties_ext;
 };
 
 struct VkJsonExtDeviceMemoryReport {
@@ -512,6 +567,21 @@ struct VkJsonExtFragmentDensityMap2 {
       fragment_density_map2_properties_ext;
 };
 
+struct VkJsonExtFragmentDensityMapOffset {
+  VkJsonExtFragmentDensityMapOffset() {
+    reported = false;
+    memset(&fragment_density_map_offset_features_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT));
+    memset(&fragment_density_map_offset_properties_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT
+      fragment_density_map_offset_features_ext;
+  VkPhysicalDeviceFragmentDensityMapOffsetPropertiesEXT
+      fragment_density_map_offset_properties_ext;
+};
+
 struct VkJsonExtFragmentShaderInterlock {
   VkJsonExtFragmentShaderInterlock() {
     reported = false;
@@ -564,9 +634,14 @@ struct VkJsonExtHostImageCopy {
     reported = false;
     memset(&host_image_copy_features_ext, 0,
            sizeof(VkPhysicalDeviceHostImageCopyFeaturesEXT));
+    memset(&host_image_copy_properties_ext, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyPropertiesEXT));
   }
   bool reported;
   VkPhysicalDeviceHostImageCopyFeaturesEXT host_image_copy_features_ext;
+  VkPhysicalDeviceHostImageCopyPropertiesEXT host_image_copy_properties_ext;
+  std::vector<VkImageLayout> copy_src_layouts;
+  std::vector<VkImageLayout> copy_dst_layouts;
 };
 
 struct VkJsonExtHostQueryReset {
@@ -906,6 +981,17 @@ struct VkJsonExtPipelineRobustness {
       pipeline_robustness_properties_ext;
 };
 
+struct VkJsonExtPresentModeFifoLatestReady {
+  VkJsonExtPresentModeFifoLatestReady() {
+    reported = false;
+    memset(&present_mode_fifo_latest_ready_features_ext, 0,
+           sizeof(VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT
+      present_mode_fifo_latest_ready_features_ext;
+};
+
 struct VkJsonExtPrimitiveTopologyListRestart {
   VkJsonExtPrimitiveTopologyListRestart() {
     reported = false;
@@ -1047,6 +1133,16 @@ struct VkJsonExtShaderDemoteToHelperInvocation {
   bool reported;
   VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT
       shader_demote_to_helper_invocation_features_ext;
+};
+
+struct VkJsonExtShaderFloat8 {
+  VkJsonExtShaderFloat8() {
+    reported = false;
+    memset(&shader_float8_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderFloat8FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderFloat8FeaturesEXT shader_float8_features_ext;
 };
 
 struct VkJsonExtShaderImageAtomicInt64 {
@@ -1204,6 +1300,17 @@ struct VkJsonExtVertexAttributeDivisor {
       vertex_attribute_divisor_features_ext;
 };
 
+struct VkJsonExtVertexAttributeRobustness {
+  VkJsonExtVertexAttributeRobustness() {
+    reported = false;
+    memset(&vertex_attribute_robustness_features_ext, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT
+      vertex_attribute_robustness_features_ext;
+};
+
 struct VkJsonExtVertexInputDynamicState {
   VkJsonExtVertexInputDynamicState() {
     reported = false;
@@ -1236,6 +1343,17 @@ struct VkJsonExtYcbcrImageArrays {
   VkPhysicalDeviceYcbcrImageArraysFeaturesEXT ycbcr_image_arrays_features_ext;
 };
 
+struct VkJsonExtZeroInitializeDeviceMemory {
+  VkJsonExtZeroInitializeDeviceMemory() {
+    reported = false;
+    memset(&zero_initialize_device_memory_features_ext, 0,
+           sizeof(VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT
+      zero_initialize_device_memory_features_ext;
+};
+
 struct VkJsonHUAWEIClusterCullingShader {
   VkJsonHUAWEIClusterCullingShader() {
     reported = false;
@@ -1249,6 +1367,16 @@ struct VkJsonHUAWEIClusterCullingShader {
       cluster_culling_shader_features_huawei;
   VkPhysicalDeviceClusterCullingShaderPropertiesHUAWEI
       cluster_culling_shader_properties_huawei;
+};
+
+struct VkJsonHUAWEIHdrVivid {
+  VkJsonHUAWEIHdrVivid() {
+    reported = false;
+    memset(&hdr_vivid_features_huawei, 0,
+           sizeof(VkPhysicalDeviceHdrVividFeaturesHUAWEI));
+  }
+  bool reported;
+  VkPhysicalDeviceHdrVividFeaturesHUAWEI hdr_vivid_features_huawei;
 };
 
 struct VkJsonHUAWEIInvocationMask {
@@ -1343,6 +1471,21 @@ struct VkJsonKHRBufferDeviceAddress {
       buffer_device_address_features_khr;
 };
 
+struct VkJsonKHRComputeShaderDerivatives {
+  VkJsonKHRComputeShaderDerivatives() {
+    reported = false;
+    memset(&compute_shader_derivatives_features_khr, 0,
+           sizeof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR));
+    memset(&compute_shader_derivatives_properties_khr, 0,
+           sizeof(VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR
+      compute_shader_derivatives_features_khr;
+  VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR
+      compute_shader_derivatives_properties_khr;
+};
+
 struct VkJsonKHRCooperativeMatrix {
   VkJsonKHRCooperativeMatrix() {
     reported = false;
@@ -1355,6 +1498,17 @@ struct VkJsonKHRCooperativeMatrix {
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR cooperative_matrix_features_khr;
   VkPhysicalDeviceCooperativeMatrixPropertiesKHR
       cooperative_matrix_properties_khr;
+};
+
+struct VkJsonKHRDepthClampZeroOne {
+  VkJsonKHRDepthClampZeroOne() {
+    reported = false;
+    memset(&depth_clamp_zero_one_features_khr, 0,
+           sizeof(VkPhysicalDeviceDepthClampZeroOneFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthClampZeroOneFeaturesKHR
+      depth_clamp_zero_one_features_khr;
 };
 
 struct VkJsonKHRDepthStencilResolve {
@@ -1399,8 +1553,26 @@ struct VkJsonKHRDynamicRenderingLocalRead {
       dynamic_rendering_local_read_features_khr;
 };
 
+struct VkJsonKHRExternalFenceCapabilities {
+  VkJsonKHRExternalFenceCapabilities() {
+    reported = false;
+    memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIDPropertiesKHR id_properties_khr;
+};
+
 struct VkJsonKHRExternalMemoryCapabilities {
   VkJsonKHRExternalMemoryCapabilities() {
+    reported = false;
+    memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIDPropertiesKHR id_properties_khr;
+};
+
+struct VkJsonKHRExternalSemaphoreCapabilities {
+  VkJsonKHRExternalSemaphoreCapabilities() {
     reported = false;
     memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
   }
@@ -1557,6 +1729,30 @@ struct VkJsonKHRMaintenance7 {
   VkPhysicalDeviceMaintenance7FeaturesKHR maintenance7_features_khr;
   VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7_properties_khr;
   VkPhysicalDeviceLayeredApiPropertiesListKHR layered_api_properties_list_khr;
+  std::vector<VkPhysicalDeviceLayeredApiPropertiesKHR> layered_apis;
+};
+
+struct VkJsonKHRMaintenance8 {
+  VkJsonKHRMaintenance8() {
+    reported = false;
+    memset(&maintenance8_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance8FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance8FeaturesKHR maintenance8_features_khr;
+};
+
+struct VkJsonKHRMaintenance9 {
+  VkJsonKHRMaintenance9() {
+    reported = false;
+    memset(&maintenance9_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance9FeaturesKHR));
+    memset(&maintenance9_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance9PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance9FeaturesKHR maintenance9_features_khr;
+  VkPhysicalDeviceMaintenance9PropertiesKHR maintenance9_properties_khr;
 };
 
 struct VkJsonKHRMultiview {
@@ -1620,6 +1816,16 @@ struct VkJsonKHRPresentId {
   VkPhysicalDevicePresentIdFeaturesKHR present_id_features_khr;
 };
 
+struct VkJsonKHRPresentId2 {
+  VkJsonKHRPresentId2() {
+    reported = false;
+    memset(&present_id2_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentId2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentId2FeaturesKHR present_id2_features_khr;
+};
+
 struct VkJsonKHRPresentWait {
   VkJsonKHRPresentWait() {
     reported = false;
@@ -1628,6 +1834,16 @@ struct VkJsonKHRPresentWait {
   }
   bool reported;
   VkPhysicalDevicePresentWaitFeaturesKHR present_wait_features_khr;
+};
+
+struct VkJsonKHRPresentWait2 {
+  VkJsonKHRPresentWait2() {
+    reported = false;
+    memset(&present_wait2_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentWait2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentWait2FeaturesKHR present_wait2_features_khr;
 };
 
 struct VkJsonKHRPushDescriptor {
@@ -1687,6 +1903,19 @@ struct VkJsonKHRRayTracingPositionFetch {
       ray_tracing_position_fetch_features_khr;
 };
 
+struct VkJsonKHRRobustness2 {
+  VkJsonKHRRobustness2() {
+    reported = false;
+    memset(&robustness2_features_khr, 0,
+           sizeof(VkPhysicalDeviceRobustness2FeaturesKHR));
+    memset(&robustness2_properties_khr, 0,
+           sizeof(VkPhysicalDeviceRobustness2PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRobustness2FeaturesKHR robustness2_features_khr;
+  VkPhysicalDeviceRobustness2PropertiesKHR robustness2_properties_khr;
+};
+
 struct VkJsonKHRSamplerYcbcrConversion {
   VkJsonKHRSamplerYcbcrConversion() {
     reported = false;
@@ -1717,6 +1946,16 @@ struct VkJsonKHRShaderAtomicInt64 {
   }
   bool reported;
   VkPhysicalDeviceShaderAtomicInt64FeaturesKHR shader_atomic_int64_features_khr;
+};
+
+struct VkJsonKHRShaderBfloat16 {
+  VkJsonKHRShaderBfloat16() {
+    reported = false;
+    memset(&shader_bfloat16_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderBfloat16FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR shader_bfloat16_features_khr;
 };
 
 struct VkJsonKHRShaderClock {
@@ -1889,6 +2128,17 @@ struct VkJsonKHRTimelineSemaphore {
       timeline_semaphore_properties_khr;
 };
 
+struct VkJsonKHRUnifiedImageLayouts {
+  VkJsonKHRUnifiedImageLayouts() {
+    reported = false;
+    memset(&unified_image_layouts_features_khr, 0,
+           sizeof(VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR
+      unified_image_layouts_features_khr;
+};
+
 struct VkJsonKHRUniformBufferStandardLayout {
   VkJsonKHRUniformBufferStandardLayout() {
     reported = false;
@@ -1928,6 +2178,37 @@ struct VkJsonKHRVertexAttributeDivisor {
       vertex_attribute_divisor_features_khr;
 };
 
+struct VkJsonKHRVideoDecodeVp9 {
+  VkJsonKHRVideoDecodeVp9() {
+    reported = false;
+    memset(&video_decode_vp9_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoDecodeVP9FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoDecodeVP9FeaturesKHR video_decode_vp9_features_khr;
+};
+
+struct VkJsonKHRVideoEncodeAv1 {
+  VkJsonKHRVideoEncodeAv1() {
+    reported = false;
+    memset(&video_encode_av1_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoEncodeAV1FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoEncodeAV1FeaturesKHR video_encode_av1_features_khr;
+};
+
+struct VkJsonKHRVideoEncodeQuantizationMap {
+  VkJsonKHRVideoEncodeQuantizationMap() {
+    reported = false;
+    memset(&video_encode_quantization_map_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR
+      video_encode_quantization_map_features_khr;
+};
+
 struct VkJsonKHRVideoMaintenance1 {
   VkJsonKHRVideoMaintenance1() {
     reported = false;
@@ -1936,6 +2217,16 @@ struct VkJsonKHRVideoMaintenance1 {
   }
   bool reported;
   VkPhysicalDeviceVideoMaintenance1FeaturesKHR video_maintenance1_features_khr;
+};
+
+struct VkJsonKHRVideoMaintenance2 {
+  VkJsonKHRVideoMaintenance2() {
+    reported = false;
+    memset(&video_maintenance2_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoMaintenance2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoMaintenance2FeaturesKHR video_maintenance2_features_khr;
 };
 
 struct VkJsonKHRVulkanMemoryModel {
@@ -2006,6 +2297,21 @@ struct VkJsonNVXMultiviewPerViewAttributes {
       multiview_per_view_attributes_properties_nvx;
 };
 
+struct VkJsonNVClusterAccelerationStructure {
+  VkJsonNVClusterAccelerationStructure() {
+    reported = false;
+    memset(&cluster_acceleration_structure_features_nv, 0,
+           sizeof(VkPhysicalDeviceClusterAccelerationStructureFeaturesNV));
+    memset(&cluster_acceleration_structure_properties_nv, 0,
+           sizeof(VkPhysicalDeviceClusterAccelerationStructurePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceClusterAccelerationStructureFeaturesNV
+      cluster_acceleration_structure_features_nv;
+  VkPhysicalDeviceClusterAccelerationStructurePropertiesNV
+      cluster_acceleration_structure_properties_nv;
+};
+
 struct VkJsonNVCommandBufferInheritance {
   VkJsonNVCommandBufferInheritance() {
     reported = false;
@@ -2042,6 +2348,34 @@ struct VkJsonNVCooperativeMatrix {
       cooperative_matrix_properties_nv;
 };
 
+struct VkJsonNVCooperativeMatrix2 {
+  VkJsonNVCooperativeMatrix2() {
+    reported = false;
+    memset(&cooperative_matrix2_features_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrix2FeaturesNV));
+    memset(&cooperative_matrix2_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrix2PropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeMatrix2FeaturesNV cooperative_matrix2_features_nv;
+  VkPhysicalDeviceCooperativeMatrix2PropertiesNV
+      cooperative_matrix2_properties_nv;
+};
+
+struct VkJsonNVCooperativeVector {
+  VkJsonNVCooperativeVector() {
+    reported = false;
+    memset(&cooperative_vector_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeVectorPropertiesNV));
+    memset(&cooperative_vector_features_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeVectorFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeVectorPropertiesNV
+      cooperative_vector_properties_nv;
+  VkPhysicalDeviceCooperativeVectorFeaturesNV cooperative_vector_features_nv;
+};
+
 struct VkJsonNVCopyMemoryIndirect {
   VkJsonNVCopyMemoryIndirect() {
     reported = false;
@@ -2075,19 +2409,6 @@ struct VkJsonNVCoverageReductionMode {
   bool reported;
   VkPhysicalDeviceCoverageReductionModeFeaturesNV
       coverage_reduction_mode_features_nv;
-};
-
-struct VkJsonNVCudaKernelLaunch {
-  VkJsonNVCudaKernelLaunch() {
-    reported = false;
-    memset(&cuda_kernel_launch_features_nv, 0,
-           sizeof(VkPhysicalDeviceCudaKernelLaunchFeaturesNV));
-    memset(&cuda_kernel_launch_properties_nv, 0,
-           sizeof(VkPhysicalDeviceCudaKernelLaunchPropertiesNV));
-  }
-  bool reported;
-  VkPhysicalDeviceCudaKernelLaunchFeaturesNV cuda_kernel_launch_features_nv;
-  VkPhysicalDeviceCudaKernelLaunchPropertiesNV cuda_kernel_launch_properties_nv;
 };
 
 struct VkJsonNVDedicatedAllocationImageAliasing {
@@ -2161,6 +2482,17 @@ struct VkJsonNVExtendedSparseAddressSpace {
       extended_sparse_address_space_features_nv;
   VkPhysicalDeviceExtendedSparseAddressSpacePropertiesNV
       extended_sparse_address_space_properties_nv;
+};
+
+struct VkJsonNVExternalComputeQueue {
+  VkJsonNVExternalComputeQueue() {
+    reported = false;
+    memset(&external_compute_queue_properties_nv, 0,
+           sizeof(VkPhysicalDeviceExternalComputeQueuePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceExternalComputeQueuePropertiesNV
+      external_compute_queue_properties_nv;
 };
 
 struct VkJsonNVExternalMemoryRdma {
@@ -2251,6 +2583,22 @@ struct VkJsonNVOpticalFlow {
   VkPhysicalDeviceOpticalFlowPropertiesNV optical_flow_properties_nv;
 };
 
+struct VkJsonNVPartitionedAccelerationStructure {
+  VkJsonNVPartitionedAccelerationStructure() {
+    reported = false;
+    memset(&partitioned_acceleration_structure_features_nv, 0,
+           sizeof(VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV));
+    memset(
+        &partitioned_acceleration_structure_properties_nv, 0,
+        sizeof(VkPhysicalDevicePartitionedAccelerationStructurePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV
+      partitioned_acceleration_structure_features_nv;
+  VkPhysicalDevicePartitionedAccelerationStructurePropertiesNV
+      partitioned_acceleration_structure_properties_nv;
+};
+
 struct VkJsonNVPerStageDescriptorSet {
   VkJsonNVPerStageDescriptorSet() {
     reported = false;
@@ -2305,6 +2653,17 @@ struct VkJsonNVRayTracingInvocationReorder {
       ray_tracing_invocation_reorder_properties_nv;
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV
       ray_tracing_invocation_reorder_features_nv;
+};
+
+struct VkJsonNVRayTracingLinearSweptSpheres {
+  VkJsonNVRayTracingLinearSweptSpheres() {
+    reported = false;
+    memset(&ray_tracing_linear_swept_spheres_features_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV
+      ray_tracing_linear_swept_spheres_features_nv;
 };
 
 struct VkJsonNVRayTracingMotionBlur {
@@ -2483,6 +2842,19 @@ struct VkJsonQCOMMultiviewPerViewViewports {
       multiview_per_view_viewports_features_qcom;
 };
 
+struct VkJsonQCOMTileMemoryHeap {
+  VkJsonQCOMTileMemoryHeap() {
+    reported = false;
+    memset(&tile_memory_heap_features_qcom, 0,
+           sizeof(VkPhysicalDeviceTileMemoryHeapFeaturesQCOM));
+    memset(&tile_memory_heap_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceTileMemoryHeapPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceTileMemoryHeapFeaturesQCOM tile_memory_heap_features_qcom;
+  VkPhysicalDeviceTileMemoryHeapPropertiesQCOM tile_memory_heap_properties_qcom;
+};
+
 struct VkJsonQCOMTileProperties {
   VkJsonQCOMTileProperties() {
     reported = false;
@@ -2491,6 +2863,19 @@ struct VkJsonQCOMTileProperties {
   }
   bool reported;
   VkPhysicalDeviceTilePropertiesFeaturesQCOM tile_properties_features_qcom;
+};
+
+struct VkJsonQCOMTileShading {
+  VkJsonQCOMTileShading() {
+    reported = false;
+    memset(&tile_shading_features_qcom, 0,
+           sizeof(VkPhysicalDeviceTileShadingFeaturesQCOM));
+    memset(&tile_shading_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceTileShadingPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceTileShadingFeaturesQCOM tile_shading_features_qcom;
+  VkPhysicalDeviceTileShadingPropertiesQCOM tile_shading_properties_qcom;
 };
 
 struct VkJsonQCOMYcbcrDegamma {
@@ -2598,6 +2983,8 @@ struct VkJsonDevice {
            sizeof(VkPhysicalDeviceGlobalPriorityQueryFeatures));
     memset(&host_image_copy_features, 0,
            sizeof(VkPhysicalDeviceHostImageCopyFeatures));
+    memset(&host_image_copy_properties, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyProperties));
     memset(&host_query_reset_features, 0,
            sizeof(VkPhysicalDeviceHostQueryResetFeatures));
     memset(&id_properties, 0, sizeof(VkPhysicalDeviceIDProperties));
@@ -2722,12 +3109,15 @@ struct VkJsonDevice {
   VkJsonAMDShaderEarlyAndLateFragmentTests
       amd_shader_early_and_late_fragment_tests;
   VkJsonANDROIDExternalFormatResolve android_external_format_resolve;
+  VkJsonARMFormatPack arm_format_pack;
+  VkJsonARMPipelineOpacityMicromap arm_pipeline_opacity_micromap;
   VkJsonARMRasterizationOrderAttachmentAccess
       arm_rasterization_order_attachment_access;
   VkJsonARMRenderPassStriped arm_render_pass_striped;
   VkJsonARMSchedulingControls arm_scheduling_controls;
   VkJsonARMShaderCoreBuiltins arm_shader_core_builtins;
   VkJsonARMShaderCoreProperties arm_shader_core_properties;
+  VkJsonARMTensors arm_tensors;
   VkJsonExt4444Formats ext_formats_4444;
   VkJsonExtAstcDecodeMode ext_astc_decode_mode;
   VkJsonExtAttachmentFeedbackLoopDynamicState
@@ -2741,13 +3131,14 @@ struct VkJsonDevice {
   VkJsonExtConservativeRasterization ext_conservative_rasterization;
   VkJsonExtCustomBorderColor ext_custom_border_color;
   VkJsonExtDepthBiasControl ext_depth_bias_control;
-  VkJsonExtDepthClampZeroOne ext_depth_clamp_zero_one;
+  VkJsonExtDepthClampControl ext_depth_clamp_control;
   VkJsonExtDepthClipControl ext_depth_clip_control;
   VkJsonExtDepthClipEnable ext_depth_clip_enable;
   VkJsonExtDescriptorBuffer ext_descriptor_buffer;
   VkJsonExtDescriptorIndexing ext_descriptor_indexing;
   VkJsonExtDeviceAddressBindingReport ext_device_address_binding_report;
   VkJsonExtDeviceFault ext_device_fault;
+  VkJsonExtDeviceGeneratedCommands ext_device_generated_commands;
   VkJsonExtDeviceMemoryReport ext_device_memory_report;
   VkJsonExtDiscardRectangles ext_discard_rectangles;
   VkJsonExtDynamicRenderingUnusedAttachments
@@ -2758,6 +3149,7 @@ struct VkJsonDevice {
   VkJsonExtExternalMemoryHost ext_external_memory_host;
   VkJsonExtFragmentDensityMap ext_fragment_density_map;
   VkJsonExtFragmentDensityMap2 ext_fragment_density_map2;
+  VkJsonExtFragmentDensityMapOffset ext_fragment_density_map_offset;
   VkJsonExtFragmentShaderInterlock ext_fragment_shader_interlock;
   VkJsonExtFrameBoundary ext_frame_boundary;
   VkJsonExtGlobalPriorityQuery ext_global_priority_query;
@@ -2794,6 +3186,7 @@ struct VkJsonDevice {
   VkJsonExtPipelineProperties ext_pipeline_properties;
   VkJsonExtPipelineProtectedAccess ext_pipeline_protected_access;
   VkJsonExtPipelineRobustness ext_pipeline_robustness;
+  VkJsonExtPresentModeFifoLatestReady ext_present_mode_fifo_latest_ready;
   VkJsonExtPrimitiveTopologyListRestart ext_primitive_topology_list_restart;
   VkJsonExtPrimitivesGeneratedQuery ext_primitives_generated_query;
   VkJsonExtPrivateData ext_private_data;
@@ -2809,6 +3202,7 @@ struct VkJsonDevice {
   VkJsonExtShaderAtomicFloat2 ext_shader_atomic_float2;
   VkJsonExtShaderDemoteToHelperInvocation
       ext_shader_demote_to_helper_invocation;
+  VkJsonExtShaderFloat8 ext_shader_float8;
   VkJsonExtShaderImageAtomicInt64 ext_shader_image_atomic_int64;
   VkJsonExtShaderModuleIdentifier ext_shader_module_identifier;
   VkJsonExtShaderObject ext_shader_object;
@@ -2821,10 +3215,13 @@ struct VkJsonDevice {
   VkJsonExtTextureCompressionAstcHdr ext_texture_compression_astc_hdr;
   VkJsonExtTransformFeedback ext_transform_feedback;
   VkJsonExtVertexAttributeDivisor ext_vertex_attribute_divisor;
+  VkJsonExtVertexAttributeRobustness ext_vertex_attribute_robustness;
   VkJsonExtVertexInputDynamicState ext_vertex_input_dynamic_state;
   VkJsonExtYcbcr2plane444Formats ext_ycbcr_2plane_444_formats;
   VkJsonExtYcbcrImageArrays ext_ycbcr_image_arrays;
+  VkJsonExtZeroInitializeDeviceMemory ext_zero_initialize_device_memory;
   VkJsonHUAWEIClusterCullingShader huawei_cluster_culling_shader;
+  VkJsonHUAWEIHdrVivid huawei_hdr_vivid;
   VkJsonHUAWEIInvocationMask huawei_invocation_mask;
   VkJsonHUAWEISubpassShading huawei_subpass_shading;
   VkJsonIMGRelaxedLineRasterization img_relaxed_line_rasterization;
@@ -2833,12 +3230,16 @@ struct VkJsonDevice {
   VkJsonKHR8bitStorage khr_8bit_storage;
   VkJsonKHRAccelerationStructure khr_acceleration_structure;
   VkJsonKHRBufferDeviceAddress khr_buffer_device_address;
+  VkJsonKHRComputeShaderDerivatives khr_compute_shader_derivatives;
   VkJsonKHRCooperativeMatrix khr_cooperative_matrix;
+  VkJsonKHRDepthClampZeroOne khr_depth_clamp_zero_one;
   VkJsonKHRDepthStencilResolve khr_depth_stencil_resolve;
   VkJsonKHRDriverProperties khr_driver_properties;
   VkJsonKHRDynamicRendering khr_dynamic_rendering;
   VkJsonKHRDynamicRenderingLocalRead khr_dynamic_rendering_local_read;
+  VkJsonKHRExternalFenceCapabilities khr_external_fence_capabilities;
   VkJsonKHRExternalMemoryCapabilities khr_external_memory_capabilities;
+  VkJsonKHRExternalSemaphoreCapabilities khr_external_semaphore_capabilities;
   VkJsonKHRFragmentShaderBarycentric khr_fragment_shader_barycentric;
   VkJsonKHRFragmentShadingRate khr_fragment_shading_rate;
   VkJsonKHRGlobalPriority khr_global_priority;
@@ -2851,20 +3252,26 @@ struct VkJsonDevice {
   VkJsonKHRMaintenance5 khr_maintenance5;
   VkJsonKHRMaintenance6 khr_maintenance6;
   VkJsonKHRMaintenance7 khr_maintenance7;
+  VkJsonKHRMaintenance8 khr_maintenance8;
+  VkJsonKHRMaintenance9 khr_maintenance9;
   VkJsonKHRMultiview khr_multiview;
   VkJsonKHRPerformanceQuery khr_performance_query;
   VkJsonKHRPipelineBinary khr_pipeline_binary;
   VkJsonKHRPipelineExecutableProperties khr_pipeline_executable_properties;
   VkJsonKHRPresentId khr_present_id;
+  VkJsonKHRPresentId2 khr_present_id2;
   VkJsonKHRPresentWait khr_present_wait;
+  VkJsonKHRPresentWait2 khr_present_wait2;
   VkJsonKHRPushDescriptor khr_push_descriptor;
   VkJsonKHRRayQuery khr_ray_query;
   VkJsonKHRRayTracingMaintenance1 khr_ray_tracing_maintenance1;
   VkJsonKHRRayTracingPipeline khr_ray_tracing_pipeline;
   VkJsonKHRRayTracingPositionFetch khr_ray_tracing_position_fetch;
+  VkJsonKHRRobustness2 khr_robustness2;
   VkJsonKHRSamplerYcbcrConversion khr_sampler_ycbcr_conversion;
   VkJsonKHRSeparateDepthStencilLayouts khr_separate_depth_stencil_layouts;
   VkJsonKHRShaderAtomicInt64 khr_shader_atomic_int64;
+  VkJsonKHRShaderBfloat16 khr_shader_bfloat16;
   VkJsonKHRShaderClock khr_shader_clock;
   VkJsonKHRShaderExpectAssume khr_shader_expect_assume;
   VkJsonKHRShaderFloat16Int8 khr_shader_float16_int8;
@@ -2882,23 +3289,30 @@ struct VkJsonDevice {
   VkJsonKHRShaderTerminateInvocation khr_shader_terminate_invocation;
   VkJsonKHRSynchronization2 khr_synchronization2;
   VkJsonKHRTimelineSemaphore khr_timeline_semaphore;
+  VkJsonKHRUnifiedImageLayouts khr_unified_image_layouts;
   VkJsonKHRUniformBufferStandardLayout khr_uniform_buffer_standard_layout;
   VkJsonKHRVariablePointers khr_variable_pointers;
   VkJsonKHRVertexAttributeDivisor khr_vertex_attribute_divisor;
+  VkJsonKHRVideoDecodeVp9 khr_video_decode_vp9;
+  VkJsonKHRVideoEncodeAv1 khr_video_encode_av1;
+  VkJsonKHRVideoEncodeQuantizationMap khr_video_encode_quantization_map;
   VkJsonKHRVideoMaintenance1 khr_video_maintenance1;
+  VkJsonKHRVideoMaintenance2 khr_video_maintenance2;
   VkJsonKHRVulkanMemoryModel khr_vulkan_memory_model;
   VkJsonKHRWorkgroupMemoryExplicitLayout khr_workgroup_memory_explicit_layout;
   VkJsonKHRZeroInitializeWorkgroupMemory khr_zero_initialize_workgroup_memory;
   VkJsonMESAImageAlignmentControl mesa_image_alignment_control;
   VkJsonMSFTLayeredDriver msft_layered_driver;
   VkJsonNVXMultiviewPerViewAttributes nvx_multiview_per_view_attributes;
+  VkJsonNVClusterAccelerationStructure nv_cluster_acceleration_structure;
   VkJsonNVCommandBufferInheritance nv_command_buffer_inheritance;
   VkJsonNVComputeShaderDerivatives nv_compute_shader_derivatives;
   VkJsonNVCooperativeMatrix nv_cooperative_matrix;
+  VkJsonNVCooperativeMatrix2 nv_cooperative_matrix2;
+  VkJsonNVCooperativeVector nv_cooperative_vector;
   VkJsonNVCopyMemoryIndirect nv_copy_memory_indirect;
   VkJsonNVCornerSampledImage nv_corner_sampled_image;
   VkJsonNVCoverageReductionMode nv_coverage_reduction_mode;
-  VkJsonNVCudaKernelLaunch nv_cuda_kernel_launch;
   VkJsonNVDedicatedAllocationImageAliasing
       nv_dedicated_allocation_image_aliasing;
   VkJsonNVDescriptorPoolOverallocation nv_descriptor_pool_overallocation;
@@ -2906,6 +3320,7 @@ struct VkJsonDevice {
   VkJsonNVDeviceGeneratedCommands nv_device_generated_commands;
   VkJsonNVDeviceGeneratedCommandsCompute nv_device_generated_commands_compute;
   VkJsonNVExtendedSparseAddressSpace nv_extended_sparse_address_space;
+  VkJsonNVExternalComputeQueue nv_external_compute_queue;
   VkJsonNVExternalMemoryRdma nv_external_memory_rdma;
   VkJsonNVFragmentShadingRateEnums nv_fragment_shading_rate_enums;
   VkJsonNVInheritedViewportScissor nv_inherited_viewport_scissor;
@@ -2913,11 +3328,14 @@ struct VkJsonDevice {
   VkJsonNVMemoryDecompression nv_memory_decompression;
   VkJsonNVMeshShader nv_mesh_shader;
   VkJsonNVOpticalFlow nv_optical_flow;
+  VkJsonNVPartitionedAccelerationStructure
+      nv_partitioned_acceleration_structure;
   VkJsonNVPerStageDescriptorSet nv_per_stage_descriptor_set;
   VkJsonNVPresentBarrier nv_present_barrier;
   VkJsonNVRawAccessChains nv_raw_access_chains;
   VkJsonNVRayTracing nv_ray_tracing;
   VkJsonNVRayTracingInvocationReorder nv_ray_tracing_invocation_reorder;
+  VkJsonNVRayTracingLinearSweptSpheres nv_ray_tracing_linear_swept_spheres;
   VkJsonNVRayTracingMotionBlur nv_ray_tracing_motion_blur;
   VkJsonNVRayTracingValidation nv_ray_tracing_validation;
   VkJsonNVRepresentativeFragmentTest nv_representative_fragment_test;
@@ -2933,7 +3351,9 @@ struct VkJsonDevice {
   VkJsonQCOMImageProcessing2 qcom_image_processing2;
   VkJsonQCOMMultiviewPerViewRenderAreas qcom_multiview_per_view_render_areas;
   VkJsonQCOMMultiviewPerViewViewports qcom_multiview_per_view_viewports;
+  VkJsonQCOMTileMemoryHeap qcom_tile_memory_heap;
   VkJsonQCOMTileProperties qcom_tile_properties;
+  VkJsonQCOMTileShading qcom_tile_shading;
   VkJsonQCOMYcbcrDegamma qcom_ycbcr_degamma;
   VkJsonSECAmigoProfiling sec_amigo_profiling;
   VkJsonVALVEDescriptorSetHostMapping valve_descriptor_set_host_mapping;
@@ -2956,6 +3376,7 @@ struct VkJsonDevice {
   VkPhysicalDeviceFloatControlsProperties float_controls_properties;
   VkPhysicalDeviceGlobalPriorityQueryFeatures global_priority_query_features;
   VkPhysicalDeviceHostImageCopyFeatures host_image_copy_features;
+  VkPhysicalDeviceHostImageCopyProperties host_image_copy_properties;
   VkPhysicalDeviceHostQueryResetFeatures host_query_reset_features;
   VkPhysicalDeviceIDProperties id_properties;
   VkPhysicalDeviceImageRobustnessFeatures image_robustness_features;
@@ -3034,6 +3455,8 @@ struct VkJsonDevice {
   VkPhysicalDeviceProperties properties;
   VkPhysicalDeviceFeatures features;
   VkPhysicalDeviceMemoryProperties memory;
+  std::vector<VkImageLayout> copy_src_layouts;
+  std::vector<VkImageLayout> copy_dst_layouts;
   std::vector<VkQueueFamilyProperties> queues;
   std::vector<VkExtensionProperties> extensions;
   std::vector<VkLayerProperties> layers;

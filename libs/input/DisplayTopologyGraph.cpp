@@ -22,6 +22,7 @@
 #include <ftl/enum.h>
 #include <input/DisplayTopologyGraph.h>
 #include <input/PrintTools.h>
+#include <log/log_main.h>
 #include <ui/LogicalDisplayId.h>
 
 #include <algorithm>
@@ -111,25 +112,37 @@ bool validateTopologyGraph(
                            << adjacentDisplay.displayId << " for source " << sourceDisplay;
                 return false;
             }
-            const auto reverseEdgeIt =
-                    std::find_if(adjacentGraphIt->second.adjacentDisplays.begin(),
-                                 adjacentGraphIt->second.adjacentDisplays.end(),
-                                 [sourceDisplay](const DisplayTopologyAdjacentDisplay&
-                                                         reverseAdjacentDisplay) {
-                                     return sourceDisplay == reverseAdjacentDisplay.displayId;
-                                 });
-            if (reverseEdgeIt == adjacentGraphIt->second.adjacentDisplays.end()) {
+            std::vector<DisplayTopologyAdjacentDisplay> reverseEdges;
+            for (const auto& edge : adjacentGraphIt->second.adjacentDisplays) {
+                if (edge.displayId == sourceDisplay) {
+                    reverseEdges.push_back(edge);
+                }
+            }
+            if (reverseEdges.empty()) {
                 LOG(ERROR) << "Missing reverse edge in topology graph for: " << sourceDisplay
                            << " -> " << adjacentDisplay.displayId;
                 return false;
             }
-            DisplayTopologyPosition expectedPosition =
+
+            DisplayTopologyPosition expectedOppositePosition =
                     getOppositePosition(adjacentDisplay.position);
-            if (reverseEdgeIt->position != expectedPosition) {
-                LOG(ERROR) << "Unexpected reverse edge for: " << sourceDisplay << " -> "
+            const auto reverseEdgeIt =
+                    std::find_if(reverseEdges.begin(), reverseEdges.end(),
+                                 [expectedOppositePosition](
+                                         const DisplayTopologyAdjacentDisplay& edge) {
+                                     return expectedOppositePosition == edge.position;
+                                 });
+            if (reverseEdgeIt == reverseEdges.end()) {
+                std::string positions;
+                for (const auto& edge : reverseEdges) {
+                    positions += ftl::enum_string(edge.position);
+                    positions += " ";
+                }
+                LOG(ERROR) << "Reverse edges for: " << sourceDisplay << " -> "
                            << adjacentDisplay.displayId
-                           << " expected position: " << ftl::enum_string(expectedPosition)
-                           << " actual " << ftl::enum_string(reverseEdgeIt->position);
+                           << " found, but none had the expected position: "
+                           << ftl::enum_string(expectedOppositePosition) << " actual [" << positions
+                           << "]";
                 return false;
             }
             if (reverseEdgeIt->offsetDp != -adjacentDisplay.offsetDp) {
@@ -170,6 +183,47 @@ std::string dumpTopologyGraphComponents(
 }
 
 } // namespace
+
+ui::Transform DisplayTopologyGraph::localPxToGlobalDpTransform(
+        ui::LogicalDisplayId displayId) const {
+    const auto displayPropertiesIt = graph.find(displayId);
+    LOG_ALWAYS_FATAL_IF(displayPropertiesIt == graph.end(), "Invalid display %d in %s",
+                        displayId.val(), __func__);
+    const auto& displayProperties = displayPropertiesIt->second;
+
+    // Scale to convert from px to DP.
+    const float pxToDpScaleFactor = static_cast<float>(ACONFIGURATION_DENSITY_MEDIUM) /
+            static_cast<float>(displayProperties.density);
+    ui::Transform pxToDpScaleTransform;
+    pxToDpScaleTransform.set(pxToDpScaleFactor, 0.0f, 0.0f, pxToDpScaleFactor);
+
+    // Translate origin from local to the topology origin to convert to the global coordinates.
+    const auto& displayBounds = displayProperties.boundsInGlobalDp;
+    ui::Transform localDpToGlobalDpTransform;
+    localDpToGlobalDpTransform.set(displayBounds.left, displayBounds.top);
+    return localDpToGlobalDpTransform * pxToDpScaleTransform;
+}
+
+ui::Transform DisplayTopologyGraph::globalDpToLocalPxTransform(
+        ui::LogicalDisplayId displayId) const {
+    const auto displayPropertiesIt = graph.find(displayId);
+    LOG_ALWAYS_FATAL_IF(displayPropertiesIt == graph.end(), "Invalid display %d in %s",
+                        displayId.val(), __func__);
+    const auto& displayProperties = displayPropertiesIt->second;
+
+    // Translate from the topology origin to the destination-display's origin.
+    const auto& displayBounds = displayProperties.boundsInGlobalDp;
+    ui::Transform globalDpToLocalDpTransform;
+    globalDpToLocalDpTransform.set(-displayBounds.left, -displayBounds.top);
+
+    // Scale to convert from dp to px.
+    const float dpToPxScaleFactor = static_cast<float>(displayProperties.density) /
+            static_cast<float>(ACONFIGURATION_DENSITY_MEDIUM);
+    ui::Transform dpToPxScaleTransform;
+    dpToPxScaleTransform.set(dpToPxScaleFactor, 0.0f, 0.0f, dpToPxScaleFactor);
+
+    return dpToPxScaleTransform * globalDpToLocalDpTransform;
+}
 
 std::string DisplayTopologyAdjacentDisplay::dump() const {
     std::string dump;

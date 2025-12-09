@@ -68,7 +68,34 @@ cc_test {
         "liblog",
     ],
     test_suites: [
-        "cts",
         "general-tests",
+    ],
+}
+
+aconfig_declarations {
+    name: "aconfig_adbdauth_flags",
+    package: "com.android.adbdauth.flags",
+    container: "system",
+    srcs: [
+        "adbdauth_flags.aconfig",
+    ],
+}
+
+cc_aconfig_library {
+    name: "android_adbdauth_flags_cc_lib",
+    aconfig_declarations: "aconfig_adbdauth_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.adbd",
+    ],
+    min_sdk_version: "apex_inherit",
+}
+
+java_aconfig_library {
+    name: "aconfig_adbdauth_flags_java_lib",
+    aconfig_declarations: "aconfig_adbdauth_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.adbd",
     ],
 }

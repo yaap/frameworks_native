@@ -94,6 +94,11 @@ struct LinearEffectHasher {
 // Typical use-cases supported:
 // 1. Apply tone-mapping
 // 2. Apply color transform matrices in linear space
+//
+// The created runtime effect must be wrapped in a working color space shader or color filter so
+// that its inputs and outputs are converted correctly. The working color space should be set to the
+// `linearEffect.inputDataspace` with a linear gamma. If the effect requires a custom OETF, the
+// output space should be set to `linearEffect.outputDataspace`.
 std::string buildLinearEffectSkSL(const LinearEffect& linearEffect);
 
 // Generates a list of uniforms to set on the LinearEffect shader above.

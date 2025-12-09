@@ -111,7 +111,6 @@ private:
     DisplayIdVariant mIdVariant;
     bool mIsDisconnected = false;
     adpf::PowerAdvisor* mPowerAdvisor = nullptr;
-    bool mHasPictureProcessing = false;
     int32_t mMaxLayerPictureProfiles = 0;
 };
 

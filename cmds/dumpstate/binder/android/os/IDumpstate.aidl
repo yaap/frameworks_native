@@ -20,7 +20,7 @@ import android.os.IDumpstateListener;
 
 /**
  * Binder interface for the currently running dumpstate process.
- * {@hide}
+ * @hide
  */
 interface IDumpstate {
 
@@ -51,6 +51,9 @@ interface IDumpstate {
 
     // Bugreport taken for onboarding related flows.
     const int BUGREPORT_MODE_ONBOARDING = 7;
+
+    // Bugreport limited to only bluetooth info.
+    const int BUGREPORT_MODE_BLUETOOTH = 8;
 
     // Use pre-dumped data.
     const int BUGREPORT_FLAG_USE_PREDUMPED_UI_DATA = 0x1;

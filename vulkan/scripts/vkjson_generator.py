@@ -17,11 +17,12 @@
 """Generates the vkjson files.
 """
 import os
-
 import generator_common as gencom
 import vkjson_gen_util as util
 import vk as VK
 import importlib
+
+VK_PROPERTIES_SETTER_LINE = 'vkGetPhysicalDeviceProperties2(physical_device, &properties);'
 
 def re_import_vk():
   importlib.reload(VK)
@@ -79,6 +80,12 @@ struct VkJsonDevice {
     for struct_entries in (vkjson_extension_structs, vkjson_core_structs, feature_property_structs):
       for entry in struct_entries:
         f.write(entry + ";\n")
+
+    # write list properties for memory allocation
+    list_members = util.get_dynamic_size_list_member_from_structures(VK.EXTENSION_INDEPENDENT_STRUCTS)
+    for list_type, list_variable_name in list_members:
+      variable_entry = "std::vector<" + list_type + ">" + " " + list_variable_name + ";"
+      f.write(f"  {variable_entry}\n")
 
     f.write("""\
   std::vector<VkQueueFamilyProperties> queues;
@@ -798,6 +805,13 @@ bool VkJsonImageFormatPropertiesFromJson(const std::string& json,
 
 
 def gen_instance_cc():
+  def write_list_resizing_codeblock(file, vk_version_mapping):
+    code_block = util.generate_ext_independent_structs_list_resizing_logic(
+      vk_version_mapping,
+      VK_PROPERTIES_SETTER_LINE,
+    )
+    file.write(f"\n{code_block}\n")
+
   """Generates vkjson_instance.cc file.
   """
   genfile = os.path.join(os.path.dirname(__file__),
@@ -876,10 +890,14 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     cc_code_properties = util.generate_vk_extension_structs_init_code(
     VK.VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING["extensions"], "Properties")
     f.write(f'{cc_code_properties}\n')
+    f.write(f'{VK_PROPERTIES_SETTER_LINE}\n')
 
+    extension_list_resize_logic = util.generate_ext_dependent_structs_list_resizing_logic(
+      VK_PROPERTIES_SETTER_LINE,
+    )
+    f.write(f'\n{extension_list_resize_logic}\n')
     f.write("""\
 
-  vkGetPhysicalDeviceProperties2(physical_device, &properties);
   device.properties = properties.properties;
 
   VkPhysicalDeviceFeatures2 features = {
@@ -922,6 +940,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
 
     f.write("""\
     vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n""")
+    write_list_resizing_codeblock(f, vk_version_data)
 
     features_initialization_code = util.generate_vk_version_structs_initialization(vk_version_data, "Features")
     f.write(features_initialization_code)
@@ -986,6 +1005,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
 
     f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
+    write_list_resizing_codeblock(f, vk_version_data)
 
     f.write(cc_code_features_11)
     f.write(cc_code_features_12)
@@ -1006,6 +1026,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
     f.write(cc_code_properties_13)
     f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
+    write_list_resizing_codeblock(f, vk_version_data)
 
     f.write(cc_code_features_13)
     f.write(f"{util.generate_vk_version_structs_initialization(vk_version_data, "Features")}\n")
@@ -1021,6 +1042,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
     f.write(cc_code_properties_14)
     f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
+    write_list_resizing_codeblock(f, vk_version_data)
 
     f.write("""\
     if (device.core14.properties.copySrcLayoutCount > 0 || device.core14.properties.copyDstLayoutCount > 0 ) {

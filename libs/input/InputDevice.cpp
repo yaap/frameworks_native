@@ -25,6 +25,7 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <ftl/enum.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/InputEventLabels.h>
 
@@ -178,11 +179,11 @@ std::string InputDeviceIdentifier::getCanonicalName() const {
     return replacedName;
 }
 
-
 // --- InputDeviceInfo ---
-
 InputDeviceInfo::InputDeviceInfo() {
-    initialize(-1, 0, -1, InputDeviceIdentifier(), "", false, false, ui::LogicalDisplayId::INVALID);
+    initialize(/*id=*/-1, /*generation=*/0, /*controllerNumber=*/-1, InputDeviceIdentifier(),
+               /*alias=*/"", /*isExternal=*/false, /*isVirtualDevice=*/false, /*hasMic=*/false,
+               ui::LogicalDisplayId::INVALID);
 }
 
 InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
@@ -192,6 +193,7 @@ InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
         mIdentifier(other.mIdentifier),
         mAlias(other.mAlias),
         mIsExternal(other.mIsExternal),
+        mIsVirtualDevice(other.mIsVirtualDevice),
         mHasMic(other.mHasMic),
         mKeyboardLayoutInfo(other.mKeyboardLayoutInfo),
         mSources(other.mSources),
@@ -217,6 +219,7 @@ InputDeviceInfo& InputDeviceInfo::operator=(const InputDeviceInfo& other) {
     mIdentifier = other.mIdentifier;
     mAlias = other.mAlias;
     mIsExternal = other.mIsExternal;
+    mIsVirtualDevice = other.mIsVirtualDevice;
     mHasMic = other.mHasMic;
     mKeyboardLayoutInfo = other.mKeyboardLayoutInfo;
     mSources = other.mSources;
@@ -240,9 +243,9 @@ InputDeviceInfo& InputDeviceInfo::operator=(const InputDeviceInfo& other) {
 InputDeviceInfo::~InputDeviceInfo() {
 }
 
-void InputDeviceInfo::initialize(int32_t id, int32_t generation, int32_t controllerNumber,
+void InputDeviceInfo::initialize(DeviceId id, int32_t generation, int32_t controllerNumber,
                                  const InputDeviceIdentifier& identifier, const std::string& alias,
-                                 bool isExternal, bool hasMic,
+                                 bool isExternal, bool isVirtualDevice, bool hasMic,
                                  ui::LogicalDisplayId associatedDisplayId,
                                  InputDeviceViewBehavior viewBehavior, bool enabled) {
     mId = id;
@@ -251,6 +254,7 @@ void InputDeviceInfo::initialize(int32_t id, int32_t generation, int32_t control
     mIdentifier = identifier;
     mAlias = alias;
     mIsExternal = isExternal;
+    mIsVirtualDevice = isVirtualDevice;
     mHasMic = hasMic;
     mSources = 0;
     mKeyboardType = AINPUT_KEYBOARD_TYPE_NONE;

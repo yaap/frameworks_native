@@ -21,8 +21,6 @@
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "RegionSamplingThread"
 
 #include "RegionSamplingThread.h"
 
@@ -355,11 +353,13 @@ void RegionSamplingThread::captureSample() {
                            .disableBlur = true,
                            .isGrayscale = false,
                            .isSecure = true,
-                           .seamlessTransition = false,
+                           .preserveDisplayColors = false,
                            .debugName = "RegionSampling"};
 
     std::vector<std::pair<Layer*, sp<LayerFE>>> layers;
-    mFlinger.setScreenshotSnapshotsAndDisplayState(screenshotArgs);
+    mFlinger.setScreenshotSnapshotsAndDisplayState(screenshotArgs,
+                                                   static_cast<ui::PixelFormat>(
+                                                           buffer->getPixelFormat()));
     FenceResult fenceResult = mFlinger.captureScreenshot(screenshotArgs, buffer, nullptr).get();
     if (fenceResult.ok()) {
         fenceResult.value()->waitForever(LOG_TAG);

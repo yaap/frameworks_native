@@ -82,6 +82,16 @@ const FenceTimePtr& FrameTarget::presentFenceForPreviousFrame() const {
     return FenceTime::NO_FENCE;
 }
 
+size_t FrameTargeter::countPresentFencesPendingAt(TimePoint time) const {
+    size_t pendingFenceCount = 0;
+    for (ssize_t i = static_cast<ssize_t>(mPresentFences.size() - 1); i >= 0; --i) {
+        if (mPresentFences[static_cast<size_t>(i)].fenceTime->wasPendingAt(time.ns())) {
+            pendingFenceCount++;
+        }
+    }
+    return pendingFenceCount;
+}
+
 void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& vsyncSource) {
     return beginFrame(args, vsyncSource, &FrameTargeter::isFencePending);
 }

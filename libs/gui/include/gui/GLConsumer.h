@@ -245,6 +245,8 @@ public:
     // current at the time of the last call to detachFromContext.
     status_t attachToContext(uint32_t tex);
 
+    void onFirstRef() override;
+
 protected:
 
     // abandonLocked overrides the ConsumerBase method to clear
@@ -308,6 +310,8 @@ protected:
 
 private:
     friend class sp<GLConsumer>;
+
+    void initializeConsumer();
 
     GLConsumer(uint32_t tex, uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
 

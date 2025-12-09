@@ -66,6 +66,7 @@ interface ISurfaceComposer {
     enum EventRegistration {
         modeChanged = 1 << 0,
         frameRateOverride = 1 << 1,
+        modeRejected = 1 << 2,
     }
 
     enum OptimizationPolicy {
@@ -650,4 +651,18 @@ interface ISurfaceComposer {
      * profiles.
      */
     oneway void removeActivePictureListener(IActivePictureListener listener);
+
+    /**
+     * Force the display specified by the argument to become the pacesetter display until the
+     * display is removed or another forcePacesetter/resetForcedPacesetter call is invoked.
+     * Requires root
+     */
+    void forcePacesetter(long displayId);
+
+    /**
+     * Resets the forced pacesetter display selection made by the forcePacesetter call. No-op
+     * if there was no forced pacesetter display set.
+     * Requires root
+     */
+     void resetForcedPacesetter();
 }

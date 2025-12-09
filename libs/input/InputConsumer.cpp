@@ -185,6 +185,20 @@ bool shouldResampleTool(ToolType toolType) {
             toolType == ToolType::STYLUS || toolType == ToolType::UNKNOWN;
 }
 
+// These axis values are relative to the previous event. When synthesizing a resampled event,
+// they are set to zero, so that consumers of these axis values can correctly accumulate the delta.
+// Note that they are not cleared in `InputConsumer::rewriteMessage` because the rewritten event
+// there is a real event containing delta from the last real event.
+constexpr std::array<int32_t, 7> relativeAxesToClearOnResample{
+        AMOTION_EVENT_AXIS_RELATIVE_X,
+        AMOTION_EVENT_AXIS_RELATIVE_Y,
+        AMOTION_EVENT_AXIS_GESTURE_X_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_Y_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_PINCH_SCALE_FACTOR,
+};
+
 } // namespace
 
 using android::base::Result;
@@ -695,6 +709,11 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
                                      lerp(currentCoords.getX(), otherCoords.getX(), alpha));
         resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_Y,
                                      lerp(currentCoords.getY(), otherCoords.getY(), alpha));
+        if (input_flags::clear_relative_axes_in_resampled_coords()) {
+            for (int32_t axis : relativeAxesToClearOnResample) {
+                resampledCoords.setAxisValue(axis, 0);
+            }
+        }
         ALOGD_IF(debugResampling(),
                  "[%d] - out (%0.3f, %0.3f), cur (%0.3f, %0.3f), "
                  "other (%0.3f, %0.3f), alpha %0.3f",

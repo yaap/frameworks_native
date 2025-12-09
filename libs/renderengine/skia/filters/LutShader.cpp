@@ -33,7 +33,7 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-static const SkString kShader = SkString(R"(
+const SkString kEffectSource_LutEffect(R"(
     uniform shader image;
     uniform shader lut;
     uniform int size;
@@ -183,8 +183,7 @@ static float computePqScale() {
 }
 
 LutShader::LutShader(RuntimeEffectManager& effectManager) {
-    mEffect = effectManager.createAndStoreRuntimeEffect(RuntimeEffectManager::KnownId::kLutEffect,
-                                                        "LutEffect", kShader);
+    mEffect = effectManager.mKnownEffects[kLutEffect];
 }
 
 sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
@@ -287,8 +286,7 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
 
 sk_sp<SkShader> LutShader::lutShader(sk_sp<SkShader>& input,
                                      std::shared_ptr<gui::DisplayLuts> displayLuts,
-                                     ui::Dataspace srcDataspace,
-                                     sk_sp<SkColorSpace> outColorSpace) {
+                                     ui::Dataspace srcDataspace) {
     if (mBuilder == nullptr) {
         mBuilder = std::make_unique<SkRuntimeShaderBuilder>(mEffect);
     }

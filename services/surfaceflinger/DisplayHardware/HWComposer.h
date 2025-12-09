@@ -116,7 +116,7 @@ public:
         float dpiY = -1.f;
         int32_t configGroup = -1;
         std::optional<hal::VrrConfig> vrrConfig;
-        OutputType hdrOutputType;
+        composer3::OutputType hdrOutputType;
 
         friend std::ostream& operator<<(std::ostream& os, const HWCDisplayMode& mode) {
             return os << "id=" << mode.hwcId << " res=" << mode.width << "x" << mode.height
@@ -584,6 +584,7 @@ private:
     std::vector<HWCDisplayMode> getModesFromDisplayConfigurations(uint64_t hwcDisplayId,
                                                                   int32_t maxFrameIntervalNs) const;
     std::vector<HWCDisplayMode> getModesFromLegacyDisplayConfigs(uint64_t hwcDisplayId) const;
+    ui::DisplayConnectionType getHwcDisplayConnectionType(uint64_t hwcDisplayId) const;
 
     int32_t getAttribute(hal::HWDisplayId hwcDisplayId, hal::HWConfigId configId,
                          hal::Attribute attribute) const;

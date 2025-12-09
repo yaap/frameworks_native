@@ -80,9 +80,7 @@ TEST_F(MirrorLayerTest, MirrorColorLayer) {
             .show(mirrorLayer)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
 
     {
         SCOPED_TRACE("Initial Mirror");
@@ -178,9 +176,7 @@ TEST_F(MirrorLayerTest, MirrorBufferLayer) {
             .show(mirrorLayer)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Initial Mirror BufferQueueLayer");
         auto shot = screenshot();
@@ -272,9 +268,7 @@ TEST_F(MirrorLayerTest, InitialMirrorState) {
             .setLayer(mirrorLayer, INT32_MAX - 1)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Offscreen Mirror");
         auto shot = screenshot();
@@ -331,9 +325,7 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
     // Show the mirror layer, but don't reparent to a layer on screen.
     Transaction().reparent(mirrorLayer, mirrorParent).show(mirrorLayer).apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 50, 50).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 50, 50).apply();
 
     {
         SCOPED_TRACE("Offscreen Mirror");

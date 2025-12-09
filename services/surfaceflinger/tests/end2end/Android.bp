@@ -65,6 +65,11 @@ cc_test {
     tidy_flags: [
         "--config=", // Use the .clang-tidy closest to each source file for the configuration
     ],
+    tidy_checks: [
+        // Disable this check, as currently it is triggering (as an error) on fields deep in
+        // fmtlib's internal `compile_parse_context` are not being initialized by the ctor.
+        "-clang-analyzer-optin.cplusplus.UninitializedObject",
+    ],
     tidy_checks_as_errors: [
         "*",
     ],

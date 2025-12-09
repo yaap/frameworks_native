@@ -199,6 +199,10 @@ public:
         mInfo.setInputConfig(InputConfig::DO_NOT_PILFER, doNotPilfer);
     }
 
+    inline void setDisplayTopologyAware(bool displayTopologyAware) {
+        mInfo.setInputConfig(InputConfig::DISPLAY_TOPOLOGY_AWARE, displayTopologyAware);
+    }
+
     inline void setAlpha(float alpha) { mInfo.alpha = alpha; }
 
     inline void setTouchOcclusionMode(gui::TouchOcclusionMode mode) {

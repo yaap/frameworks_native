@@ -189,6 +189,10 @@ Surface::~Surface() {
 #endif // !defined(NO_BINDER)
 }
 
+sp<Surface> Surface::from(ANativeWindow* anw) {
+    return sp<Surface>::fromExisting(static_cast<Surface*>(anw));
+}
+
 #ifndef NO_BINDER
 sp<ISurfaceComposer> Surface::composerService() const {
     return ComposerService::getComposerService();
@@ -731,7 +735,7 @@ int Surface::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
     }
 
     if (result & IGraphicBufferProducer::RELEASE_ALL_BUFFERS) {
-        freeAllBuffers();
+        freeUndequeuedBuffersLocked();
     }
 
     if (dqInput.getTimestamps) {
@@ -800,7 +804,7 @@ status_t Surface::queueBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& 
     if (buffer == nullptr) {
         return BAD_VALUE;
     }
-    return queueBuffer(buffer.get(), fd ? fd->get() : -1, output);
+    return queueBuffer(sp<GraphicBuffer>::fromExisting(buffer.get()), fd ? fd->get() : -1, output);
 }
 
 status_t Surface::detachBuffer(const sp<GraphicBuffer>& buffer) {
@@ -809,6 +813,14 @@ status_t Surface::detachBuffer(const sp<GraphicBuffer>& buffer) {
     }
 
     Mutex::Autolock lock(mMutex);
+
+    if (mLeakedBuffers.contains(buffer)) {
+        SURF_LOGE("Surface::detachBuffer given a leaked buffer! Deleting extra held reference.");
+        mLeakedBuffers.erase(buffer);
+        if (!mIsConnected) {
+            return OK;
+        }
+    }
 
     uint64_t bufferId = buffer->getId();
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
@@ -820,6 +832,7 @@ status_t Surface::detachBuffer(const sp<GraphicBuffer>& buffer) {
         if (bufferSlot.buffer != nullptr && bufferSlot.buffer->getId() == bufferId) {
             bufferSlot.buffer = nullptr;
             bufferSlot.dirtyRegion = Region::INVALID_REGION;
+            bufferSlot.requiresFreeOnReturn = false;
             return mGraphicBufferProducer->detachBuffer(slot);
         }
     }
@@ -929,7 +942,7 @@ int Surface::dequeueBuffers(std::vector<BatchBuffer>* buffers) {
     for (const auto& output : dequeueOutput) {
         if (output.result & IGraphicBufferProducer::RELEASE_ALL_BUFFERS) {
             SURF_LOGV("%s: RELEASE_ALL_BUFFERS during batch operation", __FUNCTION__);
-            freeAllBuffers();
+            freeUndequeuedBuffersLocked();
             break;
         }
     }
@@ -1009,6 +1022,15 @@ int Surface::cancelBuffer(sp<GraphicBuffer>&& buffer, int fenceFd) {
     ATRACE_CALL();
     SURF_LOGV("Surface::cancelBuffer");
     Mutex::Autolock lock(mMutex);
+
+    if (mLeakedBuffers.contains(buffer)) {
+        SURF_LOGE("Surface::cancelBuffer given a leaked buffer! Deleting extra held reference.");
+        mLeakedBuffers.erase(buffer);
+        if (!mIsConnected) {
+            return OK;
+        }
+    }
+
     int i = getSlotFromBufferLocked(buffer);
     if (i < 0) {
         if (fenceFd >= 0) {
@@ -1030,6 +1052,10 @@ int Surface::cancelBuffer(sp<GraphicBuffer>&& buffer, int fenceFd) {
     }
 
     mDequeuedSlots.erase(i);
+    if (mSlots[i].requiresFreeOnReturn) {
+        mSlots[i].buffer = nullptr;
+        mSlots[i].requiresFreeOnReturn = false;
+    }
 
     return OK;
 }
@@ -1039,40 +1065,69 @@ int Surface::cancelBuffers(const std::vector<BatchBuffer>& buffers) {
     ATRACE_CALL();
     SURF_LOGV("Surface::cancelBuffers");
 
-    if (mSharedBufferMode) {
-        SURF_LOGE("%s: batch operation is not supported in shared buffer mode!", __FUNCTION__);
-        return INVALID_OPERATION;
-    }
-
     size_t numBuffers = buffers.size();
     std::vector<CancelBufferInput> cancelBufferInputs(numBuffers);
     std::vector<status_t> cancelBufferOutputs;
     size_t numBuffersCancelled = 0;
     int badSlotResult = 0;
-    for (size_t i = 0; i < numBuffers; i++) {
-        sp<GraphicBuffer> buffer = GraphicBuffer::from(buffers[i].buffer);
-        int slot = getSlotFromBufferLocked(buffer);
-        int fenceFd = buffers[i].fenceFd;
-        if (slot < 0) {
-            if (fenceFd >= 0) {
-                close(fenceFd);
+    std::vector<sp<GraphicBuffer>> deletedLeakedBuffers;
+    {
+        Mutex::Autolock _l(mMutex);
+
+        for (auto& batchBuffer : buffers) {
+            auto buffer = GraphicBuffer::from(batchBuffer.buffer);
+            if (mLeakedBuffers.contains(buffer)) {
+                SURF_LOGE("Surface::cancelBuffers given a leaked buffer! Deleting extra held "
+                          "reference.");
+                mLeakedBuffers.erase(buffer);
+                // Hold onto one last reference to the buffer until the end of the scope of this
+                // function in the rare case that it still needs to be sent to the client.
+                deletedLeakedBuffers.push_back(std::move(buffer));
             }
-            SURF_LOGE("%s: cannot find slot number for cancelled buffer", __FUNCTION__);
-            badSlotResult = slot;
-        } else {
-            sp<Fence> fence(fenceFd >= 0 ? sp<Fence>::make(fenceFd) : Fence::NO_FENCE);
-            cancelBufferInputs[numBuffersCancelled].slot = slot;
-            cancelBufferInputs[numBuffersCancelled++].fence = fence;
         }
+        if (!mIsConnected && !deletedLeakedBuffers.empty()) {
+            return OK;
+        }
+
+        if (mSharedBufferMode) {
+            SURF_LOGE("%s: batch operation is not supported in shared buffer mode!", __FUNCTION__);
+            return INVALID_OPERATION;
+        }
+
+        for (size_t i = 0; i < numBuffers; i++) {
+            sp<GraphicBuffer> buffer = GraphicBuffer::from(buffers[i].buffer);
+            int slot = getSlotFromBufferLocked(buffer);
+            int fenceFd = buffers[i].fenceFd;
+            if (slot < 0) {
+                if (fenceFd >= 0) {
+                    close(fenceFd);
+                }
+                SURF_LOGE("%s: cannot find slot number for cancelled buffer", __FUNCTION__);
+                badSlotResult = slot;
+            } else {
+                sp<Fence> fence(fenceFd >= 0 ? sp<Fence>::make(fenceFd) : Fence::NO_FENCE);
+                cancelBufferInputs[numBuffersCancelled].slot = slot;
+                cancelBufferInputs[numBuffersCancelled++].fence = fence;
+            }
+        }
+        cancelBufferInputs.resize(numBuffersCancelled);
     }
-    cancelBufferInputs.resize(numBuffersCancelled);
+
+    // Call w/o lock held to handle callbacks without deadlocking.
     mGraphicBufferProducer->cancelBuffers(cancelBufferInputs, &cancelBufferOutputs);
 
+    {
+        Mutex::Autolock _l(mMutex);
 
-    for (size_t i = 0; i < numBuffersCancelled; i++) {
-        mDequeuedSlots.erase(cancelBufferInputs[i].slot);
+        for (size_t i = 0; i < numBuffersCancelled; i++) {
+            int slot = cancelBufferInputs[i].slot;
+            mDequeuedSlots.erase(slot);
+            if (mSlots[slot].requiresFreeOnReturn) {
+                mSlots[slot].buffer = nullptr;
+                mSlots[slot].requiresFreeOnReturn = false;
+            }
+        }
     }
-
     if (badSlotResult != 0) {
         return badSlotResult;
     }
@@ -1225,6 +1280,10 @@ void Surface::applyGrallocMetadataLocked(
 void Surface::onBufferQueuedLocked(int slot, sp<Fence> fence,
         const IGraphicBufferProducer::QueueBufferOutput& output) {
     mDequeuedSlots.erase(slot);
+    if (mSlots[slot].requiresFreeOnReturn) {
+        mSlots[slot].buffer = nullptr;
+        mSlots[slot].requiresFreeOnReturn = false;
+    }
 
     if (mEnableFrameTimestamps) {
         mFrameEventHistory->applyDelta(output.frameTimestamps);
@@ -1282,6 +1341,14 @@ int Surface::queueBuffer(sp<GraphicBuffer>&& buffer, int fenceFd,
     {
         Mutex::Autolock lock(mMutex);
 
+        if (mLeakedBuffers.contains(buffer)) {
+            SURF_LOGE("Surface::queueBuffer given a leaked buffer! Deleting extra held reference.");
+            mLeakedBuffers.erase(buffer);
+            if (!mIsConnected) {
+                return OK;
+            }
+        }
+
         slot = getSlotFromBufferLocked(buffer);
         if (slot < 0) {
             if (fenceFd >= 0) {
@@ -1338,10 +1405,26 @@ int Surface::queueBuffers(const std::vector<BatchQueuedBuffer>& buffers,
     std::vector<IGraphicBufferProducer::QueueBufferOutput> igbpQueueBufferOutputs;
     std::vector<int> bufferSlots(numBuffers, -1);
     std::vector<sp<Fence>> bufferFences(numBuffers);
+    std::vector<sp<GraphicBuffer>> deletedLeakedBuffers;
 
     int err;
     {
         Mutex::Autolock lock(mMutex);
+
+        for (auto& batchBuffer : buffers) {
+            auto buffer = GraphicBuffer::from(batchBuffer.buffer);
+            if (mLeakedBuffers.contains(buffer)) {
+                SURF_LOGE("Surface::queueBuffers given a leaked buffer! Deleting extra held "
+                          "reference.");
+                mLeakedBuffers.erase(buffer);
+                // Hold onto one last reference to the buffer until the end of the scope of this
+                // function in the rare case that it still needs to be sent to the client.
+                deletedLeakedBuffers.push_back(std::move(buffer));
+            }
+        }
+        if (!mIsConnected && !deletedLeakedBuffers.empty()) {
+            return OK;
+        }
 
         if (mSharedBufferMode) {
             SURF_LOGE("%s: batched operation is not supported in shared buffer mode", __FUNCTION__);
@@ -2074,7 +2157,7 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
     mReportRemovedBuffers = reportBufferRemoval;
 
     if (listener != nullptr) {
-        mListenerProxy = sp<ProducerListenerProxy>::make(this, listener);
+        mListenerProxy = sp<ProducerListenerProxy>::make(wp<Surface>::fromExisting(this), listener);
     }
 
     int err =
@@ -2111,6 +2194,7 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
             mGraphicBufferProducer->getUniqueId(&mId);
         }
         SURF_LOGE_IF(idErr != NO_ERROR, "Unable to get ID from IGBP: %d", idErr);
+        mIsConnected = true;
     }
     if (!err && api == NATIVE_WINDOW_API_CPU) {
         mConnectedToCpu = true;
@@ -2127,35 +2211,46 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
 int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
     ATRACE_CALL();
     SURF_LOGV("Surface::disconnect");
+    int err = mGraphicBufferProducer->disconnect(api, mode);
+    if (err == BAD_VALUE) {
+        SURF_LOGE("Surface failed to disconnect with error %d (%s). Likely the wrong API was "
+                  "requested (%d). Not cleaning up internals.",
+                  err, statusToString(err).c_str(), api);
+        return err;
+    }
+
+    // In this case the surface is either already disconnected or the process is dead.
+    SURF_LOGE_IF(err != NO_ERROR,
+                 "Surface failed to disconnect. Cleaning up internals anyway. Error %d (%s).", err,
+                 statusToString(err).c_str());
+
     Mutex::Autolock lock(mMutex);
     mRemovedBuffers.clear();
     mSharedBufferSlot = BufferItem::INVALID_BUFFER_SLOT;
     mSharedBufferHasBeenQueued = false;
-    freeAllBuffers();
-    int err = mGraphicBufferProducer->disconnect(api, mode);
-    if (!err) {
-        mReqFormat = 0;
-        mReqWidth = 0;
-        mReqHeight = 0;
-        mReqUsage = 0;
-        mCrop.clear();
-        mDataSpace = Dataspace::UNKNOWN;
-        mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
-        mTransform = 0;
-        mStickyTransform = 0;
-        mAutoPrerotation = false;
-        mEnableFrameTimestamps = false;
-        mMaxBufferCount = NUM_BUFFER_SLOTS;
+    clearBuffersForDisconnectLocked();
+    mReqFormat = 0;
+    mReqWidth = 0;
+    mReqHeight = 0;
+    mReqUsage = 0;
+    mCrop.clear();
+    mDataSpace = Dataspace::UNKNOWN;
+    mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
+    mTransform = 0;
+    mStickyTransform = 0;
+    mAutoPrerotation = false;
+    mEnableFrameTimestamps = false;
+    mMaxBufferCount = NUM_BUFFER_SLOTS;
 
-        if (api == NATIVE_WINDOW_API_CPU) {
-            mConnectedToCpu = false;
-        }
-
-        std::scoped_lock _dl(mDebugMutex);
-        // Keep the old name in case we get subsequent calls, for logging.
-        mDebugName = mDebugName + "-DISCONNECTED";
-        mId = 0;
+    if (api == NATIVE_WINDOW_API_CPU) {
+        mConnectedToCpu = false;
     }
+
+    std::scoped_lock _dl(mDebugMutex);
+    // Keep the old name in case we get subsequent calls, for logging.
+    mDebugName = mDebugName + "-DISCONNECTED";
+    mId = 0;
+    mIsConnected = false;
 
 #if !defined(NO_BINDER)
     if (mSurfaceDeathListener != nullptr) {
@@ -2176,17 +2271,17 @@ int Surface::detachNextBuffer(sp<GraphicBuffer>* outBuffer,
         return BAD_VALUE;
     }
 
-    Mutex::Autolock lock(mMutex);
-    if (mReportRemovedBuffers) {
-        mRemovedBuffers.clear();
-    }
-
     sp<GraphicBuffer> buffer(nullptr);
     sp<Fence> fence(nullptr);
     status_t result = mGraphicBufferProducer->detachNextBuffer(
             &buffer, &fence);
     if (result != NO_ERROR) {
         return result;
+    }
+
+    Mutex::Autolock lock(mMutex);
+    if (mReportRemovedBuffers) {
+        mRemovedBuffers.clear();
     }
 
     *outBuffer = buffer;
@@ -2207,6 +2302,9 @@ int Surface::detachNextBuffer(sp<GraphicBuffer>* outBuffer,
                 mRemovedBuffers.push_back(mSlots[i].buffer);
             }
             mSlots[i].buffer = nullptr;
+            mSlots[i].dirtyRegion = Region::INVALID_REGION;
+            mSlots[i].requiresFreeOnReturn = false;
+            break;
         }
     }
 
@@ -2246,7 +2344,8 @@ int Surface::isBufferOwned(const sp<GraphicBuffer>& buffer, bool* outIsOwned) co
 int Surface::attachBuffer(ANativeWindowBuffer* buffer)
 {
     ATRACE_CALL();
-    sp<GraphicBuffer> graphicBuffer(static_cast<GraphicBuffer*>(buffer));
+    sp<GraphicBuffer> graphicBuffer(
+            sp<GraphicBuffer>::fromExisting(static_cast<GraphicBuffer*>(buffer)));
 
     SURF_LOGV("Surface::attachBuffer bufferId=%" PRIu64, graphicBuffer->getId());
 
@@ -2568,7 +2667,27 @@ Dataspace Surface::getBuffersDataSpace() {
     return mDataSpace;
 }
 
-void Surface::freeAllBuffers() {
+void Surface::freeUndequeuedBuffersLocked() {
+    ATRACE_CALL();
+    SURF_LOGV("Surface::releaseUndequeuedBuffers");
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    for (int i = 0; i < (int)mSlots.size(); i++) {
+#else
+    for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
+#endif
+        if (mDequeuedSlots.contains(i)) {
+            mSlots[i].requiresFreeOnReturn = true;
+        } else {
+            mSlots[i].buffer = nullptr;
+            mSlots[i].requiresFreeOnReturn = false;
+        }
+    }
+}
+
+void Surface::clearBuffersForDisconnectLocked() {
+    ATRACE_CALL();
+    SURF_LOGV("Surface::clearBuffersForDisconnectLocked");
     if (!mDequeuedSlots.empty()) {
         SURF_LOGE("%s: %zu buffers were freed while being dequeued!", __FUNCTION__,
                   mDequeuedSlots.size());
@@ -2578,7 +2697,16 @@ void Surface::freeAllBuffers() {
 #else
     for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
 #endif
+        // Since we're ANW contractually oblicates us to be responsible for a reference to a
+        // dequeued buffer, hold onto a reference to the buffer even though we're disconnecting.
+        // This is especially important in the case of when some client is using ANW and someone
+        // else, having a reference to the Surface, disconnects it.
+        if (mDequeuedSlots.contains(i)) {
+            mLeakedBuffers.insert(mSlots[i].buffer);
+        }
         mSlots[i].buffer = nullptr;
+        mSlots[i].dirtyRegion.clear();
+        mSlots[i].requiresFreeOnReturn = false;
     }
 }
 
@@ -2807,7 +2935,7 @@ status_t Surface::unlockAndPost()
     status_t err = mLockedBuffer->unlockAsync(&fd);
     SURF_LOGE_IF(err, "failed unlocking buffer (%p)", mLockedBuffer->handle);
 
-    err = queueBuffer(mLockedBuffer.get(), fd);
+    err = queueBuffer(sp<GraphicBuffer>::fromExisting(mLockedBuffer.get()), fd);
     SURF_LOGE_IF(err, "queueBuffer (handle=%p) failed (%s)", mLockedBuffer->handle, strerror(-err));
 
     mPostedBuffer = mLockedBuffer;

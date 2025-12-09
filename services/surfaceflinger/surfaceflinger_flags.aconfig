@@ -11,14 +11,6 @@ flag {
   is_fixed_read_only: true
 }
 
-flag {
-  name: "vrr_config"
-  namespace: "core_graphics"
-  description: "Controls SurfaceFlinger support for VRR Configurations"
-  bug: "284845445"
-  is_fixed_read_only: true
-}
-
 # This file is locked and should not be changed. Use surfaceflinger_flags_new.aconfig
 
 flag {

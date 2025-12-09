@@ -34,6 +34,7 @@ using namespace testing;
 
 // --- Mocks ---
 constexpr int64_t kSpamAggregationWindowSec = 5;
+constexpr int64_t kLatencyAggregationWindowSec = 5; // Same as spam for now
 // Mock for IStatsBootstrapAtomService
 class MockStatsBootstrapAtomService : public os::BnStatsBootstrapAtomService {
 public:
@@ -63,11 +64,22 @@ BinderCallData createStatsData(uid_t uid, uint32_t code, const char* desc, int64
     return {.interfaceDescriptor = String16(desc),
             .transactionCode = code,
             .startTimeNanos = startNanos,
-            .endTimeNanos = startNanos + 1000,
+            .endTimeNanos = 0,
             .senderUid = uid};
 }
 
-// Helper function to create a StatsBootstrapAtom for comparison
+BinderCallData createStatsData(uid_t uid, const char* desc, uint32_t code, int64_t startNanos,
+                               int64_t endNanos) {
+    return BinderCallData{
+            .interfaceDescriptor = String16(desc),
+            .transactionCode = code,
+            .startTimeNanos = startNanos,
+            .endTimeNanos = endNanos,
+            .senderUid = uid,
+    };
+}
+
+// Helper function to create a StatsBootstrapAtom for spam comparison
 os::StatsBootstrapAtom createExpectedAtom(const BinderCallData& datum, int count125, int count250) {
     auto atom = os::StatsBootstrapAtom();
     // TODO: use directly from stats/atoms/framework/framework_extension_atoms.proto
@@ -78,6 +90,25 @@ os::StatsBootstrapAtom createExpectedAtom(const BinderCallData& datum, int count
     atom.values.push_back(createPrimitiveValue(std::to_string(datum.transactionCode)));
     atom.values.push_back(createPrimitiveValue((int32_t)count125));
     atom.values.push_back(createPrimitiveValue((int32_t)count250));
+    return atom;
+}
+
+// Helper function to create a StatsBootstrapAtom for latency comparison
+os::StatsBootstrapAtom createExpectedLatencyAtom(const BinderCallData& datum, int64_t callCount,
+                                                 int64_t durationSumMicros,
+                                                 int32_t secondsWithAtLeast10Calls,
+                                                 int32_t secondsWithAtLeast50Calls) {
+    auto atom = os::StatsBootstrapAtom();
+    // TODO: use directly from stats/atoms/framework/framework_extension_atoms.proto
+    atom.atomId = 1090; // kBinderLatencyAtomId
+    atom.values.push_back(createPrimitiveValue(static_cast<int64_t>(datum.senderUid)));
+    atom.values.push_back(createPrimitiveValue(static_cast<int64_t>(getuid()))); // host uid
+    atom.values.push_back(createPrimitiveValue(datum.interfaceDescriptor));
+    atom.values.push_back(createPrimitiveValue(std::to_string(datum.transactionCode)));
+    atom.values.push_back(createPrimitiveValue(callCount));
+    atom.values.push_back(createPrimitiveValue(durationSumMicros));
+    atom.values.push_back(createPrimitiveValue(secondsWithAtLeast10Calls));
+    atom.values.push_back(createPrimitiveValue(secondsWithAtLeast50Calls));
     return atom;
 }
 
@@ -135,7 +166,8 @@ TEST_F(BinderStatsPusherTest, AggregateSpamNoSpamBelowThreshold) {
     EXPECT_CALL(*mockStatsService, reportBootstrapAtom(_)).Times(0);
     EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
 
-    pusher.pushLocked(data, currentTimeSec); //  pushLocked calls aggregateBinderSpamLocked
+    pusher.pushLocked(data, currentTimeSec); //  pushLocked calls
+                                             //  aggregateBinderSpamLocked
 }
 
 TEST_F(BinderStatsPusherTest, AggregateSpamOneSecondSpam) {
@@ -338,4 +370,127 @@ TEST_F(BinderStatsPusherTest, DataNotDroppedWhenPushIsSkippedThenSucceeds) {
     EXPECT_CALL(*mockStatsService, reportBootstrapAtom(StatsAtomEq(expectedAtom))).Times(1);
 
     pusher.pushLocked(spamCallData2, timeSec2);
+}
+
+// --- Latency Tests ---
+
+TEST_F(BinderStatsPusherTest, AggregateLatencyNoLatencyBelowThreshold) {
+    std::vector<BinderCallData> data;
+    int64_t currentTimeSec = 14;
+    // Create data within the delay window
+    for (int i = 0; i < 5; ++i) { // Less than kLatencyCountFirstWatermark (10)
+        data.push_back(
+                createStatsData(2001, "ILatencyFoo", 1,
+                                (currentTimeSec - kLatencyAggregationWindowSec + 1) * 1000000000LL,
+                                (currentTimeSec - kLatencyAggregationWindowSec + 1) * 1000000000LL +
+                                        1000000 /* 1ms */));
+    }
+
+    // Expect no calls to reportBootstrapAtom
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(_)).Times(0);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+
+    pusher.pushLocked(data, currentTimeSec);
+}
+
+TEST_F(BinderStatsPusherTest, AggregateLatencyOneSecondLatency) {
+    std::vector<BinderCallData> data;
+    int64_t callTimeNanos = 2'000'000'000LL; // 2s
+    int64_t currentTimeSec =
+            (callTimeNanos / 1000'000'000LL) + kLatencyAggregationWindowSec + 1; // 2 + 5 + 1 = 8s
+    int64_t totalDurationMicros = 0;
+
+    // Create enough data in the *same second* to trigger latency reporting
+    for (int i = 0; i < 15; ++i) {              // More than kLatencyCountFirstWatermark (10)
+        int64_t durationMicros = (i + 1) * 100; // e.g. 100us, 200us ..
+        data.push_back(createStatsData(2002, "ILatencyBar", 2, callTimeNanos,
+                                       callTimeNanos + durationMicros * 1000));
+        totalDurationMicros += durationMicros;
+    }
+
+    auto expectedAtom = createExpectedLatencyAtom(data[0], 15, totalDurationMicros, 1, 0);
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(StatsAtomEq(expectedAtom))).Times(1);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+
+    pusher.pushLocked(data, currentTimeSec);
+}
+
+TEST_F(BinderStatsPusherTest, AggregateLatencyDelayedLatency) {
+    std::vector<BinderCallData> data;
+    int64_t currentTimeNanos = 9'100'000'000;
+
+    // Create latency data within the aggregation window
+    for (int i = 0; i < 15; ++i) {
+        data.push_back(createStatsData(2003, "ILatencyBaz", 3, currentTimeNanos - 1000'000'000,
+                                       currentTimeNanos - 1000'000'000 + 500000 /* 0.5ms */));
+    }
+
+    // Expect no calls, data is delayed
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(_)).Times(0);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+    pusher.pushLocked(data, currentTimeNanos / 1000'000'000);
+}
+
+TEST_F(BinderStatsPusherTest, AggregateLatencyProcessesDelayedDataOnSubsequentCall) {
+    std::vector<BinderCallData> callData1;
+    int64_t callTimeSec1 = 10;
+    int64_t latencyDataTimeNanos = (callTimeSec1 - 2) * 1000'000'000LL; // 8s, will be delayed
+    int64_t totalDurationMicros1 = 0;
+
+    for (int i = 0; i < 15; ++i) {
+        int64_t durationMicros = (i + 1) * 150;
+        callData1.push_back(createStatsData(2004, "ILatencyDelayed", 4, latencyDataTimeNanos,
+                                            latencyDataTimeNanos + durationMicros * 1000));
+        totalDurationMicros1 += durationMicros;
+    }
+
+    // First push: data should be buffered as it's too recent
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(_)).Times(0);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+    pusher.pushLocked(callData1, callTimeSec1);
+
+    // Second push: advance time so the previous data is now outside the aggregation window
+    std::vector<BinderCallData> callData2;                                    // Can be empty
+    int64_t call2_time_sec = callTimeSec1 + kLatencyAggregationWindowSec + 1; // 10 + 5 + 1 = 16s
+
+    auto expectedAtom = createExpectedLatencyAtom(callData1[0], 15, totalDurationMicros1, 1, 0);
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(StatsAtomEq(expectedAtom))).Times(1);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+
+    pusher.pushLocked(callData2, call2_time_sec);
+}
+
+TEST_F(BinderStatsPusherTest, AggregateLatencyMultipleSeconds) {
+    std::vector<BinderCallData> data;
+    int64_t firstCallSecondNanos = 2'000'000'000LL;  // 2s
+    int64_t secondCallSecondNanos = 3'000'000'000LL; // 3s
+    int64_t currentTimeSec = (secondCallSecondNanos / 1000'000'000LL) +
+            kLatencyAggregationWindowSec + 1; // 3 + 5 + 1 = 9s
+    int64_t totalDurationMicros = 0;
+
+    // Data for the first second
+    for (int i = 0; i < 12; ++i) { // 12 calls
+        int64_t durationMicros = (i + 1) * 100;
+        data.push_back(createStatsData(2005, "ILatencyMultiSec", 5, firstCallSecondNanos,
+                                       firstCallSecondNanos + durationMicros * 1000));
+        totalDurationMicros += durationMicros;
+    }
+    // Data for the second second
+    for (int i = 0; i < 8; ++i) { // 8 calls
+        int64_t durationMicros = (i + 1) * 120;
+        // Use the same UID, code, desc for aggregation
+        data.push_back(createStatsData(2005, "ILatencyMultiSec", 5, secondCallSecondNanos,
+                                       secondCallSecondNanos + durationMicros * 1000));
+        totalDurationMicros += durationMicros;
+    }
+
+    // Expect one atom representing aggregated data across 2 seconds
+    // Total calls = 12 + 8 = 20
+    // secondsWithAtLeast10Calls = 1 (only the first second has >= 10 calls)
+    // secondsWithAtLeast50Calls = 0
+    auto expectedAtom = createExpectedLatencyAtom(data[0], 20, totalDurationMicros, 1, 0);
+    EXPECT_CALL(*mockStatsService, reportBootstrapAtom(StatsAtomEq(expectedAtom))).Times(1);
+    EXPECT_CALL(*mockStatsService, localBinder()).Times(1);
+
+    pusher.pushLocked(data, currentTimeSec);
 }

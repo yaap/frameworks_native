@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "FrameTimeline"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "FrameTimeline.h"
@@ -388,14 +386,14 @@ void SurfaceFrame::setDropTime(nsecs_t dropTime) {
     mDropTime = dropTime;
 }
 
-void SurfaceFrame::setPresentState(PresentState presentState, nsecs_t lastLatchTime) {
+void SurfaceFrame::setPresentState(PresentState presentState, LastFrameTimestamps times) {
     std::scoped_lock lock(mMutex);
     LOG_ALWAYS_FATAL_IF(mPresentState != PresentState::Unknown,
                         "setPresentState called on a SurfaceFrame from Layer - %s, that has a "
                         "PresentState - %s set already.",
                         mDebugName.c_str(), toString(mPresentState).c_str());
     mPresentState = presentState;
-    mLastLatchTime = lastLatchTime;
+    mLastFrameTimestamps = times;
 }
 
 void SurfaceFrame::setRenderRate(Fps renderRate) {
@@ -536,9 +534,14 @@ void SurfaceFrame::dump(std::string& result, const std::string& indent, nsecs_t 
     StringAppendF(&result, "%s", indent.c_str());
     StringAppendF(&result, "Finish Metadata: %s\n", toString(mFrameReadyMetadata).c_str());
     std::chrono::nanoseconds latchTime(
-            std::max(static_cast<int64_t>(0), mLastLatchTime - baseTime));
+            std::max(static_cast<int64_t>(0), mLastFrameTimestamps.latchTime - baseTime));
     StringAppendF(&result, "%s", indent.c_str());
     StringAppendF(&result, "Last latch time: %10f\n",
+                  std::chrono::duration<double, std::milli>(latchTime).count());
+    std::chrono::nanoseconds latchExpectedPresentTime(
+            std::max(static_cast<int64_t>(0), mLastFrameTimestamps.expectedPresentTime - baseTime));
+    StringAppendF(&result, "%s", indent.c_str());
+    StringAppendF(&result, "Last expected present time: %10f\n",
                   std::chrono::duration<double, std::milli>(latchTime).count());
     if (mPredictionState == PredictionState::Valid) {
         nsecs_t presentDelta = mActuals.presentTime - mPredictions.presentTime;
@@ -644,8 +647,15 @@ void SurfaceFrame::classifyJankLocked(int32_t displayFrameJankType, const Fps& r
             // Finish late, Present early
             mJankType = JankType::Unknown;
         }
-    } else {
-        if (mLastLatchTime != 0 && mPredictions.endTime <= mLastLatchTime) {
+    } else { // FramePresentMetadata::LatePresent
+        const bool readyBeforePreviousLatch = mLastFrameTimestamps.latchTime != 0 &&
+                mPredictions.endTime <= mLastFrameTimestamps.latchTime;
+        const bool dueLastFrame = !FlagManager::getInstance().buffer_stuffing_fix() ||
+                (mLastFrameTimestamps.expectedPresentTime != 0 &&
+                 mPredictions.presentTime - presentThreshold <
+                         mLastFrameTimestamps.expectedPresentTime);
+
+        if (readyBeforePreviousLatch && dueLastFrame) {
             // Buffer Stuffing.
             mJankType |= JankType::BufferStuffing;
             // In a stuffed state, the frame could be stuck on a dequeue wait for quite some time.
@@ -653,7 +663,8 @@ void SurfaceFrame::classifyJankLocked(int32_t displayFrameJankType, const Fps& r
             // We try to do this by moving the deadline. Since the queue could be stuffed by more
             // than one buffer, we take the last latch time as reference and give one vsync
             // worth of time for the frame to be ready.
-            nsecs_t adjustedDeadline = mLastLatchTime + displayFrameRenderRate.getPeriodNsecs();
+            nsecs_t adjustedDeadline =
+                    mLastFrameTimestamps.latchTime + displayFrameRenderRate.getPeriodNsecs();
             if (adjustedDeadline > mActuals.endTime) {
                 mFrameReadyMetadata = FrameReadyMetadata::OnTimeFinish;
             } else {

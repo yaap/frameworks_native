@@ -21,6 +21,7 @@
 #include <android/gui/BorderSettings.h>
 #include <android/gui/BoxShadowSettings.h>
 #include <android/gui/CachingHint.h>
+#include <common/LayerFilter.h>
 #include <gui/DisplayLuts.h>
 #include <gui/HdrMetadata.h>
 #include <math/mat4.h>
@@ -105,7 +106,7 @@ struct LayerFECompositionState {
      */
 
     // The filter that determines which outputs include this layer
-    ui::LayerFilter outputFilter;
+    LayerFilter outputFilter;
 
     // If false, this layer should not be considered visible
     bool isVisible{true};

@@ -75,6 +75,7 @@ public:
     virtual void postMessageDelayed(sp<MessageHandler>&&, nsecs_t uptimeDelay) = 0;
     virtual void scheduleConfigure() = 0;
     virtual void scheduleFrame(Duration workDurationSlack = Duration::fromNs(0)) = 0;
+    virtual void scheduleImmediateFrame() = 0;
 
     virtual std::optional<scheduler::ScheduleResult> getScheduledFrameResult() const = 0;
 };
@@ -150,6 +151,7 @@ public:
 
     void scheduleConfigure() override;
     void scheduleFrame(Duration workDurationSlack = Duration::fromNs(0)) override;
+    void scheduleImmediateFrame() override;
 
     std::optional<scheduler::ScheduleResult> getScheduledFrameResult() const override;
 };

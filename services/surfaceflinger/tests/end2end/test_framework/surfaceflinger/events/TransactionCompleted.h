@@ -39,26 +39,26 @@ struct TransactionCompleted final {
 
     using Timestamp = std::chrono::steady_clock::time_point;
 
-    Surface* surface{};
+    uintptr_t surfaceId{};
     uint64_t frameNumber{};
     core::BufferId bufferId{};
-    Timestamp latchTime{};
+    Timestamp latchTime;
     Timestamp receivedAt{std::chrono::steady_clock::now()};
 
-    friend auto operator==(const TransactionCompleted&,
-                           const TransactionCompleted&) -> bool = default;
+    friend auto operator==(const TransactionCompleted&, const TransactionCompleted&)
+            -> bool = default;
 };
 
 inline auto toString(const TransactionCompleted& event) -> std::string {
     return fmt::format(
             "sfTransactionCompleted{{"
-            " surface: {},"
+            " surfaceId: 0x{:x},"
             " frameNumber: {},"
             " bufferId: {}"
             " latchTime: {}"
             " receivedAt: {}"
             " }}",
-            static_cast<void*>(event.surface), event.frameNumber, toString(event.bufferId),
+            event.surfaceId, event.frameNumber, toString(event.bufferId),
             event.latchTime.time_since_epoch(), event.receivedAt.time_since_epoch());
 }
 

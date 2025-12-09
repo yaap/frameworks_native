@@ -61,24 +61,13 @@ inline bool operator<(LayerStack lhs, LayerStack rhs) {
     return lhs.id < rhs.id;
 }
 
-// A LayerFilter determines if a layer is included for output to a display.
-struct LayerFilter {
-    LayerStack layerStack;
+} // namespace android::ui
 
-    // True if the layer is only output to internal displays, i.e. excluded from screenshots, screen
-    // recordings, and mirroring to virtual or external displays. Used for display cutout overlays.
-    bool toInternalDisplay = false;
-
-    // Returns true if the input filter can be output to this filter.
-    bool includes(LayerFilter other) const {
-        // The layer stacks must match.
-        if (other.layerStack == UNASSIGNED_LAYER_STACK || other.layerStack != layerStack) {
-            return false;
-        }
-
-        // The output must be to an internal display if the input filter has that constraint.
-        return !other.toInternalDisplay || toInternalDisplay;
+namespace std {
+template <>
+struct hash<android::ui::LayerStack> {
+    size_t operator()(const android::ui::LayerStack& layerStack) const {
+        return hash<uint32_t>()(layerStack.id);
     }
 };
-
-} // namespace android::ui
+} // namespace std

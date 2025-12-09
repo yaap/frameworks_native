@@ -132,19 +132,21 @@ public:
         return driverPath;
     }
 
-    FeatureOverrides getFeatureOverrides() override {
+    void getFeatureOverrides(FeatureOverrides& featureOverrides) override {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
 
-        FeatureOverrides featureOverrides;
         status_t error =
                 remote()->transact(BnGpuService::GET_FEATURE_CONFIG_OVERRIDES, data, &reply);
         if (error != OK) {
-            return featureOverrides;
+            return;
         }
 
-        featureOverrides.readFromParcel(&reply);
-        return featureOverrides;
+        error = featureOverrides.readFromParcel(&reply);
+        if (error != OK) {
+            ALOGE("Failed to read FeatureOverrides from parcel: error = %d", error);
+            return;
+        }
     }
 };
 
@@ -309,7 +311,7 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
 
             // Get the FeatureOverrides from gpuservice, which implements the IGpuService interface
             // with GpuService::getFeatureOverrides().
-            FeatureOverrides featureOverrides = getFeatureOverrides();
+            const FeatureOverrides& featureOverrides = getCachedFeatureOverrides();
             featureOverrides.writeToParcel(reply);
             return OK;
         }

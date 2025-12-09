@@ -26,13 +26,6 @@ flag {
 }
 
 flag {
-  name: "enable_input_event_tracing"
-  namespace: "input"
-  description: "Set to true to enable input event tracing, including always-on tracing on non-user builds"
-  bug: "210460522"
-}
-
-flag {
   name: "enable_multi_device_input"
   namespace: "input"
   description: "Set to true to enable multi-device input: touch and stylus can be active at the same time, but in different windows"
@@ -251,6 +244,53 @@ flag {
   namespace: "input"
   description: "Require apps to use topology-aware flag to receive cross-display gestures"
   bug: "401220484"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "clear_relative_axes_in_resampled_coords"
+  namespace: "input"
+  description: "Relative axes are cleared in resampled event coordinates"
+  bug: "423433478"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "abort_device_opening_on_enodev"
+  namespace: "input"
+  description: "Stop opening a device if it is removed before we can cache all of its axis information"
+  bug: "424789999"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "low_level_tracing"
+  namespace: "input"
+  description: "Log low-level events from evdev and the Gestures library in traces"
+  bug: "394861376"
+}
+
+flag {
+  name: "use_separate_xy_dpi_scaling_for_mice"
+  namespace: "input"
+  description: "Use the xDpi and yDpi values to scale mouse moves"
+  bug: "432649760"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "simultaneous_outside_and_hover_fix"
+  namespace: "input"
+  description: "Bug fix to prevent dispatcher from crashing when a window is expected to receive simultaneous action-outside and hover-exit events"
+  bug: "423393151"
   metadata {
     purpose: PURPOSE_BUGFIX
   }

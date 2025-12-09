@@ -39,6 +39,12 @@ public:
     virtual ~VSyncTracker();
 
     /*
+     * The threshold for a vsync timestamp to be too old to be used for prediction of
+     * nextAnticipatedVSyncTimeFrom.
+     */
+    static constexpr Duration kPredictorThreshold = std::chrono::milliseconds(200);
+
+    /*
      * Adds a known timestamp from a vsync timing source (HWVsync signal, present fence)
      * to the model.
      *

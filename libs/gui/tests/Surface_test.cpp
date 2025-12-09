@@ -22,6 +22,7 @@
 #include <android/gui/ISurfaceComposer.h>
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware_buffer.h>
+#include <android/native_window.h>
 #include <binder/ProcessState.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <configstore/Utils.h>
@@ -53,6 +54,7 @@
 #include <utils/String8.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <future>
@@ -676,10 +678,7 @@ public:
         mSupportsPresent = supportsPresent;
     }
 
-    status_t setTransactionState(SimpleTransactionState /*podState*/,
-                                 const ComplexTransactionState& /*complexState*/,
-                                 MutableTransactionState& /*mutableState*/,
-                                 const sp<IBinder>& /*applyToken*/
+    status_t setTransactionState(TransactionState&& /*state*/, const sp<IBinder>& /*applyToken*/
                                  ) override {
         return NO_ERROR;
     }
@@ -1063,6 +1062,10 @@ public:
                                               int32_t* /*outMaxProfiles*/) {
         return binder::Status::ok();
     }
+
+    binder::Status forcePacesetter(int64_t) { return binder::Status::ok(); }
+
+    binder::Status resetForcedPacesetter() { return binder::Status::ok(); }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }
@@ -2812,5 +2815,301 @@ TEST_F(SurfaceTest, isBufferOwned_SameBufferBufferWithDifferentHandles) {
 
     ASSERT_EQ(OK, surface->isBufferOwned(copiedBuffer, &isOwned));
     EXPECT_TRUE(isOwned);
+}
+
+TEST_F(SurfaceTest, DisconnectWhileDequeued_HoldsDequeuedBuffersOnDisconnect) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+
+    // Dequeue a raw buffer. According to ANativeWindow::dequeueBuffer, the client can generally
+    // expect a reference to be held by the Surface.
+    ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+    ANativeWindowBuffer* buffer;
+    int fence;
+    ASSERT_EQ(OK, anw->dequeueBuffer(anw, &buffer, &fence));
+
+    wp<GraphicBuffer> wpBuffer = GraphicBuffer::from(buffer);
+    ASSERT_NE(nullptr, wpBuffer.promote());
+
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    ASSERT_NE(nullptr, wpBuffer.promote())
+            << "A dequeued buffer should not go out of scope just because of a disconnect.";
+
+    anw->cancelBuffer(anw, buffer, fence);
+    ASSERT_EQ(nullptr, wpBuffer.promote())
+            << "A dequeued buffer should go out of scope if it was cancelled, even if it was "
+               "dequeued from a disconnected buffer.";
+}
+
+TEST_F(SurfaceTest, DisconnectWhileDequeued_QueueLeakedBufferAfterDisconnect) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+
+    ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+    ANativeWindowBuffer* buffer;
+    int fence;
+    ASSERT_EQ(OK, anw->dequeueBuffer(anw, &buffer, &fence));
+
+    wp<GraphicBuffer> wpBuffer = GraphicBuffer::from(buffer);
+    ASSERT_NE(nullptr, wpBuffer.promote());
+
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    ASSERT_NE(nullptr, wpBuffer.promote());
+
+    ASSERT_EQ(OK, anw->queueBuffer(anw, buffer, fence));
+    ASSERT_EQ(nullptr, wpBuffer.promote());
+}
+
+TEST_F(SurfaceTest, DisconnectWhileDequeued_BatchCancelLeakedBuffers) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+    ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+    ASSERT_EQ(OK, native_window_set_buffer_count(anw, 4));
+
+    ANativeWindowBuffer* buffers[3];
+    wp<GraphicBuffer> wpBuffers[3];
+    int fences[3];
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(OK, anw->dequeueBuffer(anw, &buffers[i], &fences[i]));
+        wpBuffers[i] = GraphicBuffer::from(buffers[i]);
+        ASSERT_NE(nullptr, wpBuffers[i].promote());
+    }
+
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_NE(nullptr, wpBuffers[i].promote());
+    }
+
+    // The batch cancel should release all leaked buffers.
+    std::vector<Surface::BatchBuffer> batch;
+    for (int i = 0; i < 3; ++i) {
+        batch.push_back({buffers[i], fences[i]});
+    }
+    ASSERT_EQ(OK, surface->cancelBuffers(batch));
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(nullptr, wpBuffers[i].promote());
+    }
+}
+
+TEST_F(SurfaceTest, DisconnectWhileDequeued_ReconnectDoesNotAffectLeakedBuffers) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+
+    // Client A connects and dequeues a buffer.
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+    ANativeWindowBuffer* bufferA;
+    int fenceA;
+    ASSERT_EQ(OK, anw->dequeueBuffer(anw, &bufferA, &fenceA));
+    wp<GraphicBuffer> wpBufferA = GraphicBuffer::from(bufferA);
+    ANativeWindowBuffer* bufferB;
+    int fenceB;
+    ASSERT_EQ(OK, anw->dequeueBuffer(anw, &bufferB, &fenceB));
+    wp<GraphicBuffer> wpBufferB = GraphicBuffer::from(bufferB);
+
+    // Client A disconnects, leaking bufferA.
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    ASSERT_NE(nullptr, wpBufferA.promote());
+
+    // Client B connects and performs some operations.
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+    ANativeWindowBuffer* bufferC;
+    int fenceC;
+    ASSERT_EQ(OK, anw->dequeueBuffer(anw, &bufferC, &fenceC));
+
+    // Even though they likely use the same slot, the new buffer should be really new.
+    ASSERT_NE(bufferA, bufferC);
+
+    ASSERT_EQ(OK, anw->cancelBuffer(anw, bufferC, fenceC));
+
+    // Cancelling will remove the previously dequeued buffer from the leaked set, but should fail
+    // since it's an invalid operation on the reconnected BQ.
+    ASSERT_NE(OK, anw->cancelBuffer(anw, bufferB, fenceB));
+    ASSERT_EQ(nullptr, wpBufferB.promote());
+
+    // Leaked bufferA should not be affected.
+    ASSERT_NE(nullptr, wpBufferA.promote());
+
+    // Client B disconnects.
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+
+    ASSERT_EQ(OK, anw->cancelBuffer(anw, bufferA, fenceA));
+    ASSERT_EQ(nullptr, wpBufferA.promote());
+}
+
+TEST_F(SurfaceTest, DiscardDetach_DoesNotDeadlock) {
+    constexpr size_t kLotsOfBuffers = 512;
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    consumer->setName(String8("DetachDeadlockTest"));
+
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    //
+    // Set up a large number of buffers to increase the likelihood that a deadlock might get caught:
+    //
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(kLotsOfBuffers));
+
+    std::vector<std::tuple<sp<GraphicBuffer>, sp<Fence>>> buffers(kLotsOfBuffers);
+    for (size_t i = 0; i < kLotsOfBuffers; i++) {
+        auto& [buffer, fence] = buffers[i];
+        ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    }
+
+    BufferItem item;
+    for (auto& [buffer, fence] : buffers) {
+        ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+        ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+        ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    }
+
+    //
+    // Do work in two threads simultaneously (as simultaneously as humanly possible). The cv helps
+    // thread us not get caught in synchronous thread creation.
+    //
+    std::condition_variable cv;
+    auto surfaceThread = std::jthread([&] {
+        std::mutex m;
+        std::unique_lock l(m);
+        cv.wait(l);
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        status_t ret = surface->detachNextBuffer(&buffer, &fence);
+        ASSERT_TRUE(ret == OK || ret == NO_MEMORY);
+    });
+    auto consumerThread = std::jthread([&] {
+        std::mutex m;
+        std::unique_lock l(m);
+        cv.wait(l);
+        ASSERT_EQ(OK, consumer->discardFreeBuffers());
+    });
+
+    std::this_thread::sleep_for(2s);
+    cv.notify_all();
+}
+
+TEST_F(SurfaceTest, DisconnectDetach_DoesNotDeadlock) {
+    constexpr size_t kLotsOfBuffers = 512;
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    consumer->setName(String8("DisconnectDeadlockTest"));
+
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    //
+    // Set up a large number of buffers to increase the likelihood that a deadlock might get caught:
+    //
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(kLotsOfBuffers));
+
+    std::vector<std::tuple<sp<GraphicBuffer>, sp<Fence>>> buffers(kLotsOfBuffers);
+    for (size_t i = 0; i < kLotsOfBuffers; i++) {
+        auto& [buffer, fence] = buffers[i];
+        ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    }
+
+    BufferItem item;
+    for (auto& [buffer, fence] : buffers) {
+        ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+        ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+        ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    }
+
+    //
+    // Do work in two threads simultaneously (as simultaneously as humanly possible). The cv helps
+    // thread us not get caught in synchronous thread creation.
+    //
+    std::condition_variable cv;
+    auto surfaceThread = std::jthread([&] {
+        std::mutex m;
+        std::unique_lock l(m);
+        cv.wait(l);
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    });
+    auto consumerThread = std::jthread([&] {
+        std::mutex m;
+        std::unique_lock l(m);
+        cv.wait(l);
+        ASSERT_EQ(OK, consumer->discardFreeBuffers());
+    });
+
+    // Give some time for the threads to be ready.
+    std::this_thread::sleep_for(2s);
+    cv.notify_all();
+}
+
+TEST_F(SurfaceTest, DisconnectWithBadApi) {
+    const android_dataspace kDataspace = HAL_DATASPACE_V0_SRGB_LINEAR;
+    const int kFormat = PIXEL_FORMAT_RGB_565;
+
+    // This test ensures that the internal surface state isn't disrupted in the weird case that the
+    // wrong api is set--the underlying IGBP will still be connected with no state changes within
+    // itself.
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ANativeWindow* anw = static_cast<ANativeWindow*>(surface.get());
+
+    consumer->setName(String8("DisconnectWithBadApi"));
+
+    struct NotifyingListener : public StubSurfaceListener {
+        virtual bool needsReleaseNotify() override { return true; }
+        virtual void onBufferReleased() override { mReleasedCount++; }
+
+        uint32_t mReleasedCount = 0;
+    };
+
+    sp<NotifyingListener> surfaceListener = sp<NotifyingListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    //
+    // Prepare two buffers, one we'll acquire and one we won't.
+    //
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+
+    //
+    // Set some values that should be cleared by a correct disconnect
+    //
+    ASSERT_EQ(NO_ERROR, native_window_set_buffers_data_space(anw, kDataspace));
+    ASSERT_EQ(NO_ERROR, native_window_set_buffers_format(anw, kFormat));
+
+    //
+    // This disconnect will fail, leaving everything the same and functional.
+    //
+    ASSERT_EQ(BAD_VALUE, surface->disconnect(NATIVE_WINDOW_API_CAMERA));
+
+    int value;
+    ASSERT_EQ(NO_ERROR, anw->query(anw, NATIVE_WINDOW_DATASPACE, &value));
+    EXPECT_EQ(kDataspace, value);
+    ASSERT_EQ(NO_ERROR, anw->query(anw, NATIVE_WINDOW_FORMAT, &value));
+    EXPECT_EQ(kFormat, value);
+
+    BufferItem item;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+
+    ASSERT_EQ(1u, surfaceListener->mReleasedCount);
+
+    //
+    // This disconnect will succeed, cleaning up the state.
+    //
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    ASSERT_EQ(NO_ERROR, anw->query(anw, NATIVE_WINDOW_DATASPACE, &value));
+    EXPECT_NE(kDataspace, value);
+    ASSERT_EQ(NO_ERROR, anw->query(anw, NATIVE_WINDOW_FORMAT, &value));
+    EXPECT_NE(kFormat, value);
+
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(IGraphicBufferConsumer::STALE_BUFFER_SLOT, consumer->releaseBuffer(item));
+    ASSERT_EQ(1u, surfaceListener->mReleasedCount);
 }
 } // namespace android

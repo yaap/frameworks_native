@@ -45,8 +45,8 @@ public:
     MOCK_METHOD1(setDisplaySize, void(const ui::Size&));
     MOCK_CONST_METHOD0(getTransformHint, ui::Transform::RotationFlags());
 
-    MOCK_METHOD(void, setLayerFilter, (ui::LayerFilter));
-    MOCK_METHOD(bool, includesLayer, (ui::LayerFilter), (const));
+    MOCK_METHOD(void, setLayerFilter, (LayerFilter));
+    MOCK_METHOD(bool, includesLayer, (LayerFilter), (const));
     MOCK_METHOD(bool, includesLayer, (const sp<compositionengine::LayerFE>&), (const));
     MOCK_METHOD(bool, includesLayer, (compositionengine::LayerFE*), (const));
 

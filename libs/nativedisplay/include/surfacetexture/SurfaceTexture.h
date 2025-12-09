@@ -311,6 +311,8 @@ public:
      */
     void setSurfaceTextureListener(const sp<SurfaceTextureListener>&);
 
+    void onFirstRef() override;
+
 protected:
     /**
      * abandonLocked overrides the ConsumerBase method to clear

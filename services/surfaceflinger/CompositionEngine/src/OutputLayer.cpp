@@ -86,8 +86,9 @@ Rect OutputLayer::calculateInitialCrop() const {
     // if there are no window scaling involved, this operation will map to full
     // pixels in the buffer.
 
-    FloatRect activeCropFloat =
-            reduce(layerState.geomLayerBounds, layerState.transparentRegionHint);
+    FloatRect activeCropFloat = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? layerState.geomLayerBounds
+            : reduce(layerState.geomLayerBounds, layerState.transparentRegionHint);
 
     const Rect& viewport = getOutput().getState().layerStackSpace.getContent();
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
@@ -195,7 +196,9 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
     // apply the layer's transform, followed by the display's global transform
     // here we're guaranteed that the layer's transform preserves rects
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
-    Region activeTransparentRegion = layerTransform.transform(layerState.transparentRegionHint);
+    Region activeTransparentRegion = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? layerTransform.transform(Region())
+            : layerTransform.transform(layerState.transparentRegionHint);
     if (!layerState.geomCrop.isEmpty() && layerState.geomBufferSize.isValid()) {
         FloatRect activeCrop = layerTransform.transform(layerState.geomCrop);
         activeCrop = activeCrop.intersect(outputState.layerStackSpace.getContent().toFloatRect());

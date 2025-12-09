@@ -27,14 +27,16 @@
 #include "test_framework/core/TestService.h"
 #include "test_framework/hwc3/Hwc3Controller.h"
 #include "test_framework/hwc3/ObservingComposer.h"
+#include "test_framework/hwc3/events/BufferPendingDisplay.h"
+#include "test_framework/hwc3/events/BufferPendingRelease.h"
 #include "test_framework/hwc3/events/DisplayPresented.h"
-#include "test_framework/hwc3/events/PendingBufferSwap.h"
 #include "test_framework/hwc3/events/VSyncEnabled.h"
 #include "test_framework/surfaceflinger/DisplayEventReceiver.h"
 #include "test_framework/surfaceflinger/SFController.h"
 #include "test_framework/surfaceflinger/Surface.h"
 #include "test_framework/surfaceflinger/events/BufferReleased.h"
 #include "test_framework/surfaceflinger/events/Hotplug.h"
+#include "test_framework/surfaceflinger/events/TransactionCommitted.h"
 #include "test_framework/surfaceflinger/events/TransactionCompleted.h"
 #include "test_framework/surfaceflinger/events/TransactionInitiated.h"
 #include "test_framework/surfaceflinger/events/VSyncTiming.h"
@@ -75,8 +77,13 @@ TEST_F(Placeholder, Bringup) {
             [&](test_framework::hwc3::events::DisplayPresented event) {
                 LOG(INFO) << fmt::format("onDisplayPresented {}", event);
             })();
-    service->hwc().editCallbacks().onPendingBufferSwap.set(
-            [&](test_framework::hwc3::events::PendingBufferSwap event) {
+    service->hwc().editCallbacks().onBufferPendingDisplay.set(
+            [&](test_framework::hwc3::events::BufferPendingDisplay event) {
+                LOG(INFO) << fmt::format("onBufferPendingDisplay {}", event);
+            })();
+
+    service->hwc().editCallbacks().onBufferPendingRelease.set(
+            [&](test_framework::hwc3::events::BufferPendingRelease event) {
                 LOG(INFO) << fmt::format("onPendingBufferSwap {}", event);
             })();
 
@@ -110,15 +117,20 @@ TEST_F(Placeholder, Bringup) {
                 ++transactionInitiatedCount;
                 LOG(INFO) << fmt::format("onTransactionInitiated {}", event);
             })();
-
+    size_t transactionCommitCount = 0;
+    surface->editCallbacks().onTransactionCommitted.set(
+            [&](test_framework::surfaceflinger::events::TransactionCommitted event) {
+                ++transactionCommitCount;
+                LOG(INFO) << fmt::format("onTransactionCommitted {}", event);
+                // Commit a new frame now that the previous one has completed.
+                // This is ONE possible way an app can continue to submit new frames.
+                auto nextFrameNumber = surface->commitNextBuffer();
+            })();
     size_t transactionCompleteCount = 0;
     surface->editCallbacks().onTransactionCompleted.set(
             [&](test_framework::surfaceflinger::events::TransactionCompleted event) {
                 ++transactionCompleteCount;
                 LOG(INFO) << fmt::format("onTransactionCompleted {}", event);
-                // Commit a new frame now that the previous one has completed.
-                // This is ONE possible way an app can continue to submit new frames.
-                auto nextFrameNumber = surface->commitNextBuffer();
             })();
 
     // Trigger the first commit to get things started.
@@ -136,6 +148,8 @@ TEST_F(Placeholder, Bringup) {
             << "Expected at least one buffer release callback. Zero observed.";
     EXPECT_GT(transactionInitiatedCount, 0)
             << "Expected at least one transaction initiated callback. Zero observed.";
+    EXPECT_GT(transactionCommitCount, 0)
+            << "Expected at least one transaction commit callback. Zero observed.";
     EXPECT_GT(transactionCompleteCount, 0)
             << "Expected at least one transaction complete callback. Zero observed.";
 }

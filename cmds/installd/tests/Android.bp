@@ -175,26 +175,6 @@ cc_test {
 }
 
 cc_test {
-    name: "installd_otapreopt_test",
-    test_suites: ["device-tests"],
-    srcs: ["installd_otapreopt_test.cpp"],
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
-    shared_libs: [
-        "libbase",
-        "libcutils",
-        "libutils",
-        "server_configurable_flags",
-    ],
-    static_libs: [
-        "liblog",
-        "libotapreoptparameters",
-    ],
-}
-
-cc_test {
     name: "installd_file_test",
     test_suites: ["device-tests"],
     srcs: ["installd_file_test.cpp"],

@@ -87,6 +87,9 @@ struct Edid {
     std::string_view displayName;
     uint8_t manufactureOrModelYear;
     uint8_t manufactureWeek;
+    uint8_t edidStructureVersion;
+    uint8_t edidStructureRevision;
+    bool isDigital;
     ui::Size physicalSizeInCm;
     std::optional<Cea861ExtensionBlock> cea861Block;
     std::optional<DetailedTimingDescriptor> preferredDetailedTimingDescriptor;
@@ -97,7 +100,8 @@ std::optional<Edid> parseEdid(const DisplayIdentificationData&);
 std::optional<PnpId> getPnpId(uint16_t manufacturerId);
 
 std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
-        uint8_t port, const DisplayIdentificationData&, android::ScreenPartStatus screenPartStatus);
+        uint8_t port, const DisplayIdentificationData&, android::ScreenPartStatus screenPartStatus,
+        bool useStableEdidIds = true);
 
 PhysicalDisplayId resolveDisplayIdCollision(PhysicalDisplayId id, uint8_t port);
 

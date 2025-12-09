@@ -13,10 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// TODO(393217449) Fix code and remove.
+#undef ANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION
 
 #define LOG_TAG "ConsumerBase"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 
 #define EGL_EGLEXT_PROTOTYPES
 

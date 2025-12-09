@@ -14,16 +14,23 @@
  * limitations under the License.
  */
 
-#include "../dispatcher/trace/AndroidInputEventProtoConverter.h"
+#include "../trace/AndroidInputEventProtoConverter.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#include "InputTracingBackendInterface.h"
 
 namespace android::inputdispatcher::trace {
 
 namespace {
 
 using testing::Return, testing::_;
+
+using input_trace::AndroidInputEventProtoConverter;
+using input_trace::TracedKeyEvent;
+using input_trace::TracedMotionEvent;
+using input_trace::WindowDispatchArgs;
 
 class MockProtoAxisValue {
 public:
@@ -94,9 +101,13 @@ public:
     MOCK_METHOD(MockProtoDispatchPointer*, add_dispatched_pointer, ());
 };
 
+class MockProtoEvdev {
+    // Currently empty as it's not used in tests.
+};
+
 using TestProtoConverter =
         AndroidInputEventProtoConverter<MockProtoMotion, MockProtoKey, MockProtoDispatch,
-                                        proto::AndroidInputEventConfig::Decoder>;
+                                        MockProtoEvdev, proto::AndroidInputEventConfig::Decoder>;
 
 TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent) {
     TracedMotionEvent event{};

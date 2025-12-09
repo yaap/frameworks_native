@@ -398,10 +398,10 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
                    return nullptr;
             }
 
-            sp<BpBinder> b = BpBinder::PrivateAccessor::create(handle, &postTask);
-            e->binder = b.get();
-            if (b) e->refs = b->getWeakRefs();
-            result = b;
+            sp<BpBinder> bp = BpBinder::PrivateAccessor::create(handle, &postTask);
+            e->binder = bp.get();
+            if (bp) e->refs = bp->getWeakRefs();
+            result = bp;
         } else {
             // This little bit of nastyness is to allow us to add a primary
             // reference to the remote proxy when this team doesn't have one

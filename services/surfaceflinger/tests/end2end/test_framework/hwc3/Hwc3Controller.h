@@ -23,9 +23,10 @@
 #include <android-base/expected.h>
 
 #include "test_framework/core/DisplayConfiguration.h"
+#include "test_framework/hwc3/events/BufferPendingDisplay.h"
+#include "test_framework/hwc3/events/BufferPendingRelease.h"
 #include "test_framework/hwc3/events/ClientDestroyed.h"
 #include "test_framework/hwc3/events/DisplayPresented.h"
-#include "test_framework/hwc3/events/PendingBufferSwap.h"
 #include "test_framework/hwc3/events/PowerMode.h"
 #include "test_framework/hwc3/events/VSync.h"
 #include "test_framework/hwc3/events/VSyncEnabled.h"
@@ -52,8 +53,11 @@ class Hwc3Controller final : public std::enable_shared_from_this<Hwc3Controller>
         // Invoked when SF presents a display.
         events::DisplayPresented::AsyncConnector onDisplayPresented;
 
-        // Invoked when SF is swapping the buffer content of a hardware overlay.
-        events::PendingBufferSwap::AsyncConnector onPendingBufferSwap;
+        // Invoked when SF is setting new buffer content to display on a hardware overlay.
+        events::BufferPendingDisplay::AsyncConnector onBufferPendingDisplay;
+
+        // Invoked when SF is replacing displayed buffer content on a hardware overlay.
+        events::BufferPendingRelease::AsyncConnector onBufferPendingRelease;
 
         // Invoked when the client sends SF a vsync callback.
         events::VSync::AsyncConnector onVSyncCallbackSent;
@@ -79,6 +83,15 @@ class Hwc3Controller final : public std::enable_shared_from_this<Hwc3Controller>
 
     // Removes a new display from the HWC3, which will become a hotplug disconnect event.
     void removeDisplay(core::DisplayConfiguration::Id displayId);
+
+    // Invoked by ObservingComposer to signal certain events.
+    void onClientDestroyed(const events::ClientDestroyed& event) const;
+    void onPowerModeChanged(const events::PowerMode& event) const;
+    void onVsyncEnabledChanged(const events::VSyncEnabled& event) const;
+    void onDisplayPresented(const events::DisplayPresented& event) const;
+    void onBufferPendingDisplay(const events::BufferPendingDisplay& event) const;
+    void onBufferPendingRelease(const events::BufferPendingRelease& event) const;
+    void onVSyncCallbackSent(const events::VSync& event) const;
 
   private:
     static constexpr std::string baseServiceName = "fake";

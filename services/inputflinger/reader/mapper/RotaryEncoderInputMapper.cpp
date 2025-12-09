@@ -33,7 +33,6 @@ using android::expresslog::Counter;
 
 constexpr float kDefaultResolution = 0;
 constexpr float kDefaultScaleFactor = 1.0f;
-constexpr int32_t kDefaultMinRotationsToLog = 3;
 
 RotaryEncoderInputMapper::RotaryEncoderInputMapper(InputDeviceContext& deviceContext,
                                                    const InputReaderConfiguration& readerConfig)

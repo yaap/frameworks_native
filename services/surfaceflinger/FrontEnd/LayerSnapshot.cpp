@@ -15,8 +15,6 @@
  */
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
 
 #include <PowerAdvisor/Workload.h>
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
@@ -137,6 +135,7 @@ LayerSnapshot::LayerSnapshot(const RequestedLayerState& state,
     reachability = LayerSnapshot::Reachability::Unreachable;
     frameRateSelectionPriority = state.frameRateSelectionPriority;
     layerMetadata = state.metadata;
+    systemContentPriority = state.systemContentPriority;
 }
 
 // As documented in libhardware header, formats in the range
@@ -228,8 +227,14 @@ bool LayerSnapshot::getIsVisible() const {
         return false;
     }
 
-    if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay) {
-        return false;
+    if (FlagManager::getInstance().connected_displays_cursor()) {
+        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) {
+            return false;
+        }
+    } else {
+        if (handleSkipScreenshotFlag && outputFilter.toInternalDisplay) {
+            return false;
+        }
     }
 
     if (!hasSomethingToDraw()) {
@@ -251,7 +256,12 @@ std::string LayerSnapshot::getIsVisibleReason() const {
         return "layer only reachable via relative parent";
     if (isHiddenByPolicyFromParent) return "hidden by parent or layer flag";
     if (isHiddenByPolicyFromRelativeParent) return "hidden by relative parent";
-    if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay) return "eLayerSkipScreenshot";
+    if (FlagManager::getInstance().connected_displays_cursor()) {
+        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) return "eLayerSkipScreenshot";
+    } else {
+        if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay)
+            return "eLayerSkipScreenshot (toInternalDisplay=true)";
+    }
     if (invalidTransform) return "invalidTransform";
     if (color.a == 0.0f && !hasBlur()) return "alpha = 0 and no blur";
     if (!hasSomethingToDraw()) return "nothing to draw";
@@ -261,7 +271,8 @@ std::string LayerSnapshot::getIsVisibleReason() const {
     if (sidebandStream != nullptr) reason << " sidebandStream";
     if (externalTexture != nullptr)
         reason << " buffer=" << externalTexture->getId() << " frame=" << frameNumber;
-    if (fillsColor() || color.a > 0.0f) reason << " color{" << color << "}";
+    if (fillsColor()) reason << " color{" << color << "}";
+    if (color.a < 1.0f) reason << " alpha=" << color.a;
     if (drawShadows()) reason << " shadowSettings.length=" << shadowSettings.length;
     if (hasBoxShadowSettings())
         reason << " boxShadowSettings.length=" << boxShadowSettings.toString();

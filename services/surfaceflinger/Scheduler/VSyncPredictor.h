@@ -147,17 +147,23 @@ private:
     Period minFramePeriodLocked() const REQUIRES(mMutex);
     Duration ensureMinFrameDurationIsKept(TimePoint, TimePoint) REQUIRES(mMutex);
     void purgeTimelines(android::TimePoint now) REQUIRES(mMutex);
+    bool isVsyncWithinThreshold(nsecs_t currentTimestamp, nsecs_t previousTimestamp) const
+            REQUIRES(mMutex);
+    std::pair<size_t, nsecs_t> getSampleSizeAndOldestVsync(nsecs_t currentTimestamp) const
+            REQUIRES(mMutex);
+    size_t getMinSamplesRequiredForPrediction() const REQUIRES(mMutex);
 
     nsecs_t idealPeriod() const REQUIRES(mMutex);
 
     bool const mTraceOn;
     size_t const kHistorySize;
     size_t const kMinimumSamplesForPrediction;
+    static constexpr size_t kAbsoluteMinSamplesForPrediction = 3;
     size_t const kOutlierTolerancePercent;
     std::mutex mutable mMutex;
 
     std::optional<nsecs_t> mKnownTimestamp GUARDED_BY(mMutex);
-
+    nsecs_t mOldestVsync GUARDED_BY(mMutex);
     // Map between ideal vsync period and the calculated model
     std::unordered_map<nsecs_t, Model> mutable mRateMap GUARDED_BY(mMutex);
 

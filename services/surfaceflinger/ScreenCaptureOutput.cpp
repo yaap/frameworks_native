@@ -40,7 +40,8 @@ std::shared_ptr<ScreenCaptureOutput> createScreenCaptureOutput(ScreenCaptureOutp
     output->editState().isSecure = args.isSecure;
     output->editState().isProtected = args.buffer->getUsage() & GRALLOC_USAGE_PROTECTED;
     output->setCompositionEnabled(true);
-    output->setLayerFilter({args.layerStack});
+    output->setLayerFilter(
+            {.layerStack = args.layerStack, .toInternalDisplay = false, .skipScreenshot = true});
     output->setRenderSurface(std::make_unique<ScreenCaptureRenderSurface>(std::move(args.buffer)));
     output->setDisplayBrightness(args.sdrWhitePointNits, args.displayBrightnessNits);
     output->editState().clientTargetBrightness = args.targetBrightness;

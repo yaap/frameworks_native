@@ -142,6 +142,10 @@ static_assert(
         static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRA_1010102) ==
                 AHARDWAREBUFFER_FORMAT_B10G10R10A2_UNORM,
         "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRX_1010102) ==
+                AHARDWAREBUFFER_FORMAT_B10G10R10X2_UNORM,
+        "HAL and AHardwareBuffer pixel format don't match");
 
 static enum AHardwareBufferStatus filterStatus(status_t status) {
     switch (status) {

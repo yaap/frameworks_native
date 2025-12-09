@@ -79,7 +79,7 @@ public:
     using Summary = std::vector<RefreshRateSelector::LayerRequirement>;
 
     // Rebuilds sets of active/inactive layers, and accumulates stats for active layers.
-    Summary summarize(const RefreshRateSelector&, nsecs_t now);
+    Summary summarize(nsecs_t now);
 
     void clear();
 
@@ -116,8 +116,7 @@ private:
     // such as update activity, visibility, and frame rate vote.
     // worst case time complexity is O(2 * inactive + active)
     // now: the current time (system time) when calling the method
-    // isVrrDevice: true if the device has DisplayMode with VrrConfig specified.
-    void partitionLayers(nsecs_t now, bool isVrrDevice) REQUIRES(mLock);
+    void partitionLayers(nsecs_t now) REQUIRES(mLock);
 
     enum class LayerStatus {
         NotFound,

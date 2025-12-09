@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <android/configuration.h>
 #include <com_android_input_flags.h>
 #include <gtest/gtest.h>
 #include <input/DisplayTopologyGraph.h>
@@ -30,7 +31,6 @@ namespace {
 
 constexpr ui::LogicalDisplayId DISPLAY_ID_1{1};
 constexpr ui::LogicalDisplayId DISPLAY_ID_2{2};
-constexpr int DENSITY_MEDIUM = 160;
 
 } // namespace
 
@@ -79,7 +79,7 @@ INSTANTIATE_TEST_SUITE_P(
                         DisplayPropertiesMap{
                                 {DISPLAY_ID_1,
                                  DisplayProperties{.adjacentDisplays = AdjacentDisplaysVector{},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 0, 0)}}},
                         false),
                 std::make_tuple(
@@ -89,7 +89,7 @@ INSTANTIATE_TEST_SUITE_P(
                         DisplayPropertiesMap{
                                 {DISPLAY_ID_1,
                                  DisplayProperties{.adjacentDisplays = AdjacentDisplaysVector{},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}}},
                         true),
                 std::make_tuple(
@@ -103,11 +103,11 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_2,
                                                                     DisplayTopologyPosition::TOP,
                                                                     0}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}},
                                 {DISPLAY_ID_2,
                                  DisplayProperties{.adjacentDisplays = AdjacentDisplaysVector{},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 100, 100,
                                                                                  200)}}},
                         false),
@@ -122,7 +122,7 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_2,
                                                                     DisplayTopologyPosition::TOP,
                                                                     0}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}},
                                 {DISPLAY_ID_2,
                                  DisplayProperties{.adjacentDisplays =
@@ -130,7 +130,7 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_1,
                                                                     DisplayTopologyPosition::TOP,
                                                                     0}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 100, 100,
                                                                                  200)}}},
                         false),
@@ -145,7 +145,7 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_2,
                                                                     DisplayTopologyPosition::TOP,
                                                                     10}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}},
                                 {DISPLAY_ID_2,
                                  DisplayProperties{.adjacentDisplays =
@@ -153,7 +153,7 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_1,
                                                                     DisplayTopologyPosition::TOP,
                                                                     20}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 100, 100,
                                                                                  200)}}},
                         false),
@@ -168,7 +168,7 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_2,
                                                                     DisplayTopologyPosition::TOP,
                                                                     10}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}},
                                 {DISPLAY_ID_2,
                                  DisplayProperties{.adjacentDisplays =
@@ -176,8 +176,37 @@ INSTANTIATE_TEST_SUITE_P(
                                                                    {DISPLAY_ID_1,
                                                                     DisplayTopologyPosition::BOTTOM,
                                                                     -10}},
-                                                   .density = DENSITY_MEDIUM,
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
                                                    .boundsInGlobalDp = FloatRect(0, 100, 100,
+                                                                                 200)}}},
+                        true),
+                std::make_tuple(
+                        "ValidMultiDisplayTopologyCornerAdjacency",
+                        /*primaryDisplayId=*/DISPLAY_ID_1,
+                        /*graph=*/
+                        DisplayPropertiesMap{
+                                {DISPLAY_ID_1,
+                                 DisplayProperties{.adjacentDisplays =
+                                                           AdjacentDisplaysVector{
+                                                                   {DISPLAY_ID_2,
+                                                                    DisplayTopologyPosition::RIGHT,
+                                                                    0},
+                                                                   {DISPLAY_ID_2,
+                                                                    DisplayTopologyPosition::BOTTOM,
+                                                                    0}},
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
+                                                   .boundsInGlobalDp = FloatRect(0, 0, 100, 100)}},
+                                {DISPLAY_ID_2,
+                                 DisplayProperties{.adjacentDisplays =
+                                                           AdjacentDisplaysVector{
+                                                                   {DISPLAY_ID_1,
+                                                                    DisplayTopologyPosition::LEFT,
+                                                                    0},
+                                                                   {DISPLAY_ID_1,
+                                                                    DisplayTopologyPosition::TOP,
+                                                                    0}},
+                                                   .density = ACONFIGURATION_DENSITY_MEDIUM,
+                                                   .boundsInGlobalDp = FloatRect(100, 100, 200,
                                                                                  200)}}},
                         true)),
         [](const testing::TestParamInfo<DisplayTopologyGraphTestFixtureParam>& p) {

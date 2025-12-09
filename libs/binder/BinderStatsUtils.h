@@ -63,6 +63,8 @@ struct BinderCallData {
     int64_t startTimeNanos;
     int64_t endTimeNanos;
     uid_t senderUid;
+
+    bool hasLatencyData() const { return endTimeNanos > startTimeNanos; }
 };
 
 } // namespace android

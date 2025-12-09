@@ -52,9 +52,7 @@ SurfaceTexture::SurfaceTexture(uint32_t tex, uint32_t texTarget, bool useFenceSy
         mUseFenceSync(useFenceSync),
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
-        mOpMode(OpMode::attachedToGL) {
-    initialize();
-}
+        mOpMode(OpMode::attachedToGL) {}
 
 SurfaceTexture::SurfaceTexture(uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
       : ConsumerBase(isControlledByApp),
@@ -72,9 +70,7 @@ SurfaceTexture::SurfaceTexture(uint32_t texTarget, bool useFenceSync, bool isCon
         mUseFenceSync(useFenceSync),
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
-        mOpMode(OpMode::detached) {
-    initialize();
-}
+        mOpMode(OpMode::detached) {}
 
 SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
                                uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
@@ -93,9 +89,7 @@ SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t te
         mUseFenceSync(useFenceSync),
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
-        mOpMode(OpMode::attachedToGL) {
-    initialize();
-}
+        mOpMode(OpMode::attachedToGL) {}
 
 SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
                                bool useFenceSync, bool isControlledByApp)
@@ -114,9 +108,7 @@ SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t te
         mUseFenceSync(useFenceSync),
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
-        mOpMode(OpMode::detached) {
-    initialize();
-}
+        mOpMode(OpMode::detached) {}
 
 status_t SurfaceTexture::setDefaultBufferSize(uint32_t w, uint32_t h) {
     Mutex::Autolock lock(mMutex);
@@ -576,6 +568,11 @@ void SurfaceTexture::initialize() {
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
 
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
+
+void SurfaceTexture::onFirstRef() {
+    ConsumerBase::onFirstRef();
+    initialize();
 }
 
 } // namespace android

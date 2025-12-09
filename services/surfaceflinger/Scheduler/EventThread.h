@@ -119,18 +119,11 @@ public:
     virtual void onModeAndFrameRateOverridesChanged(PhysicalDisplayId,
                                                     const scheduler::FrameRateMode&,
                                                     std::vector<FrameRateOverride>,
+                                                    std::vector<float> supportedRefreshRates,
                                                     scheduler::VsyncConfigSet) = 0;
-
-    // called when SF changes the active mode or updates the WorkDuration
-    // and apps needs to be notified about the change
-    virtual void onModeChanged(const scheduler::FrameRateMode&, scheduler::VsyncConfigSet) = 0;
 
     // called when SF rejects the mode change request
     virtual void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) = 0;
-
-    // called when SF updates the Frame Rate Override list
-    virtual void onFrameRateOverridesChanged(PhysicalDisplayId displayId,
-                                             std::vector<FrameRateOverride> overrides) = 0;
 
     virtual void dump(std::string& result) const = 0;
 
@@ -156,7 +149,13 @@ struct IEventThreadCallback {
 
     virtual bool throttleVsync(TimePoint, uid_t) = 0;
     virtual Period getVsyncPeriod(uid_t) = 0;
-    virtual void resync() = 0;
+
+    enum class ResyncCaller {
+        RequestNextVsync,
+        Transaction,
+    };
+    virtual void resync(ResyncCaller) = 0;
+
     virtual void onExpectedPresentTimePosted(TimePoint) = 0;
 };
 
@@ -188,14 +187,10 @@ public:
 
     void onModeAndFrameRateOverridesChanged(PhysicalDisplayId, const scheduler::FrameRateMode&,
                                             std::vector<FrameRateOverride>,
+                                            std::vector<float> supportedRefreshRates,
                                             scheduler::VsyncConfigSet) override;
 
-    void onModeChanged(const scheduler::FrameRateMode&, scheduler::VsyncConfigSet) override;
-
     void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) override;
-
-    void onFrameRateOverridesChanged(PhysicalDisplayId displayId,
-                                     std::vector<FrameRateOverride> overrides) override;
 
     void dump(std::string& result) const override;
 

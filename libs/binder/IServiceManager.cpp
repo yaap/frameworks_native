@@ -587,8 +587,7 @@ CppBackendShim::CppBackendShim(const sp<BackendUnifiedServiceManager>& impl)
 sp<IBinder> CppBackendShim::getService(const String16& name) const {
     static bool gSystemBootCompleted = false;
 
-    sp<IBinder> svc = checkService(name);
-    if (svc != nullptr) return svc;
+    if (sp<IBinder> svc = checkService(name); svc != nullptr) return svc;
 
     sp<ProcessState> self = ProcessState::selfOrNull();
     const bool isVendorService =

@@ -61,6 +61,7 @@ void InputFilter::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs&
         aidlInfo.deviceId = info.getId();
         aidlInfo.external = info.isExternal();
         aidlInfo.keyboardType = info.getKeyboardType();
+        aidlInfo.isVirtual = info.getId() < 0 || info.isVirtualDevice();
     }
     if (isFilterEnabled()) {
         LOG_ALWAYS_FATAL_IF(!mInputFilterRust->notifyInputDevicesChanged(mDeviceInfos).isOk());
