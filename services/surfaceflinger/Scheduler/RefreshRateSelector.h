@@ -40,15 +40,21 @@ namespace android::scheduler {
 
 using namespace std::chrono_literals;
 
-#if defined(FRAME_RATE_CATEGORY_HIGH) || defined(FRAME_RATE_CATEGORY_MIN)
+#if defined(FRAME_RATE_CATEGORY_HIGH) || defined(FRAME_RATE_CATEGORY_MIN) || defined(FRAME_RATE_CATEGORY_NORMAL)
 constexpr Fps intToFps(int val) {
     switch(val) {
         case 1: return 1_Hz;
         case 2: return 2_Hz;
         case 5: return 5_Hz;
         case 10: return 10_Hz;
+        case 15: return 15_Hz;
+        case 18: return 18_Hz;
         case 20: return 20_Hz;
+        case 24: return 24_Hz;
         case 30: return 30_Hz;
+        case 40: return 40_Hz;
+        case 45: return 45_Hz;
+        case 48: return 48_Hz;
         case 60: return 60_Hz;
         case 90: return 90_Hz;
         case 120: return 120_Hz;
@@ -80,7 +86,11 @@ public:
 #else
     static constexpr Fps kFrameRateCategoryRateHigh = 90_Hz;
 #endif
+#ifdef FRAME_RATE_CATEGORY_NORMAL
+    static constexpr Fps kFrameRateCategoryRateNormal = intToFps(FRAME_RATE_CATEGORY_NORMAL);
+#else
     static constexpr Fps kFrameRateCategoryRateNormal = 60_Hz;
+#endif
     static constexpr std::pair<Fps, Fps> kFrameRateCategoryRates = {kFrameRateCategoryRateNormal,
                                                                     kFrameRateCategoryRateHigh};
 
@@ -610,13 +620,22 @@ private:
     FpsRange getSupportedFrameRateRangeLocked() const REQUIRES(mLock);
 
     // The number of frame rates to be supported when using frame rate override for ARR.
+#ifdef ARR_USE_OPLUS_LTPO_REFRESH_RATES
+    static constexpr size_t kNumFrameRates = 18;
+#else
     static constexpr size_t kNumFrameRates = 15;
-
+#endif
     // A list of frame rates to be used for ARR.
     // RefreshRateSelector will select that closet possible frame rates from the list
     // and pad it to fill the gaps until it reaches kNumFrameRates.
+#ifdef ARR_USE_OPLUS_LTPO_REFRESH_RATES
+    const std::vector<Fps> kFpsAnchorList = {1_Hz,  2_Hz,  5_Hz,  10_Hz, 15_Hz,
+                                             18_Hz, 20_Hz, 22.5_Hz, 24_Hz, 30_Hz,
+                                             40_Hz, 45_Hz, 60_Hz};
+#else
     const std::vector<Fps> kFpsAnchorList = {1_Hz,  2_Hz,  5_Hz,  10_Hz, 15_Hz,
                                              20_Hz, 24_Hz, 30_Hz, 48_Hz, 60_Hz};
+#endif
 };
 
 } // namespace android::scheduler

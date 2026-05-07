@@ -48,6 +48,16 @@ cc_defaults {
             "-DFRAME_RATE_CATEGORY_MIN=" + value,
         ],
         default: [],
+    }) + select(soong_config_variable("surfaceflinger", "frame_rate_category_normal"), {
+        any @ value: [
+            "-DFRAME_RATE_CATEGORY_NORMAL=" + value,
+        ],
+        default: [],
+    }) + select(soong_config_variable("surfaceflinger", "arr_use_oplus_ltpo_rates"), {
+        any @ value: [
+            "-DARR_USE_OPLUS_LTPO_REFRESH_RATES=1",
+        ],
+        default: [],
     }),
 }
 
