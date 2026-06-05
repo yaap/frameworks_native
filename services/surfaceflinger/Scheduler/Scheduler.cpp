@@ -175,13 +175,15 @@ void Scheduler::initializeIdleTimer(PhysicalDisplayId displayId) {
                                     kernelIdleTimerCallback(displayId, TimerState::Expired);
                                 }},
              .vrr = {.onReset =
-                             [this, displayId] {
-                                 mSchedulerCallback.vrrDisplayIdle(displayId, false);
-                             },
-                     .onExpired =
-                             [this, displayId] {
-                                 mSchedulerCallback.vrrDisplayIdle(displayId, true);
-                             }}});
+                              [this, displayId] {
+                                  applyPolicy(&Policy::idleTimers, TimerState::Reset, displayId);
+                                  mSchedulerCallback.vrrDisplayIdle(displayId, false);
+                              },
+                      .onExpired =
+                              [this, displayId] {
+                                  applyPolicy(&Policy::idleTimers, TimerState::Expired, displayId);
+                                  mSchedulerCallback.vrrDisplayIdle(displayId, true);
+                              }}});
 }
 
 bool Scheduler::designatePacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId) {
@@ -1384,13 +1386,17 @@ std::shared_ptr<VsyncSchedule> Scheduler::promotePacesetterDisplayLocked(
                                                                     TimerState::Expired);
                                         }},
                      .vrr = {.onReset =
-                                     [this, pacesetterId] {
-                                         mSchedulerCallback.vrrDisplayIdle(*pacesetterId, false);
-                                     },
-                             .onExpired =
-                                     [this, pacesetterId] {
-                                         mSchedulerCallback.vrrDisplayIdle(*pacesetterId, true);
-                                     }}});
+                                      [this, pacesetterId] {
+                                          applyPolicy(&Policy::idleTimers, TimerState::Reset,
+                                                      *pacesetterId);
+                                          mSchedulerCallback.vrrDisplayIdle(*pacesetterId, false);
+                                      },
+                              .onExpired =
+                                      [this, pacesetterId] {
+                                          applyPolicy(&Policy::idleTimers, TimerState::Expired,
+                                                      *pacesetterId);
+                                          mSchedulerCallback.vrrDisplayIdle(*pacesetterId, true);
+                                      }}});
 
             pacesetter.selectorPtr->startIdleTimer();
         }
