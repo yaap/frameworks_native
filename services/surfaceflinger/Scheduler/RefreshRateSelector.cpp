@@ -810,7 +810,22 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
 
     if (layers.empty() || noVoteLayers == layers.size()) {
         ALOGV("No layers with votes");
-        const auto ranking = rankFrameRates(anchorGroup, RefreshRateOrder::Descending);
+        auto noVoteBestMode = mPrimaryFrameRates.end();
+        for (auto it = mPrimaryFrameRates.begin(); it != mPrimaryFrameRates.end(); ++it) {
+            if (it->modePtr->getGroup() != anchorGroup) continue;
+            if (isStrictlyLess(it->fps, kMinSupportedFrameRate)) continue;
+            if (noVoteBestMode == mPrimaryFrameRates.end() ||
+                isStrictlyLess(it->fps, noVoteBestMode->fps)) {
+                noVoteBestMode = it;
+            }
+        }
+        FrameRateRanking ranking;
+        if (noVoteBestMode != mPrimaryFrameRates.end()) {
+            constexpr float kMaxScore = std::numeric_limits<float>::max();
+            ranking.push_back(ScoredFrameRate{*noVoteBestMode, kMaxScore});
+        } else {
+            ranking = rankFrameRates(anchorGroup, RefreshRateOrder::Descending);
+        }
         SFTRACE_FORMAT_INSTANT("%s (No layers with votes)",
                                to_string(ranking.front().frameRateMode.fps).c_str());
         return {ranking, kNoSignals};
