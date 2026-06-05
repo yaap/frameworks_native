@@ -25,12 +25,10 @@
 
 namespace android {
 
-auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool idle, SkColor color,
+auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool /*idle*/, SkColor color,
                               ui::Transform::RotationFlags rotation, ftl::Flags<Features> features)
         -> Buffers {
     const size_t loopCount = features.test(Features::Spinner) ? 6 : 1;
-    const bool isSetByHwc = features.test(Features::SetByHwc);
-
     Buffers buffers;
     buffers.reserve(loopCount);
 
@@ -69,11 +67,7 @@ auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool idle, SkColor
         canvas->setMatrix(canvasTransform);
 
         int left = 0;
-        if (idle && !isSetByHwc) {
-            drawDash(left, *canvas);
-        } else {
-            drawNumber(refreshRate, left, color, *canvas);
-        }
+        drawNumber(refreshRate, left, color, *canvas);
         left += 3 * (kDigitWidth + kDigitSpace);
         if (features.test(Features::Spinner)) {
             switch (i) {
@@ -106,11 +100,7 @@ auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool idle, SkColor
         left += kDigitWidth + kDigitSpace;
 
         if (features.test(Features::RenderRate)) {
-            if (idle) {
-                drawDash(left, *canvas);
-            } else {
-                drawNumber(renderFps, left, color, *canvas);
-            }
+            drawNumber(renderFps, left, color, *canvas);
         }
         left += 3 * (kDigitWidth + kDigitSpace);
 
