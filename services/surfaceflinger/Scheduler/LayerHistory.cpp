@@ -376,8 +376,17 @@ void LayerHistory::partitionLayers(nsecs_t now) {
                 }
             }
 
-            if (layerUnsafe->getWindowType() == gui::WindowInfo::Type::STATUS_BAR) {
+            switch (layerUnsafe->getWindowType()) {
+            case gui::WindowInfo::Type::STATUS_BAR:
+            case gui::WindowInfo::Type::TOAST:
+            case gui::WindowInfo::Type::INPUT_METHOD:
+            case gui::WindowInfo::Type::INPUT_METHOD_DIALOG:
+            case gui::WindowInfo::Type::WALLPAPER:
+            case gui::WindowInfo::Type::NAVIGATION_BAR:
                 info->setLayerVote({LayerVoteType::NoVote, Fps()});
+                break;
+            default:
+                break;
             }
 
             it++;
