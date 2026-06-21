@@ -36,16 +36,17 @@ using ::android::binder::unique_fd;
 using ::android::os::ParcelFileDescriptor;
 
 template <typename T>
-using ContiguousArrayAllocator = bool (*)(void* arrayData, int32_t length, T** outBuffer);
+using ContiguousArrayAllocator = bool (*)(void* _Nullable arrayData, int32_t length,
+                                          T** _Nullable outBuffer);
 
 template <typename T>
-using ArrayAllocator = bool (*)(void* arrayData, int32_t length);
+using ArrayAllocator = bool (*)(void* _Nullable arrayData, int32_t length);
 template <typename T>
-using ArrayGetter = T (*)(const void* arrayData, size_t index);
+using ArrayGetter = T (*)(const void* _Nullable arrayData, size_t index);
 template <typename T>
-using ArraySetter = void (*)(void* arrayData, size_t index, T value);
+using ArraySetter = void (*)(void* _Nullable arrayData, size_t index, T value);
 
-static binder_status_t WriteAndValidateArraySize(AParcel* parcel, bool isNullArray,
+static binder_status_t WriteAndValidateArraySize(AParcel* _Nonnull parcel, bool isNullArray,
                                                  int32_t length) {
     // only -1 can be used to represent a null array
     if (length < -1) return STATUS_BAD_VALUE;
@@ -67,7 +68,8 @@ static binder_status_t WriteAndValidateArraySize(AParcel* parcel, bool isNullArr
     return STATUS_OK;
 }
 
-static binder_status_t ReadAndValidateArraySize(const AParcel* parcel, int32_t* length) {
+static binder_status_t ReadAndValidateArraySize(const AParcel* _Nonnull parcel,
+                                                int32_t* _Nonnull length) {
     if (status_t status = parcel->get()->readInt32(length); status != STATUS_OK) {
         return PruneStatusT(status);
     }
@@ -84,7 +86,7 @@ static binder_status_t ReadAndValidateArraySize(const AParcel* parcel, int32_t* 
 }
 
 template <typename T>
-binder_status_t WriteArray(AParcel* parcel, const T* array, int32_t length) {
+binder_status_t WriteArray(AParcel* _Nonnull parcel, const T* _Nullable array, int32_t length) {
     binder_status_t status = WriteAndValidateArraySize(parcel, array == nullptr, length);
     if (status != STATUS_OK) return status;
     if (length <= 0) return STATUS_OK;
@@ -105,7 +107,8 @@ binder_status_t WriteArray(AParcel* parcel, const T* array, int32_t length) {
 
 // Each element in a char16_t array is converted to an int32_t (not packed).
 template <>
-binder_status_t WriteArray<char16_t>(AParcel* parcel, const char16_t* array, int32_t length) {
+binder_status_t WriteArray<char16_t>(AParcel* _Nonnull parcel, const char16_t* _Nullable array,
+                                     int32_t length) {
     binder_status_t status = WriteAndValidateArraySize(parcel, array == nullptr, length);
     if (status != STATUS_OK) return status;
     if (length <= 0) return STATUS_OK;
@@ -128,7 +131,7 @@ binder_status_t WriteArray<char16_t>(AParcel* parcel, const char16_t* array, int
 }
 
 template <typename T>
-binder_status_t ReadArray(const AParcel* parcel, void* arrayData,
+binder_status_t ReadArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                           ContiguousArrayAllocator<T> allocator) {
     const Parcel* rawParcel = parcel->get();
 
@@ -168,7 +171,7 @@ binder_status_t ReadArray(const AParcel* parcel, void* arrayData,
 
 // Each element in a char16_t array is converted to an int32_t (not packed)
 template <>
-binder_status_t ReadArray<char16_t>(const AParcel* parcel, void* arrayData,
+binder_status_t ReadArray<char16_t>(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                     ContiguousArrayAllocator<char16_t> allocator) {
     const Parcel* rawParcel = parcel->get();
 
@@ -205,8 +208,8 @@ binder_status_t ReadArray<char16_t>(const AParcel* parcel, void* arrayData,
 }
 
 template <typename T>
-binder_status_t WriteArray(AParcel* parcel, const void* arrayData, int32_t length,
-                           ArrayGetter<T> getter, status_t (Parcel::*write)(T)) {
+binder_status_t WriteArray(AParcel* _Nonnull parcel, const void* _Nullable arrayData,
+                           int32_t length, ArrayGetter<T> getter, status_t (Parcel::*write)(T)) {
     // we have no clue if arrayData represents a null object or not, we can only infer from length
     bool arrayIsNull = length < 0;
     binder_status_t status = WriteAndValidateArraySize(parcel, arrayIsNull, length);
@@ -225,8 +228,9 @@ binder_status_t WriteArray(AParcel* parcel, const void* arrayData, int32_t lengt
 }
 
 template <typename T>
-binder_status_t ReadArray(const AParcel* parcel, void* arrayData, ArrayAllocator<T> allocator,
-                          ArraySetter<T> setter, status_t (Parcel::*read)(T*) const) {
+binder_status_t ReadArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
+                          ArrayAllocator<T> allocator, ArraySetter<T> setter,
+                          status_t (Parcel::*read)(T*) const) {
     const Parcel* rawParcel = parcel->get();
 
     int32_t length;
@@ -255,11 +259,11 @@ binder_status_t ReadArray(const AParcel* parcel, void* arrayData, ArrayAllocator
     return STATUS_OK;
 }
 
-void AParcel_delete(AParcel* parcel) {
+void AParcel_delete(AParcel* _Nullable parcel) {
     delete parcel;
 }
 
-binder_status_t AParcel_setDataPosition(const AParcel* parcel, int32_t position) {
+binder_status_t AParcel_setDataPosition(const AParcel* _Nonnull parcel, int32_t position) {
     if (position < 0) {
         return STATUS_BAD_VALUE;
     }
@@ -268,19 +272,29 @@ binder_status_t AParcel_setDataPosition(const AParcel* parcel, int32_t position)
     return STATUS_OK;
 }
 
-int32_t AParcel_getDataPosition(const AParcel* parcel) {
+size_t AParcel_getDataCapacity(const AParcel* _Nonnull parcel) {
+    return parcel->get()->dataCapacity();
+}
+
+binder_status_t AParcel_setDataCapacity(AParcel* _Nonnull parcel, size_t capacity) {
+    status_t status = parcel->get()->setDataCapacity(capacity);
+    return PruneStatusT(status);
+}
+
+int32_t AParcel_getDataPosition(const AParcel* _Nonnull parcel) {
     return parcel->get()->dataPosition();
 }
 
-void AParcel_markSensitive(const AParcel* parcel) {
+void AParcel_markSensitive(const AParcel* _Nonnull parcel) {
     return parcel->get()->markSensitive();
 }
 
-binder_status_t AParcel_writeStrongBinder(AParcel* parcel, AIBinder* binder) {
+binder_status_t AParcel_writeStrongBinder(AParcel* _Nonnull parcel, AIBinder* _Nullable binder) {
     sp<IBinder> writeBinder = binder != nullptr ? binder->getBinder() : nullptr;
     return parcel->get()->writeStrongBinder(writeBinder);
 }
-binder_status_t AParcel_readStrongBinder(const AParcel* parcel, AIBinder** binder) {
+binder_status_t AParcel_readStrongBinder(const AParcel* _Nonnull parcel,
+                                         AIBinder* _Nullable* _Nonnull binder) {
     sp<IBinder> readBinder = nullptr;
     status_t status = parcel->get()->readNullableStrongBinder(&readBinder);
     if (status != STATUS_OK) {
@@ -299,7 +313,7 @@ binder_status_t AParcel_readStrongBinder(const AParcel* parcel, AIBinder** binde
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeParcelFileDescriptor(AParcel* parcel, int fd) {
+binder_status_t AParcel_writeParcelFileDescriptor(AParcel* _Nonnull parcel, int fd) {
     if (fd < 0) {
         if (fd != -1) {
             return STATUS_UNKNOWN_ERROR;
@@ -313,7 +327,7 @@ binder_status_t AParcel_writeParcelFileDescriptor(AParcel* parcel, int fd) {
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readParcelFileDescriptor(const AParcel* parcel, int* fd) {
+binder_status_t AParcel_readParcelFileDescriptor(const AParcel* _Nonnull parcel, int* _Nonnull fd) {
     std::optional<ParcelFileDescriptor> parcelFd;
 
     status_t status = parcel->get()->readParcelable(&parcelFd);
@@ -328,10 +342,12 @@ binder_status_t AParcel_readParcelFileDescriptor(const AParcel* parcel, int* fd)
     return STATUS_OK;
 }
 
-binder_status_t AParcel_writeStatusHeader(AParcel* parcel, const AStatus* status) {
+binder_status_t AParcel_writeStatusHeader(AParcel* _Nonnull parcel,
+                                          const AStatus* _Nonnull status) {
     return PruneStatusT(status->get().writeToParcel(parcel->get()));
 }
-binder_status_t AParcel_readStatusHeader(const AParcel* parcel, AStatus** status) {
+binder_status_t AParcel_readStatusHeader(const AParcel* _Nonnull parcel,
+                                         AStatus* _Nonnull* _Nonnull status) {
     ::android::binder::Status bstatus;
     binder_status_t ret = PruneStatusT(bstatus.readFromParcel(*parcel->get()));
     if (ret == STATUS_OK) {
@@ -340,7 +356,8 @@ binder_status_t AParcel_readStatusHeader(const AParcel* parcel, AStatus** status
     return PruneStatusT(ret);
 }
 
-binder_status_t AParcel_writeString(AParcel* parcel, const char* string, int32_t length) {
+binder_status_t AParcel_writeString(AParcel* _Nonnull parcel, const char* _Nullable string,
+                                    int32_t length) {
     if (string == nullptr) {
         if (length != -1) {
             ALOGW("null string must be used with length == -1.");
@@ -379,7 +396,7 @@ binder_status_t AParcel_writeString(AParcel* parcel, const char* string, int32_t
     return STATUS_OK;
 }
 
-binder_status_t AParcel_readString(const AParcel* parcel, void* stringData,
+binder_status_t AParcel_readString(const AParcel* _Nonnull parcel, void* _Nullable stringData,
                                    AParcel_stringAllocator allocator) {
     size_t len16;
     const char16_t* str16 = parcel->get()->readString16Inplace(&len16);
@@ -418,8 +435,8 @@ binder_status_t AParcel_readString(const AParcel* parcel, void* stringData,
     return STATUS_OK;
 }
 
-binder_status_t AParcel_writeStringArray(AParcel* parcel, const void* arrayData, int32_t length,
-                                         AParcel_stringArrayElementGetter getter) {
+binder_status_t AParcel_writeStringArray(AParcel* _Nonnull parcel, const void* _Nullable arrayData,
+                                         int32_t length, AParcel_stringArrayElementGetter getter) {
     // we have no clue if arrayData represents a null object or not, we can only infer from length
     bool arrayIsNull = length < 0;
     binder_status_t status = WriteAndValidateArraySize(parcel, arrayIsNull, length);
@@ -452,7 +469,7 @@ struct StringArrayElementAllocationAdapter {
     }
 };
 
-binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readStringArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_stringArrayAllocator allocator,
                                         AParcel_stringArrayElementAllocator elementAllocator) {
     int32_t length;
@@ -486,7 +503,8 @@ binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
     return STATUS_OK;
 }
 
-binder_status_t AParcel_writeParcelableArray(AParcel* parcel, const void* arrayData, int32_t length,
+binder_status_t AParcel_writeParcelableArray(AParcel* _Nonnull parcel,
+                                             const void* _Nullable arrayData, int32_t length,
                                              AParcel_writeParcelableElement elementWriter) {
     // we have no clue if arrayData represents a null object or not, we can only infer from length
     bool arrayIsNull = length < 0;
@@ -502,7 +520,8 @@ binder_status_t AParcel_writeParcelableArray(AParcel* parcel, const void* arrayD
     return STATUS_OK;
 }
 
-binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readParcelableArray(const AParcel* _Nonnull parcel,
+                                            void* _Nullable arrayData,
                                             AParcel_parcelableArrayAllocator allocator,
                                             AParcel_readParcelableElement elementReader) {
     int32_t length;
@@ -531,204 +550,212 @@ binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayDa
 // See gen_parcel_helper.py. These auto-generated read/write methods use the same types for
 // libbinder and this library.
 // @START
-binder_status_t AParcel_writeInt32(AParcel* parcel, int32_t value) {
+binder_status_t AParcel_writeInt32(AParcel* _Nonnull parcel, int32_t value) {
     status_t status = parcel->get()->writeInt32(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeUint32(AParcel* parcel, uint32_t value) {
+binder_status_t AParcel_writeUint32(AParcel* _Nonnull parcel, uint32_t value) {
     status_t status = parcel->get()->writeUint32(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeInt64(AParcel* parcel, int64_t value) {
+binder_status_t AParcel_writeInt64(AParcel* _Nonnull parcel, int64_t value) {
     status_t status = parcel->get()->writeInt64(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeUint64(AParcel* parcel, uint64_t value) {
+binder_status_t AParcel_writeUint64(AParcel* _Nonnull parcel, uint64_t value) {
     status_t status = parcel->get()->writeUint64(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeFloat(AParcel* parcel, float value) {
+binder_status_t AParcel_writeFloat(AParcel* _Nonnull parcel, float value) {
     status_t status = parcel->get()->writeFloat(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeDouble(AParcel* parcel, double value) {
+binder_status_t AParcel_writeDouble(AParcel* _Nonnull parcel, double value) {
     status_t status = parcel->get()->writeDouble(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeBool(AParcel* parcel, bool value) {
+binder_status_t AParcel_writeBool(AParcel* _Nonnull parcel, bool value) {
     status_t status = parcel->get()->writeBool(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeChar(AParcel* parcel, char16_t value) {
+binder_status_t AParcel_writeChar(AParcel* _Nonnull parcel, char16_t value) {
     status_t status = parcel->get()->writeChar(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeByte(AParcel* parcel, int8_t value) {
+binder_status_t AParcel_writeByte(AParcel* _Nonnull parcel, int8_t value) {
     status_t status = parcel->get()->writeByte(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readInt32(const AParcel* parcel, int32_t* value) {
+binder_status_t AParcel_readInt32(const AParcel* _Nonnull parcel, int32_t* _Nonnull value) {
     status_t status = parcel->get()->readInt32(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readUint32(const AParcel* parcel, uint32_t* value) {
+binder_status_t AParcel_readUint32(const AParcel* _Nonnull parcel, uint32_t* _Nonnull value) {
     status_t status = parcel->get()->readUint32(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readInt64(const AParcel* parcel, int64_t* value) {
+binder_status_t AParcel_readInt64(const AParcel* _Nonnull parcel, int64_t* _Nonnull value) {
     status_t status = parcel->get()->readInt64(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readUint64(const AParcel* parcel, uint64_t* value) {
+binder_status_t AParcel_readUint64(const AParcel* _Nonnull parcel, uint64_t* _Nonnull value) {
     status_t status = parcel->get()->readUint64(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readFloat(const AParcel* parcel, float* value) {
+binder_status_t AParcel_readFloat(const AParcel* _Nonnull parcel, float* _Nonnull value) {
     status_t status = parcel->get()->readFloat(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readDouble(const AParcel* parcel, double* value) {
+binder_status_t AParcel_readDouble(const AParcel* _Nonnull parcel, double* _Nonnull value) {
     status_t status = parcel->get()->readDouble(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readBool(const AParcel* parcel, bool* value) {
+binder_status_t AParcel_readBool(const AParcel* _Nonnull parcel, bool* _Nonnull value) {
     status_t status = parcel->get()->readBool(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readChar(const AParcel* parcel, char16_t* value) {
+binder_status_t AParcel_readChar(const AParcel* _Nonnull parcel, char16_t* _Nonnull value) {
     status_t status = parcel->get()->readChar(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_readByte(const AParcel* parcel, int8_t* value) {
+binder_status_t AParcel_readByte(const AParcel* _Nonnull parcel, int8_t* _Nonnull value) {
     status_t status = parcel->get()->readByte(value);
     return PruneStatusT(status);
 }
 
-binder_status_t AParcel_writeInt32Array(AParcel* parcel, const int32_t* arrayData, int32_t length) {
+binder_status_t AParcel_writeInt32Array(AParcel* _Nonnull parcel,
+                                        const int32_t* _Nullable arrayData, int32_t length) {
     return WriteArray<int32_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeUint32Array(AParcel* parcel, const uint32_t* arrayData,
-                                         int32_t length) {
+binder_status_t AParcel_writeUint32Array(AParcel* _Nonnull parcel,
+                                         const uint32_t* _Nullable arrayData, int32_t length) {
     return WriteArray<uint32_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeInt64Array(AParcel* parcel, const int64_t* arrayData, int32_t length) {
+binder_status_t AParcel_writeInt64Array(AParcel* _Nonnull parcel,
+                                        const int64_t* _Nullable arrayData, int32_t length) {
     return WriteArray<int64_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeUint64Array(AParcel* parcel, const uint64_t* arrayData,
-                                         int32_t length) {
+binder_status_t AParcel_writeUint64Array(AParcel* _Nonnull parcel,
+                                         const uint64_t* _Nullable arrayData, int32_t length) {
     return WriteArray<uint64_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeFloatArray(AParcel* parcel, const float* arrayData, int32_t length) {
+binder_status_t AParcel_writeFloatArray(AParcel* _Nonnull parcel, const float* _Nullable arrayData,
+                                        int32_t length) {
     return WriteArray<float>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeDoubleArray(AParcel* parcel, const double* arrayData, int32_t length) {
+binder_status_t AParcel_writeDoubleArray(AParcel* _Nonnull parcel,
+                                         const double* _Nullable arrayData, int32_t length) {
     return WriteArray<double>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeBoolArray(AParcel* parcel, const void* arrayData, int32_t length,
-                                       AParcel_boolArrayGetter getter) {
+binder_status_t AParcel_writeBoolArray(AParcel* _Nonnull parcel, const void* _Nullable arrayData,
+                                       int32_t length, AParcel_boolArrayGetter getter) {
     return WriteArray<bool>(parcel, arrayData, length, getter, &Parcel::writeBool);
 }
 
-binder_status_t AParcel_writeCharArray(AParcel* parcel, const char16_t* arrayData, int32_t length) {
+binder_status_t AParcel_writeCharArray(AParcel* _Nonnull parcel,
+                                       const char16_t* _Nullable arrayData, int32_t length) {
     return WriteArray<char16_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_writeByteArray(AParcel* parcel, const int8_t* arrayData, int32_t length) {
+binder_status_t AParcel_writeByteArray(AParcel* _Nonnull parcel, const int8_t* _Nullable arrayData,
+                                       int32_t length) {
     return WriteArray<int8_t>(parcel, arrayData, length);
 }
 
-binder_status_t AParcel_readInt32Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readInt32Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_int32ArrayAllocator allocator) {
     return ReadArray<int32_t>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readUint32Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readUint32Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_uint32ArrayAllocator allocator) {
     return ReadArray<uint32_t>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readInt64Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readInt64Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_int64ArrayAllocator allocator) {
     return ReadArray<int64_t>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readUint64Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readUint64Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_uint64ArrayAllocator allocator) {
     return ReadArray<uint64_t>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readFloatArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readFloatArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_floatArrayAllocator allocator) {
     return ReadArray<float>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readDoubleArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readDoubleArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_doubleArrayAllocator allocator) {
     return ReadArray<double>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readBoolArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readBoolArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_boolArrayAllocator allocator,
                                       AParcel_boolArraySetter setter) {
     return ReadArray<bool>(parcel, arrayData, allocator, setter, &Parcel::readBool);
 }
 
-binder_status_t AParcel_readCharArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readCharArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_charArrayAllocator allocator) {
     return ReadArray<char16_t>(parcel, arrayData, allocator);
 }
 
-binder_status_t AParcel_readByteArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readByteArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_byteArrayAllocator allocator) {
     return ReadArray<int8_t>(parcel, arrayData, allocator);
 }
 
-bool AParcel_getAllowFds(const AParcel* parcel) {
+bool AParcel_getAllowFds(const AParcel* _Nonnull parcel) {
     return parcel->get()->allowFds();
 }
 
-binder_status_t AParcel_reset(AParcel* parcel) {
+binder_status_t AParcel_reset(AParcel* _Nonnull parcel) {
     parcel->get()->freeData();
     return STATUS_OK;
 }
 
-int32_t AParcel_getDataSize(const AParcel* parcel) {
+int32_t AParcel_getDataSize(const AParcel* _Nonnull parcel) {
     return parcel->get()->dataSize();
 }
 
-binder_status_t AParcel_appendFrom(const AParcel* from, AParcel* to, int32_t start, int32_t size) {
+binder_status_t AParcel_appendFrom(const AParcel* _Nonnull from, AParcel* _Nonnull to,
+                                   int32_t start, int32_t size) {
     status_t status = to->get()->appendFrom(from->get(), start, size);
     return PruneStatusT(status);
 }
 
-AParcel* AParcel_create() {
+AParcel* _Nonnull AParcel_create() {
     return new AParcel(nullptr);
 }
 
-binder_status_t AParcel_marshal(const AParcel* parcel, uint8_t* buffer, size_t start, size_t len) {
+binder_status_t AParcel_marshal(const AParcel* _Nonnull parcel, uint8_t* _Nonnull buffer,
+                                size_t start, size_t len) {
     if (parcel->get()->objectsCount()) {
         return STATUS_INVALID_OPERATION;
     }
@@ -747,7 +774,8 @@ binder_status_t AParcel_marshal(const AParcel* parcel, uint8_t* buffer, size_t s
     return STATUS_OK;
 }
 
-binder_status_t AParcel_unmarshal(AParcel* parcel, const uint8_t* buffer, size_t len) {
+binder_status_t AParcel_unmarshal(AParcel* _Nonnull parcel, const uint8_t* _Nonnull buffer,
+                                  size_t len) {
     status_t status = parcel->get()->setDataSize(len);
     if (status != ::android::OK) {
         return PruneStatusT(status);

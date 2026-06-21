@@ -56,6 +56,9 @@ public:
 
     MOCK_CONST_METHOD0(getFeatureFlags, FeatureFlags());
 
+    MOCK_CONST_METHOD0(isPowerHintSessionEnabled, bool());
+    MOCK_METHOD1(setPowerHintSessionEnabled, void(bool));
+
     MOCK_CONST_METHOD1(dump, void(std::string&));
 };
 

@@ -18,6 +18,10 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "LayerLifecycleManager.h"
+
+#include <android-base/logging.h>
+#include <ui/LayerStack.h>
+
 #include "Client.h" // temporarily needed for LayerCreationArgs
 #include "LayerLog.h"
 #include "SwapErase.h"
@@ -28,11 +32,42 @@ using namespace ftl::flag_operators;
 
 namespace {
 // Returns true if the layer is root of a display and can be mirrored by mirroringLayer
-bool canMirrorRootLayer(RequestedLayerState& mirroringLayer, RequestedLayerState& rootLayer) {
-    return rootLayer.isRoot() && rootLayer.layerStack == mirroringLayer.layerStackToMirror &&
-            rootLayer.id != mirroringLayer.id;
+bool canMirrorRootLayer(const RequestedLayerState& mirrorLayer,
+                        const RequestedLayerState& rootLayer) {
+    return rootLayer.isRoot() && rootLayer.layerStack != ui::UNASSIGNED_LAYER_STACK &&
+            rootLayer.layerStack == mirrorLayer.layerStackToMirror &&
+            rootLayer.id != mirrorLayer.id;
 }
 } // namespace
+
+// Register a `mirrorLayer`, and link it to the references of the root layer that the `mirrorLayer`
+// mirrors.
+void LayerLifecycleManager::doMirror(RequestedLayerState& mirrorLayer) {
+    // If this layer is mirroring a layer stack, then walk though all the existing root
+    // layers for the layer stack and add them as children to be mirrored.
+    mGlobalChanges |= RequestedLayerState::Changes::Hierarchy;
+    mirrorLayer.changes |= RequestedLayerState::Changes::Mirror;
+    mLayersMirroringLayerStack.push_back(mirrorLayer.id);
+    for (std::unique_ptr<RequestedLayerState>& mayBeRootLayer : mLayers) {
+        if (canMirrorRootLayer(mirrorLayer, *mayBeRootLayer)) {
+            mirrorLayer.mirrorIds.push_back(mayBeRootLayer->id);
+            linkLayer(mayBeRootLayer->id, mirrorLayer.id);
+        }
+    }
+}
+
+void LayerLifecycleManager::undoMirror(RequestedLayerState& mirrorLayer) {
+    mGlobalChanges |= RequestedLayerState::Changes::Hierarchy;
+    mirrorLayer.changes |= RequestedLayerState::Changes::Mirror;
+    swapErase(mLayersMirroringLayerStack, mirrorLayer.id);
+    for (uint32_t layerId : mirrorLayer.mirrorIds) {
+        if (std::vector<uint32_t /*layerId*/>* references = getLinkedLayersFromId(layerId);
+            references != nullptr) {
+            swapErase(*references, mirrorLayer.id);
+        }
+    }
+    mirrorLayer.mirrorIds.clear();
+}
 
 void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayerState>> newLayers) {
     if (newLayers.empty()) {
@@ -40,7 +75,7 @@ void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayer
     }
 
     mGlobalChanges |= RequestedLayerState::Changes::Hierarchy;
-    for (auto& newLayer : newLayers) {
+    for (std::unique_ptr<RequestedLayerState>& newLayer : newLayers) {
         RequestedLayerState& layer = *newLayer.get();
         auto [it, inserted] = mIdToLayer.try_emplace(layer.id, References{.owner = layer});
         LLOG_ALWAYS_FATAL_WITH_TRACE_IF(!inserted,
@@ -48,24 +83,21 @@ void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayer
                                         "%s",
                                         layer.getDebugString().c_str(),
                                         it->second.owner.getDebugString().c_str());
+
         mAddedLayers.push_back(newLayer.get());
         mChangedLayers.push_back(newLayer.get());
         layer.parentId = linkLayer(layer.parentId, layer.id);
         layer.relativeParentId = linkLayer(layer.relativeParentId, layer.id);
+
         if (layer.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
             // Set mirror layer's default layer stack to -1 so it doesn't end up rendered on a
             // display accidentally.
+            // TODO: b/460564504 - The client should be able to specify if the layer is root or not,
+            // that way unassigning the layer stack is not necessary.
             layer.layerStack = ui::UNASSIGNED_LAYER_STACK;
-
-            // if this layer is mirroring a display, then walk though all the existing root layers
-            // for the layer stack and add them as children to be mirrored.
-            mDisplayMirroringLayers.emplace_back(layer.id);
-            for (auto& rootLayer : mLayers) {
-                if (canMirrorRootLayer(layer, *rootLayer)) {
-                    layer.mirrorIds.emplace_back(rootLayer->id);
-                    linkLayer(rootLayer->id, layer.id);
-                }
-            }
+            doMirror(layer);
+        } else if (layer.displayIdToMirror.has_value()) {
+            layer.layerStack = ui::UNASSIGNED_LAYER_STACK;
         } else {
             layer.layerIdToMirror = linkLayer(layer.layerIdToMirror, layer.id);
         }
@@ -75,6 +107,52 @@ void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayer
         }
         LLOGV(layer.id, "%s", layer.getDebugString().c_str());
         mLayers.emplace_back(std::move(newLayer));
+    }
+}
+
+void LayerLifecycleManager::updateDisplayMirrors(
+        const ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo>& frontEndDisplaysInfo,
+        bool frontEndDisplaysInfoChanged) {
+    if (!frontEndDisplaysInfoChanged && mAddedLayers.empty()) {
+        return;
+    }
+
+    for (const std::unique_ptr<RequestedLayerState>& layer : mLayers) {
+        LOG_IF(FATAL, layer == nullptr)
+                << "Null layer found when iterating mLayers in " << __func__;
+        if (!layer->displayIdToMirror.has_value()) {
+            continue;
+        }
+        const auto displayInfoIter =
+                std::find_if(frontEndDisplaysInfo.begin(), frontEndDisplaysInfo.end(),
+                             [&](const std::pair<ui::LayerStack, frontend::DisplayInfo>& pair)
+                                     -> bool {
+                                 return *(layer->displayIdToMirror) == pair.second.displayId;
+                             });
+        if (displayInfoIter == frontEndDisplaysInfo.end()) {
+            layer->layerStackToMirror = ui::UNASSIGNED_LAYER_STACK;
+            undoMirror(*layer);
+            continue;
+        }
+        const ui::LayerStack layerStack = displayInfoIter->first;
+        if (layer->layerStackToMirror == layerStack) {
+            continue;
+        }
+        // The logic below handles three cases:
+        // - If the layer stack to mirror transitions from unassigned to assigned, then mirror the
+        // hierarchy associated to the assigned layer stack.
+        // - If the layer stack to mirror transitions from assigned to unassigned, then unmirror the
+        // hierarhcy.
+        // - If the layer stack to mirror transitions from assigned layer stack to a different
+        // assigned layer stack, then update the mirror references by re-registering the mirror
+        // layer.
+        if (layer->layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
+            undoMirror(*layer);
+        }
+        layer->layerStackToMirror = layerStack;
+        if (layer->layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
+            doMirror(*layer);
+        }
     }
 }
 
@@ -116,7 +194,7 @@ void LayerLifecycleManager::onHandlesDestroyed(
         layer.relativeParentId = unlinkLayer(layer.relativeParentId, layer.id);
         if (layer.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
             layer.mirrorIds = unlinkLayers(layer.mirrorIds, layer.id);
-            swapErase(mDisplayMirroringLayers, layer.id);
+            swapErase(mLayersMirroringLayerStack, layer.id);
         } else {
             layer.layerIdToMirror = unlinkLayer(layer.layerIdToMirror, layer.id);
             layer.mirrorIds.clear();
@@ -209,6 +287,7 @@ void LayerLifecycleManager::applyTransactions(
             uint32_t oldRelativeParentId = layer->relativeParentId;
             uint32_t oldTouchCropId = layer->touchCropId;
             layer->merge(resolvedComposerState);
+            layer->lastUpdateTime = transaction.postTime;
 
             if (layer->what & layer_state_t::eBackgroundColorChanged) {
                 RequestedLayerState* bgColorLayer = nullptr;
@@ -426,7 +505,7 @@ void LayerLifecycleManager::fixRelativeZLoop(uint32_t relativeRootId) {
 // and updates its list of layers that its mirroring. This function should be called when a new
 // root layer is added, removed or moved to another display.
 void LayerLifecycleManager::updateDisplayMirrorLayers(RequestedLayerState& rootLayer) {
-    for (uint32_t mirroringLayerId : mDisplayMirroringLayers) {
+    for (uint32_t mirroringLayerId : mLayersMirroringLayerStack) {
         RequestedLayerState* mirrorLayer = getLayerFromId(mirroringLayerId);
         bool canBeMirrored = canMirrorRootLayer(*mirrorLayer, rootLayer);
         bool currentlyMirrored =

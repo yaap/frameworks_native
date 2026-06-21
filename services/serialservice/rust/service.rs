@@ -25,6 +25,9 @@ use binder::BinderFeatures;
 use binder_tokio::TokioRuntime;
 use tokio::runtime::Handle;
 
+use atrace_tracing_subscriber::AtraceSubscriber;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 use serialservice::serial_manager::SerialManager;
 
 #[tokio::main]
@@ -35,26 +38,28 @@ async fn main() -> Result<()> {
             .with_max_level(log::LevelFilter::Debug),
     );
 
+    tracing_subscriber::registry()
+        .with(AtraceSubscriber::new(atrace::AtraceTag::SystemServer).with_filter())
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     if !enable_wired_serial_api() {
         log::debug!("Serial support isn't enabled. Skipping native serial service");
         bail!("Native Serial Service is disabled");
     }
 
-    logger::init(
-        logger::Config::default()
-            .with_tag_on_device("serialservice")
-            .with_max_level(log::LevelFilter::Debug),
-    );
-
-    binder::add_service(
-        "native_serial",
-        BnSerialManager::new_async_binder(
-            SerialManager::new().await,
-            TokioRuntime(Handle::current()),
-            BinderFeatures::default(),
-        )
-        .as_binder(),
-    )?;
+    {
+        let _span = tracing::span!(tracing::Level::TRACE, "create_native_serial");
+        binder::register_lazy_service(
+            "native_serial",
+            BnSerialManager::new_async_binder(
+                SerialManager::new().await,
+                TokioRuntime(Handle::current()),
+                BinderFeatures::default(),
+            )
+            .as_binder(),
+        )?;
+    }
 
     tokio::task::block_in_place(binder::ProcessState::join_thread_pool);
     Ok(())

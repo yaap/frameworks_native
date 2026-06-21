@@ -22,47 +22,12 @@
 #include <android/binder_manager.h>
 #include <private/android_filesystem_config.h>
 
-using ::android::hardware::hidl_vec;
-using ::android::hardware::Return;
-
 namespace aidl {
 namespace android {
 namespace hardware {
 namespace memtrack {
 
 namespace {
-
-// Check Memtrack Flags
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SMAPS_ACCOUNTED) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SMAPS_ACCOUNTED));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SMAPS_UNACCOUNTED) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SMAPS_UNACCOUNTED));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SHARED) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SHARED));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SHARED_PSS) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SHARED_PSS));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::PRIVATE) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_PRIVATE));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SYSTEM) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SYSTEM));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::DEDICATED) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_DEDICATED));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::NONSECURE) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_NONSECURE));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SECURE) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackRecord::FLAG_SECURE));
-
-// Check Memtrack Types
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::OTHER) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackType::OTHER));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::GL) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackType::GL));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::GRAPHICS) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackType::GRAPHICS));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::MULTIMEDIA) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackType::MULTIMEDIA));
-static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::CAMERA) ==
-              static_cast<uint32_t>(V1_aidl::MemtrackType::CAMERA));
 
 // LINT.IfChange
 constexpr char kMemtrackDefaultMsg[] = "memtrack default implementation";
@@ -75,23 +40,6 @@ static inline bool isMemtrackDefaultImpl(const ndk::ScopedAStatus& status) {
 }
 
 }  // namespace
-
-__attribute__((warn_unused_result)) bool translate(const V1_0_hidl::MemtrackRecord& in,
-                                                   V1_aidl::MemtrackRecord* out) {
-    // Convert uint64_t to int64_t (long in AIDL). AIDL doesn't support unsigned types.
-    if (in.sizeInBytes > std::numeric_limits<int64_t>::max() || in.sizeInBytes < 0) {
-        return false;
-    }
-    out->sizeInBytes = static_cast<int64_t>(in.sizeInBytes);
-
-    // It's ok to just assign directly, since this is a bitmap.
-    out->flags = in.flags;
-    return true;
-}
-
-sp<V1_0_hidl::IMemtrack> MemtrackProxy::MemtrackHidlInstance() {
-    return V1_0_hidl::IMemtrack::getService();
-}
 
 std::shared_ptr<V1_aidl::IMemtrack> MemtrackProxy::MemtrackAidlInstance() {
     const auto instance = std::string() + V1_aidl::IMemtrack::descriptor + "/default";
@@ -115,11 +63,6 @@ bool MemtrackProxy::CheckPid(pid_t calling_pid, pid_t request_pid) {
 
 MemtrackProxy::MemtrackProxy() {
     memtrack_aidl_instance_ = MemtrackProxy::MemtrackAidlInstance();
-
-    // Only check for a HIDL implementation if we failed to get the AIDL service
-    if (!memtrack_aidl_instance_) {
-        memtrack_hidl_instance_ = MemtrackProxy::MemtrackHidlInstance();
-    }
     is_get_memory_supported_ = true;
 }
 
@@ -158,47 +101,6 @@ ndk::ScopedAStatus MemtrackProxy::getMemory(int pid, MemtrackType type,
             // we know the operation isn't supported.
             is_get_memory_supported_ = false;
             return ndk::ScopedAStatus::ok();
-        }
-
-        return aidl_status;
-    } else if (memtrack_hidl_instance_) {
-        ndk::ScopedAStatus aidl_status;
-
-        Return<void> ret = memtrack_hidl_instance_->getMemory(
-                pid, static_cast<V1_0_hidl::MemtrackType>(type),
-                [&_aidl_return, &aidl_status](V1_0_hidl::MemtrackStatus status,
-                                              hidl_vec<V1_0_hidl::MemtrackRecord> records) {
-                    switch (status) {
-                        case V1_0_hidl::MemtrackStatus::SUCCESS:
-                            aidl_status = ndk::ScopedAStatus::ok();
-                            break;
-                        case V1_0_hidl::MemtrackStatus::MEMORY_TRACKING_NOT_SUPPORTED:
-                            [[fallthrough]];
-                        case V1_0_hidl::MemtrackStatus::TYPE_NOT_SUPPORTED:
-                            [[fallthrough]];
-                        default:
-                            aidl_status =
-                                    ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
-                            return;
-                    }
-
-                    _aidl_return->resize(records.size());
-                    for (size_t i = 0; i < records.size(); i++) {
-                        if (!translate(records[i], &(*_aidl_return)[i])) {
-                            aidl_status = ndk::ScopedAStatus::fromExceptionCodeWithMessage(
-                                    EX_SERVICE_SPECIFIC,
-                                    "Failed to convert HIDL MemtrackRecord to AIDL");
-                            return;
-                        }
-                    }
-                });
-
-        // Check HIDL return
-        if (!ret.isOk()) {
-            const char* err_msg = "HIDL Memtrack::getMemory() failed";
-            aidl_status =
-                    ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_SERVICE_SPECIFIC, err_msg);
-            LOG(ERROR) << err_msg << ": " << ret.description();
         }
 
         return aidl_status;

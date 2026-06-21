@@ -177,6 +177,22 @@ public:
         data.writeStrongBinder(IInterface::asBinder(callback));
         remote()->transact(START_WATCHING_MODE_WITH_FLAGS_TRANSACTION, data, &reply);
     }
+    virtual int32_t checkOperationForDevice(int32_t code, int32_t uid,
+                                            const String16& packageName,
+                                            const std::optional<String16>& attributionTag,
+                                            int32_t virtualDeviceId) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAppOpsService::getInterfaceDescriptor());
+        data.writeInt32(code);
+        data.writeInt32(uid);
+        data.writeString16(packageName);
+        data.writeString16(attributionTag);
+        data.writeInt32(virtualDeviceId);
+        remote()->transact(CHECK_OPERATION_FOR_DEVICE_TRANSACTION, data, &reply);
+        // fail on exception
+        if (reply.readExceptionCode() != 0) return MODE_ERRORED;
+        return reply.readInt32();
+    }
 };
 
 IMPLEMENT_META_INTERFACE(AppOpsService, "com.android.internal.app.IAppOpsService")

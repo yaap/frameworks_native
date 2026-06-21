@@ -136,20 +136,19 @@ TEST_F(FlagManagerTest, returnsValue) {
     }
 }
 
-TEST_F(FlagManagerTest, readonlyReturnsValue) {
-    mFlagManager.setUnitTestMode();
-
+TEST_F(FlagManagerTest, dump_containsFlags) {
+    // Setup mock returns to avoid unexpected call warnings during dump
     EXPECT_CALL(mFlagManager, getBoolProperty).WillRepeatedly(Return(std::nullopt));
+    EXPECT_CALL(mFlagManager, getServerConfigurableFlag).WillRepeatedly(Return(false));
 
-    {
-        SET_FLAG_FOR_TEST(flags::hdcp_level_hal, true);
-        EXPECT_EQ(true, mFlagManager.hdcp_level_hal());
-    }
+    std::string result;
 
-    {
-        SET_FLAG_FOR_TEST(flags::hdcp_level_hal, false);
-        EXPECT_EQ(false, mFlagManager.hdcp_level_hal());
-    }
+    // Call dump to get the string representation of all flags
+    mFlagManager.dump(result);
+
+    // Verifies that the dump output contains the header and some flags
+    EXPECT_THAT(result, testing::HasSubstr("FlagManager values:"));
+    EXPECT_THAT(result, testing::HasSubstr("test_flag: false"));
 }
 
 } // namespace android

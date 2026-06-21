@@ -96,7 +96,7 @@ impl IBinderRpcTest for MyBinderRpcSession {
     }
     fn nestMe(
         &self,
-        binder: &Strong<(dyn IBinderRpcTest + 'static)>,
+        binder: &Strong<dyn IBinderRpcTest + 'static>,
         count: i32,
     ) -> Result<(), Status> {
         if count < 0 {
@@ -108,10 +108,7 @@ impl IBinderRpcTest for MyBinderRpcSession {
     fn alwaysGiveMeTheSameBinder(&self) -> Result<SpIBinder, Status> {
         todo!()
     }
-    fn openSession(
-        &self,
-        _name: &str,
-    ) -> Result<Strong<(dyn IBinderRpcSession + 'static)>, Status> {
+    fn openSession(&self, _name: &str) -> Result<Strong<dyn IBinderRpcSession + 'static>, Status> {
         todo!()
     }
     fn getNumOpenSessions(&self) -> Result<i32, Status> {
@@ -134,7 +131,7 @@ impl IBinderRpcTest for MyBinderRpcSession {
     }
     fn doCallback(
         &self,
-        _: &Strong<(dyn IBinderRpcCallback + 'static)>,
+        _: &Strong<dyn IBinderRpcCallback + 'static>,
         _: bool,
         _: bool,
         _: &str,
@@ -143,7 +140,7 @@ impl IBinderRpcTest for MyBinderRpcSession {
     }
     fn doCallbackAsync(
         &self,
-        _: &Strong<(dyn IBinderRpcCallback + 'static)>,
+        _: &Strong<dyn IBinderRpcCallback + 'static>,
         _: bool,
         _: bool,
         _: &str,
@@ -175,6 +172,9 @@ impl IBinderRpcTest for MyBinderRpcSession {
         todo!()
     }
     fn blockingRecvInt(&self) -> Result<i32, Status> {
+        todo!()
+    }
+    fn getClientUid(&self) -> Result<i32, Status> {
         todo!()
     }
 }

@@ -26,6 +26,8 @@
 
 #include <binder/IInterface.h>
 
+#include <android/native_window.h>
+#include <system/window.h>
 #include <ui/BufferQueueDefs.h>
 #include <ui/Fence.h>
 #include <ui/GraphicBuffer.h>
@@ -108,6 +110,26 @@ public:
         USE_BUFFER_HUB = 0x62687562, // 'bhub'
     };
 
+    struct SurfaceConfig : public Parcelable {
+        SurfaceConfig() = default;
+
+        // Moveable.
+        SurfaceConfig(SurfaceConfig&& src) = default;
+        SurfaceConfig& operator=(SurfaceConfig&& src) = default;
+        // Not copyable.
+        SurfaceConfig(const SurfaceConfig& src) = delete;
+        SurfaceConfig& operator=(const SurfaceConfig& src) = delete;
+
+        String8 consumerName;
+        size_t slotCount = BufferQueueDefs::NUM_BUFFER_SLOTS;
+        bool isSlotExpansionAllowed = false;
+
+        virtual status_t writeToParcel(android::Parcel* parcel) const override;
+        virtual status_t readFromParcel(const android::Parcel* parcel) override;
+    };
+
+    virtual status_t getConfigForSurface(SurfaceConfig* outConfig);
+
     // requestBuffer requests a new buffer for the given index. The server (i.e.
     // the IGraphicBufferProducer implementation) assigns the newly created
     // buffer to the given slot index, and the client is expected to mirror the
@@ -124,7 +146,6 @@ public:
     //              * buffer specified by the slot is not dequeued
     virtual status_t requestBuffer(int slot, sp<GraphicBuffer>* buf) = 0;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     // extendSlotCount sets the maximum slot count (SLOT_COUNT) to the given
     //  size. This feature must be enabled by the consumer to function via
     // IGraphicBufferConsumer::allowUnlimitedSlots. This must be called before
@@ -146,7 +167,6 @@ public:
     //               (initialized to 64, then whatever the last call to this
     //               was)
     virtual status_t extendSlotCount(int size);
-#endif
 
     // setMaxDequeuedBufferCount sets the maximum number of buffers that can be
     // dequeued by the producer at one time. If this method succeeds, any new
@@ -446,6 +466,7 @@ public:
         uint64_t nextFrameNumber{0};
         FrameEventHistoryDelta frameTimestamps;
         bool bufferReplaced{false};
+        uint64_t bufferReplacedFrameId{0};
         int maxBufferCount{BufferQueueDefs::NUM_BUFFER_SLOTS};
         bool isSlotExpansionAllowed{false};
         status_t result{NO_ERROR};
@@ -727,9 +748,17 @@ public:
     virtual status_t setFrameRate(float frameRate, int8_t compatibility,
                                   int8_t changeFrameRateStrategy);
 
+    // Control CPU throttling for Vulkan/EGL producers
+    virtual status_t setProducerThrottlingEnabled(bool enabled);
+    // Returns whether CPU throttling is enabled for Vulkan/EGL producers
+    virtual status_t isProducerThrottlingEnabled(bool* outEnabled) const;
+
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     virtual status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options);
 #endif
+
+    // setPresentMode sets the buffer acquisition mode.
+    virtual status_t setPresentMode(int32_t mode);
 
     struct RequestBufferOutput : public Flattenable<RequestBufferOutput> {
         RequestBufferOutput() = default;
@@ -869,8 +898,7 @@ public:
     // This method behaves like a sequence of query() calls.
     // The return value of the batched method will only be about the
     // transaction. For a local call, the return value will always be NO_ERROR.
-    virtual status_t query(const std::vector<int32_t> inputs,
-                           std::vector<QueryOutput>* outputs);
+    virtual status_t query(const std::vector<int32_t>& inputs, std::vector<QueryOutput>* outputs);
 
 #ifndef NO_BINDER
     // Static method exports any IGraphicBufferProducer object to a parcel. It

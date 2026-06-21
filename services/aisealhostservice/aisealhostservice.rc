@@ -1,0 +1,15 @@
+service aisealhostservice /system/bin/aisealhostservice
+    user system
+    group system
+    # AiSeal hosts multiple performance sensitive services like AppSearch or AI
+    # inference, so we want to run it on all cores.
+    task_profiles MaxPerformance
+    interface aidl aiseal_host
+    disabled
+
+on property:sys.boot_completed=1 && property:service.aiseal.enable=1
+    enable aisealhostservice
+
+on property:service.aiseal.enable=0
+    stop aisealhostservice
+

@@ -32,17 +32,35 @@ cc_benchmark {
     srcs: ["stats.cpp"],
 }
 
-cc_library {
-    name: "libbinderdebug",
+cc_library_headers {
+    name: "libbinderdebug_headers",
+    host_supported: true,
     vendor_available: true,
+    export_include_dirs: ["include"],
+}
+
+cc_defaults {
+    name: "libbinderdebug_defaults",
     shared_libs: [
         "libbase",
         "libbinder",
     ],
     srcs: [
         "BinderDebug.cpp",
+        "FileReader.cpp",
     ],
-    export_include_dirs: [
-        "include",
-    ],
+    header_libs: ["libbinderdebug_headers"],
+    export_header_lib_headers: ["libbinderdebug_headers"],
+}
+
+cc_library {
+    name: "libbinderdebug",
+    vendor_available: true,
+    defaults: ["libbinderdebug_defaults"],
+}
+
+cc_library {
+    name: "libbinderdebug_for_test",
+    cflags: ["-DBINDER_DEBUG_TEST"],
+    defaults: ["libbinderdebug_defaults"],
 }

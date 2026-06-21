@@ -29,6 +29,9 @@ use std::ffi::CStr;
 use std::io::Write;
 use std::sync::Mutex;
 
+// binder's declare_binder_interface! uses alloc internally.
+extern crate alloc;
+
 /// Name of service runner.
 ///
 /// Must match the binary name in Android.bp

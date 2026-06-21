@@ -19,6 +19,7 @@
 #include <PowerAdvisor/Workload.h>
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 #include <gui/LayerState.h>
+#include <utils/Log.h>
 
 #include "Layer.h"
 #include "LayerSnapshot.h"
@@ -128,14 +129,20 @@ LayerSnapshot::LayerSnapshot(const RequestedLayerState& state,
     inputInfo.ownerPid = gui::Pid{state.ownerPid};
     uid = state.ownerUid;
     pid = state.ownerPid;
+    permissions = state.ownerPermissions;
     changes = RequestedLayerState::Changes::Created;
-    clientChanges = 0;
+    clientChanges.reset();
     mirrorRootPath =
             LayerHierarchy::isMirror(path.variant) ? path : LayerHierarchy::TraversalPath::ROOT;
+    stopLayerId = state.stopLayerId;
     reachability = LayerSnapshot::Reachability::Unreachable;
     frameRateSelectionPriority = state.frameRateSelectionPriority;
     layerMetadata = state.metadata;
     systemContentPriority = state.systemContentPriority;
+    bool isCroppedMirrorRequest = FlagManager::getInstance().mirror_with_crop()
+            && state.layerIdToMirror != UNASSIGNED_LAYER_ID
+            && state.croppedByLayerId != UNASSIGNED_LAYER_ID;
+    mirrorCrop = isCroppedMirrorRequest ? std::make_optional(FloatRect{}) : std::nullopt;
 }
 
 // As documented in libhardware header, formats in the range
@@ -163,7 +170,8 @@ bool LayerSnapshot::isOpaqueFormat(PixelFormat format) {
 }
 
 bool LayerSnapshot::hasBufferOrSidebandStream() const {
-    return ((sidebandStream != nullptr) || (externalTexture != nullptr));
+    return ((sidebandStream != nullptr) || (externalTexture != nullptr)) ||
+            (renderCommandBuffer != nullptr);
 }
 
 bool LayerSnapshot::drawShadows() const {
@@ -176,7 +184,8 @@ bool LayerSnapshot::fillsColor() const {
 }
 
 bool LayerSnapshot::hasBlur() const {
-    return backgroundBlurRadius > 0 || blurRegions.size() > 0;
+    return backgroundBlurRadius > 0 || blurRegions.size() > 0 ||
+            (postProcessShader && postProcessTarget == layer_state_t::SampleTarget::Behind);
 }
 
 bool LayerSnapshot::hasBorderSettings() const {
@@ -189,11 +198,11 @@ bool LayerSnapshot::hasBoxShadowSettings() const {
 
 bool LayerSnapshot::hasEffect() const {
     return fillsColor() || drawShadows() || hasBlur() || hasBorderSettings() ||
-            hasBoxShadowSettings();
+            hasBoxShadowSettings() || postProcessShader;
 }
 
 bool LayerSnapshot::hasSomethingToDraw() const {
-    return hasEffect() || hasBufferOrSidebandStream();
+    return hasEffect() || hasBufferOrSidebandStream() || renderCommandBuffer != nullptr;
 }
 
 bool LayerSnapshot::isContentOpaque() const {
@@ -227,14 +236,8 @@ bool LayerSnapshot::getIsVisible() const {
         return false;
     }
 
-    if (FlagManager::getInstance().connected_displays_cursor()) {
-        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) {
-            return false;
-        }
-    } else {
-        if (handleSkipScreenshotFlag && outputFilter.toInternalDisplay) {
-            return false;
-        }
+    if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) {
+        return false;
     }
 
     if (!hasSomethingToDraw()) {
@@ -256,12 +259,7 @@ std::string LayerSnapshot::getIsVisibleReason() const {
         return "layer only reachable via relative parent";
     if (isHiddenByPolicyFromParent) return "hidden by parent or layer flag";
     if (isHiddenByPolicyFromRelativeParent) return "hidden by relative parent";
-    if (FlagManager::getInstance().connected_displays_cursor()) {
-        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) return "eLayerSkipScreenshot";
-    } else {
-        if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay)
-            return "eLayerSkipScreenshot (toInternalDisplay=true)";
-    }
+    if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) return "eLayerSkipScreenshot";
     if (invalidTransform) return "invalidTransform";
     if (color.a == 0.0f && !hasBlur()) return "alpha = 0 and no blur";
     if (!hasSomethingToDraw()) return "nothing to draw";
@@ -271,6 +269,7 @@ std::string LayerSnapshot::getIsVisibleReason() const {
     if (sidebandStream != nullptr) reason << " sidebandStream";
     if (externalTexture != nullptr)
         reason << " buffer=" << externalTexture->getId() << " frame=" << frameNumber;
+    if (renderCommandBuffer != nullptr) reason << " renderCommandBuffer";
     if (fillsColor()) reason << " color{" << color << "}";
     if (color.a < 1.0f) reason << " alpha=" << color.a;
     if (drawShadows()) reason << " shadowSettings.length=" << shadowSettings.length;
@@ -366,14 +365,23 @@ std::ostream& operator<<(std::ostream& out, const LayerSnapshot& obj) {
         out << " currentHdrSdrRatio=" << obj.currentHdrSdrRatio;
     }
 
-    if (obj.desiredHdrSdrRatio > 1.f) {
+    if (obj.desiredHdrSdrRatio >= 1.f) {
         out << " desiredHdrSdrRatio=" << obj.desiredHdrSdrRatio;
     }
+
+    if (obj.maxDesiredHdrSdrRatio >= 1.f) {
+        out << " maxDesiredHdrSdrRatio=" << obj.maxDesiredHdrSdrRatio;
+    }
+
+    if (obj.stopLayerId != UNASSIGNED_LAYER_ID) {
+        out << " stopLayerId=" << obj.stopLayerId;
+    }
+
     return out;
 }
 
 FloatRect LayerSnapshot::sourceBounds() const {
-    if (!externalTexture) {
+    if (!externalTexture && !renderCommandBuffer) {
         return geomLayerBounds;
     }
     return geomBufferSize.toFloatRect();
@@ -398,8 +406,8 @@ Hwc2::IComposerClient::BlendMode LayerSnapshot::getBlendMode(
 }
 
 void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate,
-                          bool displayChanges, bool forceFullDamage,
-                          uint32_t displayRotationFlags) {
+                          bool displayChanges, bool forceFullDamage, uint32_t displayRotationFlags,
+                          ShaderRegistry* shaderRegistry) {
     clientChanges = requested.what;
     changes = requested.changes;
     autoRefresh = requested.autoRefresh;
@@ -430,6 +438,9 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
     }
     if (forceUpdate || requested.what & layer_state_t::eDesiredHdrHeadroomChanged) {
         desiredHdrSdrRatio = requested.desiredHdrSdrRatio;
+    }
+    if (forceUpdate || requested.what & layer_state_t::eDesiredMaxHdrHeadroomChanged) {
+        maxDesiredHdrSdrRatio = requested.maxDesiredHdrSdrRatio;
     }
     if (forceUpdate || requested.what & layer_state_t::eCachingHintChanged) {
         cachingHint = requested.cachingHint;
@@ -498,6 +509,7 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
         color.rgb = requested.getColor().rgb;
     }
 
+    bool hasSmpte2094_50 = false;
     if (forceUpdate || requested.what & layer_state_t::eBufferChanged) {
         acquireFence =
                 (requested.externalTexture &&
@@ -510,13 +522,30 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
         hasProtectedContent = requested.externalTexture &&
                 requested.externalTexture->getUsage() & GRALLOC_USAGE_PROTECTED;
         geomUsesSourceCrop = hasBufferOrSidebandStream();
+
+        if (buffer && FlagManager::getInstance().force_agtm_without_luts()) {
+            auto& mapper = GraphicBufferMapper::get();
+            std::optional<std::vector<uint8_t>> smpte2094_50;
+            status_t err = OK;
+            {
+                SFTRACE_NAME("getSmpte2094_50");
+                err = mapper.getSmpte2094_50(buffer->handle, &smpte2094_50);
+            }
+
+            hasSmpte2094_50 = err == OK && smpte2094_50;
+
+            if (hasSmpte2094_50) {
+                SFTRACE_NAME("Found smpte2094-50 on a layer!");
+            }
+        }
     }
 
     if (forceUpdate ||
         requested.what &
                 (layer_state_t::eCropChanged | layer_state_t::eBufferCropChanged |
                  layer_state_t::eBufferTransformChanged |
-                 layer_state_t::eTransformToDisplayInverseChanged) ||
+                 layer_state_t::eTransformToDisplayInverseChanged |
+                 layer_state_t::eRenderCommandBufferFrameIdChanged) ||
         requested.changes.test(RequestedLayerState::Changes::BufferSize) || displayChanges) {
         bufferSize = requested.getBufferSize(displayRotationFlags);
         geomBufferSize = bufferSize;
@@ -549,7 +578,7 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
                  layer_state_t::eEdgeExtensionChanged | layer_state_t::eBorderSettingsChanged)) {
         forceClientComposition = shadowSettings.length > 0 || stretchEffect.hasEffect() ||
                 edgeExtensionEffect.hasEffect() || borderSettings.strokeWidth > 0 ||
-                !boxShadowSettings.boxShadows.empty();
+                !boxShadowSettings.boxShadows.empty() || hasSmpte2094_50;
     }
 
     if (forceUpdate ||
@@ -560,12 +589,47 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
                  layer_state_t::eFlagsChanged | layer_state_t::eBufferChanged |
                  layer_state_t::eSidebandStreamChanged)) {
         contentOpaque = isContentOpaque();
-        isOpaque = contentOpaque && !roundedCorner.hasRoundedCorners() && color.a == 1.f;
+        isOpaque = contentOpaque &&
+                !(roundedCorner.hasSfDrawnRadius() || roundedCorner.hasClientDrawnRadius()) &&
+                color.a == 1.f;
         blendMode = getBlendMode(requested);
     }
 
     if (forceUpdate || requested.what & layer_state_t::eLutsChanged) {
         luts = requested.luts;
+    }
+
+    if (forceUpdate ||
+        requested.what &
+                (layer_state_t::eRenderCommandBufferChanged |
+                 layer_state_t::eRenderCommandBufferFrameIdChanged)) {
+        renderCommandBuffer = requested.renderCommandBuffer;
+        renderCommandBufferFrameId = requested.renderCommandBufferFrameId;
+        geomUsesSourceCrop = hasBufferOrSidebandStream();
+    }
+
+    if (forceUpdate || requested.what & layer_state_t::eRenderResourceTokenChanged) {
+        renderResourceToken = requested.renderResourceToken;
+    }
+
+    if (forceUpdate || requested.what & layer_state_t::ePostProcessChanged) {
+        postProcessShader = requested.postProcessShader;
+        postProcessUniforms = requested.postProcessUniforms;
+        postProcessTarget = requested.postProcessTarget;
+        if (shaderRegistry && postProcessShader) {
+            postProcessEffect = shaderRegistry->getShader(postProcessShader);
+            if (postProcessEffect) {
+                forceClientComposition = true;
+            }
+        } else {
+            postProcessEffect = nullptr;
+        }
+        isTextureSamplingBehind =
+                postProcessEffect && postProcessTarget == layer_state_t::SampleTarget::Behind;
+    }
+
+    if (renderCommandBuffer != nullptr) {
+        forceClientComposition = true;
     }
 }
 
@@ -598,14 +662,18 @@ char LayerSnapshot::classifyCompositionForDebug(
         code = 'l'; // Blur
     } else if (hasProtectedContent) {
         code = 'p'; // Protected content
-    } else if (roundedCorner.hasRoundedCorners()) {
-        code = 'r'; // Rounded corners
+    } else if (roundedCorner.hasSfDrawnRadius()) {
+        code = 'r'; // SF Drawn Rounded corners
+    } else if (roundedCorner.hasClientDrawnRadius()) {
+        code = 'o'; // Client Drawn Rounded corners
     } else if (drawShadows()) {
         code = 's'; // Shadow
     } else if (fillsColor()) {
         code = 'c'; // Solid color
     } else if (hasBufferOrSidebandStream()) {
         code = 'b';
+    } else if (postProcessShader) {
+        code = 'E'; // Effect
     }
 
     if (hwcState.lastCompositionType == Composition::CLIENT) {

@@ -99,6 +99,7 @@ cc_defaults {
         "libasync_safe",
         "libdiskusage",
         "libext2_uuid",
+        "libgmock",
         "libinstalld",
         "libziparchive",
         "liblog",

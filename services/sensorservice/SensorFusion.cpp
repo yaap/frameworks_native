@@ -81,12 +81,8 @@ SensorFusion::SensorFusion()
 }
 
 void SensorFusion::process(const sensors_event_t& event) {
-    // sensor additional info is not currently used in fusion algorithm
-    if (event.type == SENSOR_TYPE_ADDITIONAL_INFO) {
-        return;
-    }
-
-    if (mGyro.has_value() && event.sensor == mGyro.value().getHandle()) {
+    if (mGyro.has_value() && event.type == mGyro.value().getType() &&
+            event.sensor == mGyro.value().getHandle()) {
         float dT;
         if (event.timestamp - mGyroTime > 0 &&
             event.timestamp - mGyroTime < (int64_t)(5e7) ) { // 0.05sec
@@ -108,7 +104,8 @@ void SensorFusion::process(const sensors_event_t& event) {
             }
         }
         mGyroTime = event.timestamp;
-    } else if (mMag.has_value() && event.sensor == mMag.value().getHandle()) {
+    } else if (mMag.has_value() && event.type == mMag.value().getType() &&
+               event.sensor == mMag.value().getHandle()) {
         const vec3_t mag(event.data);
         for (int i = 0; i < NUM_FUSION_MODE; ++i) {
             if (mEnabled[i]) {
@@ -116,7 +113,8 @@ void SensorFusion::process(const sensors_event_t& event) {
                 mFusions[i].handleMag(mag);
             }
         }
-    } else if (event.sensor == mAcc.getHandle()) {
+    } else if (event.type == mAcc.getType() &&
+               event.sensor == mAcc.getHandle()) {
         float dT;
         if (event.timestamp - mAccTime > 0 &&
             event.timestamp - mAccTime < (int64_t)(1e8) ) { // 0.1sec

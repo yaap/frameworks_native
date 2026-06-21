@@ -286,10 +286,11 @@ std::list<NotifyArgs> TouchInputMapper::reconfigure(nsecs_t when,
 
     mConfig = config;
 
-    // Full configuration should happen the first time configure is called and
-    // when the device type is changed. Changing a device type can affect
-    // various other parameters so should result in a reconfiguration.
-    if (!changes.any() || changes.test(InputReaderConfiguration::Change::DEVICE_TYPE)) {
+    // Full configuration should happen the first time configure is called or when the overrides
+    // for the .idc properties of the device have changed. Changing a device configuration can
+    // affect various other parameters so should result in a total reconfiguration.
+    if (!changes.any() ||
+        changes.test(InputReaderConfiguration::Change::DEVICE_CONFIGURATION_OVERRIDES)) {
         // Configure basic parameters.
         mParameters = computeParameters(getDeviceContext());
 
@@ -317,7 +318,7 @@ std::list<NotifyArgs> TouchInputMapper::reconfigure(nsecs_t when,
                     InputReaderConfiguration::Change::POINTER_CAPTURE |
                     InputReaderConfiguration::Change::POINTER_GESTURE_ENABLEMENT |
                     InputReaderConfiguration::Change::EXTERNAL_STYLUS_PRESENCE |
-                    InputReaderConfiguration::Change::DEVICE_TYPE)) {
+                    InputReaderConfiguration::Change::DEVICE_CONFIGURATION_OVERRIDES)) {
         // Configure device sources, display dimensions, orientation and
         // scaling factors.
         configureInputDevice(when, &resetNeeded);
@@ -1017,17 +1018,14 @@ void TouchInputMapper::configureVirtualKeys() {
         VirtualKey virtualKey;
 
         virtualKey.scanCode = virtualKeyDefinition.scanCode;
-        int32_t keyCode;
-        int32_t dummyKeyMetaState;
-        uint32_t flags;
-        if (getDeviceContext().mapKey(virtualKey.scanCode, 0, 0, &keyCode, &dummyKeyMetaState,
-                                      &flags)) {
+        std::optional<MappedKey> mappedKey = getDeviceContext().mapKey(virtualKey.scanCode, 0, 0);
+        if (!mappedKey) {
             ALOGW(INDENT "VirtualKey %d: could not obtain key code, ignoring", virtualKey.scanCode);
             continue; // drop the key
         }
 
-        virtualKey.keyCode = keyCode;
-        virtualKey.flags = flags;
+        virtualKey.keyCode = mappedKey->keyCode;
+        virtualKey.flags = mappedKey->flags;
 
         // convert the key definition's display coordinates into touch coordinates for a hit box
         int32_t halfWidth = virtualKeyDefinition.width / 2;
@@ -2036,6 +2034,11 @@ void TouchInputMapper::cookPointerData() {
     mCurrentCookedState.cookedPointerData.pointerCount = currentPointerCount;
     mCurrentCookedState.cookedPointerData.hoveringIdBits =
             mCurrentRawState.rawPointerData.hoveringIdBits;
+    if (mCurrentCookedState.cookedPointerData.hoveringIdBits.count() > 1) {
+        // Android does not support multiple hovering pointers.
+        LOG(DEBUG) << "Multi-pointer hover detected. Suppressing hover events.";
+        mCurrentCookedState.cookedPointerData.hoveringIdBits.clear();
+    }
     mCurrentCookedState.cookedPointerData.touchingIdBits =
             mCurrentRawState.rawPointerData.touchingIdBits;
     mCurrentCookedState.cookedPointerData.canceledIdBits =

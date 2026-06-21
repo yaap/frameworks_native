@@ -20,6 +20,7 @@
 #include <ui/Rect.h>
 
 #include <android-base/stringprintf.h>
+#include <hardware/gralloc.h>
 #include <string>
 
 using android::base::StringPrintf;
@@ -285,7 +286,7 @@ std::string decodeColorTransform(android_color_transform colorTransform) {
     return StringPrintf("Unknown color transform %d", colorTransform);
 }
 
-// Converts a PixelFormat to a human-readable string.  Max 11 chars.
+// Converts a PixelFormat to a human-readable string.
 // (Could use a table of prefab String8 objects.)
 std::string decodePixelFormat(android::PixelFormat format) {
     switch (format) {
@@ -321,6 +322,10 @@ std::string decodePixelFormat(android::PixelFormat format) {
             return std::string("RG_1616_UINT");
         case android::PIXEL_FORMAT_RGBA_10101010:
             return std::string("RGBA_10101010");
+        case android::PIXEL_FORMAT_BGRA_1010102:
+            return std::string("BGRA_1010102");
+        case android::PIXEL_FORMAT_BGRX_1010102:
+            return std::string("BGRX_1010102");
         default:
             return StringPrintf("Unknown %#08x", format);
     }
@@ -338,6 +343,53 @@ std::string decodeRenderIntent(RenderIntent renderIntent) {
           return std::string("RenderIntent::TONE_MAP_ENHANCE");
     }
     return std::string("Unknown RenderIntent");
+}
+
+#define DECODE_GRALLOC_USAGE_CASE(SS, USAGE, FLAG)                \
+    if ((USAGE & GRALLOC_USAGE_##FLAG) == GRALLOC_USAGE_##FLAG) { \
+        USAGE &= (~static_cast<uint64_t>(GRALLOC_USAGE_##FLAG));  \
+        SS << #FLAG << " | ";                                     \
+    }
+
+std::string decodeGrallocUsage(uint64_t usage) {
+    if (!usage) {
+        return "NONE";
+    }
+    std::stringstream ss;
+    // Flags are incrementally cleared from `usage` as strings are appended to `ss`.
+    // Note: _OFTEN flags must be checked / cleared before their associated _RARELY flags, because
+    // _OFTEN flags are a superset of multiple overlapping bits (e.g. 0b11 vs. 0b10). _HW_CAMERA_ZSL
+    // also shares this property, w.r.t. _HW_CAMERA_READ.
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, SW_READ_OFTEN); // Must be checked before SW_READ_RARELY
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, SW_READ_RARELY);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, SW_WRITE_OFTEN); // Must be checked before SW_WRITE_RARELY
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, SW_WRITE_RARELY);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_TEXTURE);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_RENDER);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_2D);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_COMPOSER);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_FB);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, EXTERNAL_DISP);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, PROTECTED);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, CURSOR);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_VIDEO_ENCODER);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_CAMERA_WRITE);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_CAMERA_ZSL); // Must be checked before HW_CAMERA_READ
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_CAMERA_READ);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, RENDERSCRIPT);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, FOREIGN_BUFFERS);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, HW_IMAGE_ENCODER);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, PRIVATE_0);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, PRIVATE_1);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, PRIVATE_2);
+    DECODE_GRALLOC_USAGE_CASE(ss, usage, PRIVATE_3);
+    // Append any remaining unknown usage bits.
+    if (usage) {
+        ss << "0x" << std::hex << std::uppercase << usage << " | ";
+    }
+    auto result = ss.str();
+    result.erase(result.size() - 3, 3); // Remove trailing separator.
+    return result;
 }
 
 std::string toString(const android::DeviceProductInfo::ManufactureOrModelDate& date) {

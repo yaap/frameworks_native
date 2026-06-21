@@ -20,7 +20,20 @@
 
 #include <binder/Binder.h>
 #include <binder/BpBinder.h>
+#include <binder/ProcessState.h>
 #include <binder/TextOutput.h>
+
+#if defined(__ANDROID__) && !defined(__TRUSTY__)
+#define PCC_LOGGING
+#endif
+#if defined(PCC_LOGGING)
+#include <android/app/privatecompute/IPccSandboxManagerNative.h>
+#include <binder/IServiceManager.h>
+#include <binder/PersistableBundle.h>
+#include <private/android_filesystem_config.h>
+#include <utils/String8.h>
+#include <chrono>
+#endif // PCC_LOGGING
 
 #include <utils/CallStack.h>
 #include <utils/SystemClock.h>
@@ -36,9 +49,11 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
-#include "BinderObserver.h"
 #include "Utils.h"
 #include "binder_module.h"
+#include "observer/BinderObserver.h"
+
+#include "android_os_binder_flags.h"
 
 #if (defined(__ANDROID__) || defined(__Fuchsia__)) && !defined(BINDER_WITH_KERNEL_IPC)
 #error Android and Fuchsia are expected to have BINDER_WITH_KERNEL_IPC
@@ -79,28 +94,16 @@ namespace {
 #endif
     }
 
-    bool fixRecursiveDoubleDerefs() {
-#if defined(LIBBINDER_FIX_RECURSIVE_DOUBLE_DEREFS)
-        return true;
-#else
-        return false;
-#endif
-    }
-
-    bool freezeUseFlushIfNeeded() {
-#if defined(LIBBINDER_FREEZE_USE_FLUSH_IF_NEEDED)
-        return true;
-#else
-        return false;
-#endif
-    }
-
     bool freezeUseFlushEagerly() {
 #if defined(LIBBINDER_FREEZE_USE_FLUSH_EAGERLY)
         return true;
 #else
         return false;
 #endif
+    }
+
+    bool enableFrozenObjectErrorCode() {
+        return android::os::binder::flags::enable_frozen_object_error();
     }
 }
 
@@ -457,7 +460,7 @@ const char* IPCThreadState::getCallingSid() const
 uid_t IPCThreadState::getCallingUid() const
 {
     checkContextIsBinderForUse(__func__);
-    return mCallingUid;
+    return mCallingUid.has_value() ? mCallingUid.value() : getuid();
 }
 
 const IPCThreadState::SpGuard* IPCThreadState::pushGetCallingSpGuard(const SpGuard* guard) {
@@ -562,7 +565,8 @@ static_assert(unpackCallingPid(packCallingIdentity(false, 1000, -1)) == -1,
 int64_t IPCThreadState::clearCallingIdentity()
 {
     // ignore mCallingSid for legacy reasons
-    int64_t token = packCallingIdentity(mHasExplicitIdentity, mCallingUid, mCallingPid);
+    uid_t callingUid = mCallingUid.has_value() ? mCallingUid.value() : getuid();
+    int64_t token = packCallingIdentity(mHasExplicitIdentity, callingUid, mCallingPid);
     clearCaller();
     mHasExplicitIdentity = true;
     return token;
@@ -654,7 +658,7 @@ void IPCThreadState::clearCaller()
 {
     mCallingPid = getpid();
     mCallingSid = nullptr;  // expensive to lookup
-    mCallingUid = getuid();
+    mCallingUid.reset();
 }
 
 status_t IPCThreadState::flushCommands() {
@@ -815,10 +819,8 @@ void IPCThreadState::processPendingDerefs()
 
 void IPCThreadState::processPostWriteDerefs()
 {
-    if (fixRecursiveDoubleDerefs()) {
-        LOG_ALWAYS_FATAL_IF(mIsProcessingPostWriteDerefs,
-                            "processPostWriteDerefs is called recursively.");
-    }
+    LOG_ALWAYS_FATAL_IF(mIsProcessingPostWriteDerefs,
+                        "processPostWriteDerefs is called recursively.");
     mIsProcessingPostWriteDerefs = true;
 
     for (size_t i = 0; i < mPostWriteWeakDerefs.size(); i++) {
@@ -839,7 +841,7 @@ void IPCThreadState::processPostWriteDerefs()
 void IPCThreadState::joinThreadPool(bool isMain)
 {
     LOG_THREADPOOL("**** THREAD %p (PID %d) IS JOINING THE THREAD POOL\n", (void*)pthread_self(),
-                   getpid());
+        getpid());
     mProcess->checkExpectingThreadPoolStart();
     mProcess->mCurrentThreads++;
     mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
@@ -1081,12 +1083,6 @@ status_t IPCThreadState::addFrozenStateChangeCallback(int32_t handle, BpBinder* 
             }
         }
         return NO_ERROR;
-    } else if (freezeUseFlushIfNeeded()) {
-        status_t res;
-        if (flushIfNeeded(&res) && res != OK) {
-            LOG_ALWAYS_FATAL("flushIfNeeded failed. %s(%d): %s", __func__, handle,
-                             statusToString(res).c_str());
-        }
     } else if (status_t res = flushCommands(); res != OK) {
         LOG_ALWAYS_FATAL("%s(%d): %s", __func__, handle, statusToString(res).c_str());
     }
@@ -1111,12 +1107,6 @@ status_t IPCThreadState::removeFrozenStateChangeCallback(int32_t handle, BpBinde
             }
         }
         return NO_ERROR;
-    } else if (freezeUseFlushIfNeeded()) {
-        status_t res;
-        if (flushIfNeeded(&res) && res != OK) {
-            LOG_ALWAYS_FATAL("flushIfNeeded failed. %s(%d): %s", __func__, handle,
-                             statusToString(res).c_str());
-        }
     } else if (status_t res = flushCommands(); res != OK) {
         LOG_ALWAYS_FATAL("%s(%d): %s", __func__, handle, statusToString(res).c_str());
     }
@@ -1203,8 +1193,7 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
             goto finish;
 
         case BR_FROZEN_REPLY:
-            ALOGW("Transaction failed because process frozen.");
-            err = FAILED_TRANSACTION;
+            err = enableFrozenObjectErrorCode() ? FROZEN_OBJECT : FAILED_TRANSACTION;
             goto finish;
 
         case BR_ACQUIRE_RESULT:
@@ -1217,33 +1206,22 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
             goto finish;
 
         case BR_REPLY:
-            {
-                binder_transaction_data tr;
-                err = mIn.read(&tr, sizeof(tr));
-                ALOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
-                if (err != NO_ERROR) goto finish;
-
-                if (reply) {
-                    if ((tr.flags & TF_STATUS_CODE) == 0) {
-                        reply->ipcSetDataReference(
-                            reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
-                            tr.data_size,
-                            reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
-                            tr.offsets_size/sizeof(binder_size_t),
-                            freeBuffer);
-                    } else {
-                        err = *reinterpret_cast<const status_t*>(tr.data.ptr.buffer);
-                        freeBuffer(reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
-                                   tr.data_size,
-                                   reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
-                                   tr.offsets_size / sizeof(binder_size_t));
-                    }
-                } else {
-                    freeBuffer(reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer), tr.data_size,
-                               reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
-                               tr.offsets_size / sizeof(binder_size_t));
-                    continue;
-                }
+            LOG_ALWAYS_FATAL_IF(reply == NULL, "Unexpected BR_REPLY");
+            binder_transaction_data tr;
+            err = mIn.read(&tr, sizeof(tr));
+            ALOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
+            if (err != NO_ERROR) goto finish;
+            if ((tr.flags & TF_STATUS_CODE) == 0) {
+                reply->ipcSetDataReference(reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
+                                           tr.data_size,
+                                           reinterpret_cast<const binder_size_t*>(
+                                                   tr.data.ptr.offsets),
+                                           tr.offsets_size / sizeof(binder_size_t), freeBuffer);
+            } else {
+                err = *reinterpret_cast<const status_t*>(tr.data.ptr.buffer);
+                freeBuffer(reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer), tr.data_size,
+                           reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
+                           tr.offsets_size / sizeof(binder_size_t));
             }
             goto finish;
 
@@ -1536,7 +1514,7 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
 
             const pid_t origPid = mCallingPid;
             const char* origSid = mCallingSid;
-            const uid_t origUid = mCallingUid;
+            const auto origUid = mCallingUid;
             const bool origHasExplicitIdentity = mHasExplicitIdentity;
             const int32_t origStrictModePolicy = mStrictModePolicy;
             const int32_t origTransactionBinderFlags = mLastTransactionBinderFlags;
@@ -1579,7 +1557,7 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                     error = doTransactBinder(binder, tr.code, buffer, &reply, tr.flags);
                     binder->decStrong(this);
                 } else {
-                    error = doTransactBinder(nullptr, tr.code, buffer, &reply, tr.flags);
+                    error = UNKNOWN_TRANSACTION;
                 }
             } else {
                 BBinder* binder = the_context_object.get();
@@ -1668,17 +1646,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
 
     case BR_FROZEN_BINDER:
         {
-            const struct binder_frozen_state_info* data =
-                    reinterpret_cast<const struct binder_frozen_state_info*>(
-                            mIn.readInplace(sizeof(struct binder_frozen_state_info)));
-            if (data == nullptr) {
+            struct binder_frozen_state_info info;
+            if (mIn.read(&info, sizeof(struct binder_frozen_state_info)) != NO_ERROR) {
                 result = UNKNOWN_ERROR;
                 break;
             }
-            BpBinder* proxy = (BpBinder*)data->cookie;
-            proxy->getPrivateAccessor().onFrozenStateChanged(data->is_frozen);
+            BpBinder* proxy = (BpBinder*)info.cookie;
+            proxy->getPrivateAccessor().onFrozenStateChanged(info.is_frozen);
+
             mOut.writeInt32(BC_FREEZE_NOTIFICATION_DONE);
-            mOut.writePointer(data->cookie);
+            mOut.writePointer(info.cookie);
         }
         break;
 
@@ -1716,14 +1693,73 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
     return result;
 }
 
+// Flag gated: isOutgoingTransactionsAuditable is only set if
+// android.app.privatecompute.flags.Flags.enablePccFrameworkSupport is true.
+bool IPCThreadState::logPccTransaction(BBinder* binder, uint32_t code, uid_t callingUid) {
+#if !defined(PCC_LOGGING)
+    (void)binder;
+    (void)code;
+    (void)callingUid;
+    return false;
+#else
+    // Only log if this process is PCC/PCS.
+    if (!ProcessState::self()->isOutgoingTransactionsAuditable()) {
+        return false;
+    }
+    // Do not log PCC -> PCC transactions.
+    if (callingUid >= AID_PCC_COMPONENT_PROCESS_START
+        && callingUid <= AID_PCC_COMPONENT_PROCESS_END) {
+        return false;
+    }
+
+    sp<android::app::privatecompute::IPccSandboxManagerNative> service =
+            interface_cast<app::privatecompute::IPccSandboxManagerNative>(
+                    defaultServiceManager()->checkService(String16("pcc_sandbox_native")));
+
+    if (service == nullptr) {
+        // Rate-limit the logging, as this could be spammy.
+        [[clang::no_destroy]] static std::atomic<std::chrono::steady_clock::time_point>
+                lastLogTime(std::chrono::steady_clock::time_point::min());
+        auto now = std::chrono::steady_clock::now();
+        auto last = lastLogTime.load(std::memory_order_relaxed);
+        // The first and second conditions are to prevent undefined behaviors; the first when last
+        // is a large negative number, the second in case the clock is not monotonic.
+        // The third is the rate-limit we want to enforce.
+        if ((last == std::chrono::steady_clock::time_point::min() || last > now || now - last > 1s)
+            && lastLogTime.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
+            ALOGW("Failed to get IPccSandboxManager service.");
+        }
+        return false;
+    }
+
+    android::os::PersistableBundle bundle;
+    bundle.putString(String16("interface_name"), String16(binder->getInterfaceDescriptor()));
+    bundle.putString(String16("method_name"), String16(binder->getFunctionName(code).c_str()));
+    ::android::binder::Status status = service->writeToAuditLog(bundle);
+    if (!status.isOk()) {
+        ALOGW("Failed to write to audit log: %s", status.toString8().c_str());
+        return false;
+    }
+    return true;
+#endif // PCC_LOGGING
+}
+
+
 status_t IPCThreadState::doTransactBinder(BBinder* binder, uint32_t code, const Parcel& data,
                                           Parcel* reply, uint32_t flags) {
+    LOG_ALWAYS_FATAL_IF(binder == nullptr, "Calling transact on null Binder.");
 #ifdef BINDER_WITH_OBSERVERS
     BinderObserver::CallInfo callInfo =
-            mProcess->mBinderObserver->onBeginTransaction(binder, code, mCallingUid);
+            mProcess->mBinderObserver->onBeginTransaction(binder, code, getCallingUid());
 #endif
-    status_t error =
-            binder != nullptr ? binder->transact(code, data, reply, flags) : UNKNOWN_TRANSACTION;
+    status_t error = binder->transact(code, data, reply, flags);
+#if defined(PCC_LOGGING)
+    // PCC Next: Audit Mode. For PCC components and gateway apps, send binder transaction data to
+    // the audit log.
+    if (error == NO_ERROR) {
+        logPccTransaction(binder, code, getCallingUid());
+    }
+#endif // PCC_LOGGING
 #ifdef BINDER_WITH_OBSERVERS
     mProcess->mBinderObserver->onEndTransaction(mBinderStatsQueue, callInfo);
 #endif
@@ -1799,9 +1835,19 @@ void IPCThreadState::logExtendedError() {
     }
 #endif
 
+    const int bErrno = -ee.param;
+    const char* extraErrorString = "";
+
+    switch (bErrno) {
+        case ENOSPC:
+            extraErrorString = " - Binder buffer full. Too many or too large transactions.";
+            break;
+    }
+
     ALOGE_IF(ee.command != BR_OK,
-             "Binder transaction failure. id: %d, cmd: %s (%d), error: %d (%s)", ee.id,
-             getReturnString(ee.command), ee.command, ee.param, strerror(-ee.param));
+             "Binder transaction failure. id: %d, cmd: %s (%d), error: %d (%s%s)", ee.id,
+             getReturnString(ee.command), ee.command, ee.param, strerror(bErrno),
+             extraErrorString);
 }
 
 void IPCThreadState::freeBuffer(const uint8_t* data, size_t /*dataSize*/,

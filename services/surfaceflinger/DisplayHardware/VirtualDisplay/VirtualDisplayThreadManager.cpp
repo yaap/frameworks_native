@@ -17,6 +17,8 @@
 // #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <ftl/concat.h>
+
 #include "VirtualDisplayThread.h"
 
 #include "VirtualDisplayThreadManager.h"
@@ -57,6 +59,25 @@ void VirtualDisplayThreadManager::releaseThread(uid_t uid) {
         ALOGI("Destroying VirtualDisplayThread for UID: %d as it has no more references.", uid);
         it->second.thread->destroy();
         mThreadsByUid.erase(it);
+    }
+}
+
+void VirtualDisplayThreadManager::dump(utils::Dumper& dumper) const {
+    std::scoped_lock _l(mMutex);
+    utils::Dumper::Section section(dumper, "Virtual Display Helper Threads (Pooled by UID)");
+
+    if (mThreadsByUid.empty()) {
+        using namespace std::string_view_literals;
+        dumper.dump("Status", "None active"sv);
+        return;
+    }
+
+    for (const auto& [uid, context] : mThreadsByUid) {
+        ftl::Concat threadName("Thread for UID ", uid);
+        utils::Dumper::Section threadSection(dumper, threadName.c_str());
+        using namespace std::string_view_literals;
+        dumper.dump("refCount"sv, context.refCount);
+        context.thread->dump(dumper);
     }
 }
 

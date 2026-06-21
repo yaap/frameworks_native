@@ -43,13 +43,12 @@ HwcAsyncWorker::~HwcAsyncWorker() {
         mThread.join();
     }
 }
-std::future<bool> HwcAsyncWorker::send(std::function<bool()> task) {
+std::future<bool> HwcAsyncWorker::send(std::function<bool()>&& task) {
     std::unique_lock<std::mutex> lock(mMutex);
     android::base::ScopedLockAssertion assumeLock(mMutex);
-    mTask = std::packaged_task<bool()>([task = std::move(task)]() { return task(); });
-    mTaskRequested = true;
+    mTask.emplace(std::packaged_task<bool()>([task = std::move(task)]() { return task(); }));
     mCv.notify_one();
-    return mTask.get_future();
+    return mTask->get_future();
 }
 
 void HwcAsyncWorker::run() {
@@ -61,10 +60,10 @@ void HwcAsyncWorker::run() {
     std::unique_lock<std::mutex> lock(mMutex);
     android::base::ScopedLockAssertion assumeLock(mMutex);
     while (!mDone) {
-        mCv.wait(lock, [this]() FTL_FAKE_GUARD(mMutex) { return mTaskRequested || mDone; });
-        if (mTaskRequested && mTask.valid()) {
-            mTask();
-            mTaskRequested = false;
+        mCv.wait(lock, [this]() FTL_FAKE_GUARD(mMutex) { return mTask || mDone; });
+        if (mTask && mTask->valid()) {
+            (*mTask)();
+            mTask.reset();
         }
     }
 }

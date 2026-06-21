@@ -50,3 +50,30 @@ prebuilt_etc {
     name: "ftrace_synthetic_events.conf",
     src: "ftrace_synthetic_events.conf",
 }
+
+cc_test {
+    name: "AtraceRaceTest",
+    srcs: [
+        "atrace_race_test.cpp",
+        "atrace.cpp",
+    ],
+    shared_libs: [
+        "libbase",
+        "libcutils",
+        "libbinder",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+        "libz",
+        "android.hardware.atrace@1.0",
+    ],
+    cflags: [
+        "-Werror",
+        "-Wall",
+        "-DATRACE_TEST_BUILD",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+    ],
+    test_suites: ["general-tests"],
+    team: "trendy_team_android_kernel",
+}

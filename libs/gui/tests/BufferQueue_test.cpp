@@ -1232,7 +1232,7 @@ public:
 
     virtual void onBufferReleased() {}
     virtual bool needsReleaseNotify() { return true; }
-    virtual void onBufferDetached(int slot) {
+    virtual void onBufferDetached(int slot, uint64_t /* bufferId */) override {
         mDetachedSlots.push_back(slot);
     }
     const std::vector<int>& getDetachedSlots() const { return mDetachedSlots; }
@@ -1658,7 +1658,59 @@ TEST_F(BufferQueueTest, PassesThroughPictureProfileHandle) {
     }
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+TEST_F(BufferQueueTest, AttachBuffer_WithAdditionalOptions_DoesNotReallocate) {
+    if (!GraphicBufferAllocator::get().supportsAdditionalOptions()) {
+        GTEST_SKIP() << "Allocator does not support additional options";
+    }
+
+    createBufferQueue();
+    sp<MockConsumer> mc(new MockConsumer);
+    ASSERT_EQ(OK, mConsumer->consumerConnect(mc, false));
+    IGraphicBufferProducer::QueueBufferOutput output;
+    ASSERT_EQ(OK,
+              mProducer->connect(new StubProducerListener, NATIVE_WINDOW_API_CPU, false, &output));
+
+    // Set additional options, which will increment the generation ID.
+    std::vector<gui::AdditionalOptions> options;
+    options.push_back({.name = "android.hardware.graphics.common.Dataspace",
+                       .value = ADATASPACE_SRGB});
+    ASSERT_EQ(OK, mProducer->setAdditionalOptions(options));
+
+    // Create a buffer externally.
+    sp<GraphicBuffer> buffer = sp<GraphicBuffer>::make(1, 1, PIXEL_FORMAT_RGBA_8888,
+                                                       GRALLOC_USAGE_SW_WRITE_OFTEN, "test");
+    ASSERT_NE(nullptr, buffer.get());
+
+    // Attach the buffer. The change under test will set the slot's
+    // additionalOptionsGenerationId.
+    int slot;
+    ASSERT_EQ(OK, mProducer->attachBuffer(&slot, buffer));
+
+    // Queue, acquire, and release the buffer to make it available for dequeue.
+    IGraphicBufferProducer::QueueBufferInput input(
+        0, false, HAL_DATASPACE_UNKNOWN, Rect(0, 0, 1, 1), NATIVE_WINDOW_SCALING_MODE_FREEZE,
+        0, Fence::NO_FENCE);
+    ASSERT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
+
+    BufferItem item;
+    ASSERT_EQ(OK, mConsumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(OK, mConsumer->releaseBuffer(item.mSlot, item.mFrameNumber, Fence::NO_FENCE));
+
+    // Dequeue the buffer again. Without the fix, this would return
+    // BUFFER_NEEDS_REALLOCATION because the generation IDs would mismatch.
+    sp<Fence> fence;
+    int dequeuedSlot;
+    status_t result = mProducer->dequeueBuffer(
+        &dequeuedSlot, &fence, 1, 1, PIXEL_FORMAT_RGBA_8888,
+        GRALLOC_USAGE_SW_WRITE_OFTEN, nullptr, nullptr);
+
+    // We expect OK because the buffer should not need reallocation.
+    ASSERT_EQ(OK, result);
+    ASSERT_EQ(slot, dequeuedSlot);
+}
+#endif
+
 struct MockUnlimitedSlotConsumer : public MockConsumer {
     virtual void onSlotCountChanged(int size) override { mSize = size; }
 
@@ -1711,9 +1763,7 @@ protected:
     void setUpConsumer() {
         EXPECT_EQ(OK, mConsumer->consumerConnect(mConsumerListener, false));
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         EXPECT_EQ(OK, mConsumer->allowUnlimitedSlots(true));
-#endif
         EXPECT_EQ(OK, mConsumer->setConsumerUsageBits(GraphicBuffer::USAGE_SW_READ_OFTEN));
         EXPECT_EQ(OK, mConsumer->setDefaultBufferSize(10, 10));
         EXPECT_EQ(OK, mConsumer->setDefaultBufferFormat(PIXEL_FORMAT_RGBA_8888));
@@ -1727,9 +1777,7 @@ protected:
         EXPECT_EQ(OK,
                   mProducer->connect(mProducerListener, NATIVE_WINDOW_API_CPU,
                                      /*producerControlledByApp*/ true, &output));
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         ASSERT_TRUE(output.isSlotExpansionAllowed);
-#endif
         ASSERT_EQ(OK, mProducer->setMaxDequeuedBufferCount(kDequeableBufferCount));
         ASSERT_EQ(OK, mProducer->allowAllocation(true));
     }
@@ -1796,9 +1844,7 @@ TEST_F(BufferQueueUnlimitedTest, CanAcquireAndReleaseAll) {
 
         BufferItem buffer;
         EXPECT_EQ(OK, mConsumer->acquireBuffer(&buffer, 0));
-        EXPECT_EQ(OK,
-                  mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, EGL_NO_DISPLAY,
-                                           EGL_NO_SYNC, buffer.mFence));
+        EXPECT_EQ(OK, mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, buffer.mFence));
     }
 }
 
@@ -1837,9 +1883,7 @@ TEST_F(BufferQueueUnlimitedTest, GetReleasedBuffersExtended) {
 
         BufferItem buffer;
         EXPECT_EQ(OK, mConsumer->acquireBuffer(&buffer, 0));
-        EXPECT_EQ(OK,
-                  mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, EGL_NO_DISPLAY,
-                                           EGL_NO_SYNC_KHR, buffer.mFence));
+        EXPECT_EQ(OK, mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, buffer.mFence));
     }
 
     EXPECT_EQ(OK, mConsumer->getReleasedBuffersExtended(&releasedSlots));
@@ -1874,5 +1918,56 @@ TEST_F(BufferQueueUnlimitedTest, GetReleasedBuffersExtended) {
                 << "Slots that are still held in the queue are not released.";
     }
 }
-#endif //  COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+
+TEST_F(BufferQueueTest, TestUsageChangeNotifiesConsumer) {
+    createBufferQueue();
+    struct MockConsumerListener : public MockConsumer {
+        MOCK_METHOD(void, onFrameAvailable, (const BufferItem&), (override));
+        MOCK_METHOD(void, onBuffersReleased, (), (override));
+    };
+
+    sp<MockConsumerListener> mc = sp<MockConsumerListener>::make();
+    ASSERT_EQ(OK, mConsumer->consumerConnect(mc, false));
+
+    IGraphicBufferProducer::QueueBufferOutput output;
+    ASSERT_EQ(OK,
+              mProducer->connect(new StubProducerListener, NATIVE_WINDOW_API_CPU, false, &output));
+
+    int slot;
+    sp<Fence> fence;
+    sp<GraphicBuffer> buffer;
+
+    // 1. Dequeue with usage A
+    uint64_t usageA = GRALLOC_USAGE_SW_READ_OFTEN;
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
+              mProducer->dequeueBuffer(&slot, &fence, 100, 100, HAL_PIXEL_FORMAT_RGBA_8888, usageA,
+                                       nullptr, nullptr));
+    ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
+
+    // 2. Queue and Acquire
+    IGraphicBufferProducer::QueueBufferInput input(0, false, HAL_DATASPACE_UNKNOWN,
+                                                   Rect(0, 0, 100, 100),
+                                                   NATIVE_WINDOW_SCALING_MODE_FREEZE, 0,
+                                                   Fence::NO_FENCE);
+    EXPECT_CALL(*mc, onFrameAvailable(testing::_)).Times(1);
+    ASSERT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
+
+    BufferItem item;
+    ASSERT_EQ(OK, mConsumer->acquireBuffer(&item, 0));
+
+    // 3. Release (buffer is now FREE)
+    ASSERT_EQ(OK, mConsumer->releaseBuffer(item.mSlot, item.mFrameNumber, Fence::NO_FENCE));
+
+    // 4. Dequeue with usage B (different from A)
+    // This should trigger reallocation and notify the consumer via onBuffersReleased
+    uint64_t usageB = GRALLOC_USAGE_SW_WRITE_OFTEN;
+
+    // We expect onBuffersReleased to be called because the buffer in 'slot' is being reallocated.
+    EXPECT_CALL(*mc, onBuffersReleased()).Times(1);
+
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
+              mProducer->dequeueBuffer(&slot, &fence, 100, 100, HAL_PIXEL_FORMAT_RGBA_8888, usageB,
+                                       nullptr, nullptr));
+}
+
 } // namespace android

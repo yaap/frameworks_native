@@ -39,6 +39,12 @@
 #include <utils/Trace.h>
 #include <ziparchive/zip_archive.h>
 
+#include <com_android_graphics_libvulkan_flags.h>
+using namespace com::android::graphics::libvulkan;
+
+#include <VulkanProperties.sysprop.h>
+using namespace android::sysprop;
+
 // TODO(b/143296676): This file currently builds up global data structures as it
 // loads, and never cleans them up. This means we're doing heap allocations
 // without going through an app-provided allocator, but worse, we'll leak those
@@ -51,9 +57,18 @@
 namespace vulkan {
 namespace api {
 
+enum LayerType {
+    IMPLICIT,
+    EXPLICIT,
+    PLATFORM,
+    OEM,
+};
+
 struct Layer {
     VkLayerProperties properties;
     size_t library_idx;
+
+    LayerType type;
 
     // true if the layer intercepts vkCreateDevice and device commands
     bool is_global;
@@ -64,7 +79,14 @@ struct Layer {
 
 namespace {
 
-const char kSystemLayerLibraryDir[] = "/data/local/debug/vulkan";
+const char kSystemDebugLayerLibraryDir[] = "/data/local/debug/vulkan";
+#if defined(__LP64__)
+const char kSystemPlatformLayerLibraryDir[] = "/system/lib64/vulkan";
+const char kSystemOEMLayerLibraryDir[] = "/product/lib64/vulkan";
+#else
+const char kSystemPlatformLayerLibraryDir[] = "/system/lib/vulkan";
+const char kSystemOEMLayerLibraryDir[] = "/product/lib/vulkan";
+#endif
 
 class LayerLibrary {
    public:
@@ -96,7 +118,8 @@ class LayerLibrary {
     void Close();
 
     bool EnumerateLayers(size_t library_idx,
-                         std::vector<Layer>& instance_layers) const;
+                         std::vector<Layer>& instance_layers,
+                         LayerType type) const;
 
     void* GetGPA(const Layer& layer, const std::string_view gpa_name) const;
 
@@ -137,7 +160,10 @@ bool LayerLibrary::Open() {
         // (among several) we only allow them in non-user builds.
         auto app_namespace = android::GraphicsEnv::getInstance().getAppNamespace();
         if (app_namespace &&
-            !android::base::StartsWith(path_, kSystemLayerLibraryDir)) {
+            !(android::base::StartsWith(path_, kSystemDebugLayerLibraryDir) ||
+              android::base::StartsWith(path_,
+                                        kSystemPlatformLayerLibraryDir) ||
+              android::base::StartsWith(path_, kSystemOEMLayerLibraryDir))) {
             char* error_msg = nullptr;
             dlhandle_ = android::OpenNativeLibraryInNamespace(
                 app_namespace, path_.c_str(), &native_bridge_, &error_msg);
@@ -189,7 +215,8 @@ void LayerLibrary::Close() {
 }
 
 bool LayerLibrary::EnumerateLayers(size_t library_idx,
-                                   std::vector<Layer>& instance_layers) const {
+                                   std::vector<Layer>& instance_layers,
+                                   LayerType type) const {
     PFN_vkEnumerateInstanceLayerProperties enumerate_instance_layers =
         GetTrampoline<PFN_vkEnumerateInstanceLayerProperties>(
             "vkEnumerateInstanceLayerProperties");
@@ -263,6 +290,7 @@ bool LayerLibrary::EnumerateLayers(size_t library_idx,
         layer.properties = props;
         layer.library_idx = library_idx;
         layer.is_global = false;
+        layer.type = type;
 
         uint32_t count = 0;
         result =
@@ -341,12 +369,15 @@ void* LayerLibrary::GetGPA(const Layer& layer, const std::string_view gpa_name) 
 std::vector<LayerLibrary> g_layer_libraries;
 std::vector<Layer> g_instance_layers;
 
-void AddLayerLibrary(const std::string& path, const std::string& filename) {
+void AddLayerLibrary(const std::string& path,
+                     const std::string& filename,
+                     LayerType type) {
     LayerLibrary library(path + "/" + filename, filename);
     if (!library.Open())
         return;
 
-    if (!library.EnumerateLayers(g_layer_libraries.size(), g_instance_layers)) {
+    if (!library.EnumerateLayers(g_layer_libraries.size(), g_instance_layers,
+                                 type)) {
         library.Close();
         return;
     }
@@ -437,7 +468,7 @@ void ForEachFileInPath(const std::string& path,
     }
 }
 
-void DiscoverLayersInPathList(const std::string& pathstr) {
+void DiscoverLayersInPathList(const std::string& pathstr, LayerType type) {
     ATRACE_CALL();
     std::vector<std::string> paths = android::base::Split(pathstr, ":");
     for (const auto& path : paths) {
@@ -458,8 +489,36 @@ void DiscoverLayersInPathList(const std::string& pathstr) {
                 }
             }
             if (!duplicate)
-                AddLayerLibrary(path, filename);
+                AddLayerLibrary(path, filename, type);
         });
+    }
+}
+
+void DiscoverLayersFromProperty(const std::string& path,
+                                const std::string& librariesprop,
+                                LayerType type) {
+    ATRACE_CALL();
+
+    std::vector<std::string> libraries =
+        android::base::Split(librariesprop, ":");
+    for (const auto& filename : libraries) {
+        if (android::base::StartsWith(filename, "libVkLayer") &&
+            android::base::EndsWith(filename, ".so")) {
+            // Check to ensure we haven't seen this layer already
+            // (e.g. an IMPLICIT or EXPLICIT layer)
+
+            bool duplicate = false;
+            for (auto& layer : g_layer_libraries) {
+                if (layer.GetFilename() == filename) {
+                    ALOGV("Skipping duplicate layer %s in %s", filename.c_str(),
+                          path.c_str());
+                    duplicate = true;
+                }
+            }
+
+            if (!duplicate)
+                AddLayerLibrary(path, filename, type);
+        }
     }
 }
 
@@ -481,18 +540,104 @@ void* GetLayerGetProcAddr(const Layer& layer,
 
 }  // anonymous namespace
 
+/* This function is used to discover all of the implicit, explicit, platform,
+ * and OEM layers that should be used for the process (typically an application
+ * APK, but potentially a system process such as SurfaceFlinger).
+ *
+ * Android's security model restricts usage of implicit layers (a.k.a. "debug
+ * layers") to one of the following cases for the target app:
+ *
+ * - The target app is debuggable
+ * - The target app is run on a userdebug build of the operating system which
+ *   grants root access
+ * - The target app's manifest file includes the following meta-data element
+ *   (only applies to apps that target Android 11 (API level 30) or higher):
+ *   <meta-data android:name="com.android.graphics.injectLayers.enable"
+ *   android:value="true" />
+ *
+ * Implicit layers can be globally enabled until the next reboot, using the
+ * following command:
+ *
+ * - adb shell setprop debug.vulkan.layers <layer1:layer2:layerN>
+ *
+ * Implicit layers can be enabled for a single target application, using the
+ * "adb shell settings put global" command to configure the following settings
+ * (that persist across reboots):
+ *
+ * - enable_gpu_debug_layers 1
+ * - gpu_debug_app <package_name>
+ * - gpu_debug_layers <layer1:layer2:layerN>
+ * - gpu_debug_layer_app <package1:package2:packageN>
+ */
 void DiscoverLayers() {
     ATRACE_CALL();
 
+    // Look in the original Android "implicit" layer (a.k.a. "debug layer") path
+    // for implicit layers, configured by the following settings (as described
+    // above): enable_gpu_debug_layers, gpu_debug_app, gpu_debug_layers
     if (android::GraphicsEnv::getInstance().isDebuggable()) {
-        DiscoverLayersInPathList(kSystemLayerLibraryDir);
+        DiscoverLayersInPathList(kSystemDebugLayerLibraryDir,
+                                 LayerType::IMPLICIT);
     }
+    // Look in the application's APK for "explicit" layers.  Also look for
+    // "implicit" layers living in another APK(s), configured by all of the
+    // per-app settings described above.  If configured, both APKs are returned
+    // by getLayerPaths().
+    //
+    // TODO (b/455899446): Split treatment of IMPLICIT and EXPLICIT layers,
+    // which are currently treated the same in the code below.
     if (!android::GraphicsEnv::getInstance().getLayerPaths().empty())
-        DiscoverLayersInPathList(android::GraphicsEnv::getInstance().getLayerPaths());
+        DiscoverLayersInPathList(
+            android::GraphicsEnv::getInstance().getLayerPaths(),
+            LayerType::EXPLICIT);
+    // TODO: longer term, we may want to load/Open() OPLs in Zygote and
+    // inherit them into this process (i.e. not Open() and Close() them for each
+    // process).
+    if (flags::oem_and_platform_layers()) {
+        // The layer properties are colon-separated lists of layer filenames
+        std::string platformLayerLibraryNames =
+            VulkanProperties::platform_layers().value_or("");
+        if (!platformLayerLibraryNames.empty()) {
+            DiscoverLayersFromProperty(kSystemPlatformLayerLibraryDir,
+                                       platformLayerLibraryNames,
+                                       LayerType::PLATFORM);
+        }
+        std::string oemLayerLibraryNames =
+            VulkanProperties::oem_layers().value_or("");
+        if (!oemLayerLibraryNames.empty()) {
+            DiscoverLayersFromProperty(kSystemOEMLayerLibraryDir,
+                                       oemLayerLibraryNames, LayerType::OEM);
+        }
+    }
 }
 
-uint32_t GetLayerCount() {
-    return static_cast<uint32_t>(g_instance_layers.size());
+/* Return the number of IMPLICIT and EXPLICIT Layer's (not PLATFORM nor OEM
+ * Layer's), that should be returned by vkEnumerateInstanceLayerProperties().
+ *
+ * NOTE: This relies on all IMPLICIT and EXPLICIT Layer's being added to
+ * g_instance_layers before any PLATFORM or OEM Layer's.
+ */
+uint32_t GetEnumeratedLayerCount() {
+    uint32_t count = 0;
+    for (size_t i = 0; i < g_instance_layers.size(); i++) {
+        LayerType type = g_instance_layers[i].type;
+        if (type == LayerType::PLATFORM || type == LayerType::OEM) {
+            break;
+        }
+        count++;
+    }
+    return count;
+}
+
+/* Return the number of PLATFORM and OEM Layer's (not IMPLICIT nor EXPLICIT
+ * Layer's), that LayerChain::ActivateLayers() should activate.
+ *
+ * NOTE: This relies on all IMPLICIT and EXPLICIT Layer's being added to
+ * g_instance_layers before any PLATFORM or OEM Layer's.
+ */
+uint32_t GetOemAndPlatformLayerCount() {
+    uint32_t count = g_instance_layers.size() - GetEnumeratedLayerCount();
+    return count;
 }
 
 const Layer& GetLayer(uint32_t index) {

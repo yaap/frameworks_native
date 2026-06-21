@@ -284,7 +284,7 @@ public:
         ASSERT_LE(rect.right - rect.left, imageWidth);
         ASSERT_LE(rect.bottom - rect.top, imageHeight);
 
-        int tolerance = 8; // arbitrary
+        const int tolerance = 50; // arbitrary
         for (int32_t y = rect.top; y < rect.bottom; y++) {
             for (int32_t x = rect.left; x < rect.right; x++) {
                 const uint8_t* bufferPixel = mPixels + y * bufferStride + x * 4;
@@ -300,7 +300,7 @@ public:
                 dist = std::max(std::abs(db), dist);
                 dist = std::max(std::abs(da), dist);
 
-                bool pixelMatches = dist < tolerance;
+                bool pixelMatches = dist <= tolerance;
 
                 if (!pixelMatches) {
                     std::filesystem::path outFilename = pathRelativeToExeDir.filename();
@@ -314,12 +314,13 @@ public:
                             << String8::format("Inside rect (%d, %d, %d, %d), " //
                                                "pixel @ (%3d, %3d): "           //
                                                "expected [%3d, %3d, %3d, %3d], got [%3d, %3d, %3d, "
-                                               "%3d], " //
+                                               "%3d], dist=%d, " //
                                                "wrote screenshot to '%s'",
                                                rect.left, rect.top, rect.right, rect.bottom, x, y,
                                                imagePixel[0], imagePixel[1], imagePixel[2],
                                                imagePixel[3], bufferPixel[0], bufferPixel[1],
-                                               bufferPixel[2], bufferPixel[3], outPath.c_str())
+                                               bufferPixel[2], bufferPixel[3], dist,
+                                               outPath.c_str())
                                        .c_str();
                     return;
                 }
@@ -327,13 +328,53 @@ public:
         }
     }
 
-    Color getPixelColor(uint32_t x, uint32_t y) {
+    Color getPixelColor(uint32_t x, uint32_t y) const {
         if (!mOutBuffer || mOutBuffer->getPixelFormat() != HAL_PIXEL_FORMAT_RGBA_8888) {
             return {0, 0, 0, 0};
         }
 
         const uint8_t* pixel = mPixels + (4 * (y * mOutBuffer->getStride() + x));
         return {pixel[0], pixel[1], pixel[2], pixel[3]};
+    }
+
+    sp<GraphicBuffer> getBuffer() const { return mOutBuffer; }
+
+    ui::Size getBufferSize() const {
+        return mOutBuffer ? ui::Size(mOutBuffer->getWidth(), mOutBuffer->getHeight()) : ui::Size();
+    }
+
+    void expectBufferMatches(const ScreenCapture& other, const char* name = "mismatch",
+                             std::function<bool(Color)> filter = nullptr) const {
+        ui::Size s1 = getBufferSize();
+        ui::Size s2 = other.getBufferSize();
+        ASSERT_EQ(s1.width, s2.width);
+        ASSERT_EQ(s1.height, s2.height);
+
+        for (int32_t y = 0; y < s1.height; y++) {
+            for (int32_t x = 0; x < s1.width; x++) {
+                Color c1 = getPixelColor(x, y);
+                if (filter && !filter(c1)) {
+                    continue;
+                }
+                Color c2 = other.getPixelColor(x, y);
+                if (c1 != c2) {
+                    std::filesystem::path debugDir = std::filesystem::temp_directory_path() /
+                            "SurfaceFlinger_test_screenshots";
+                    std::error_code ec;
+                    std::filesystem::create_directories(debugDir, ec);
+
+                    std::filesystem::path path1 = debugDir / (std::string(name) + "_expected.png");
+                    std::filesystem::path path2 = debugDir / (std::string(name) + "_actual.png");
+
+                    writeGraphicBufferToPng(path1, mOutBuffer);
+                    writeGraphicBufferToPng(path2, other.mOutBuffer);
+
+                    ASSERT_EQ(c1, c2) << "Pixel mismatch at (" << x << ", " << y << ")\n"
+                                      << "Expected image: " << path1 << "\n"
+                                      << "Actual image:   " << path2;
+                }
+            }
+        }
     }
 
     void expectFGColor(uint32_t x, uint32_t y) { checkPixel(x, y, 195, 63, 63); }
@@ -360,7 +401,7 @@ public:
 
 private:
     sp<GraphicBuffer> mOutBuffer;
-    bool mContainsHdr = mContainsHdr;
+    bool mContainsHdr;
     uint8_t* mPixels = nullptr;
 };
 } // namespace

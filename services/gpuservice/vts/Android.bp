@@ -25,6 +25,7 @@ java_test_host {
         "compatibility-host-util",
     ],
     test_suites: [
+        "dts",
         "general-tests",
         "vts",
     ],

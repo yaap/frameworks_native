@@ -21,6 +21,7 @@
 #include <android/data_space.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
+#include <ftl/concat.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/Surface.h>
 #include <hardware/gralloc.h>
@@ -58,7 +59,8 @@ std::future<SinkSurfaceHelper::SinkSurfaceData> SinkSurfaceHelper::connectSinkSu
     auto promise = std::make_shared<std::promise<SinkSurfaceData>>();
     auto future = promise->get_future();
 
-    mVDThread.submitWork(std::bind(&SinkSurfaceHelper::connectSinkSurfaceTask,
+    mVDThread.submitWork("Sink (Connecting)", "connectSinkSurface",
+                         std::bind(&SinkSurfaceHelper::connectSinkSurfaceTask,
                                    sp<SinkSurfaceHelper>::fromExisting(this), promise));
 
     return future;
@@ -67,8 +69,9 @@ std::future<SinkSurfaceHelper::SinkSurfaceData> SinkSurfaceHelper::connectSinkSu
 void SinkSurfaceHelper::abandon() {
     ATRACE_CALL();
 
-    mVDThread.submitWork(
-            std::bind(&SinkSurfaceHelper::abandonTask, sp<SinkSurfaceHelper>::fromExisting(this)));
+    mVDThread.submitWork(mName, "abandon",
+                         std::bind(&SinkSurfaceHelper::abandonTask,
+                                   sp<SinkSurfaceHelper>::fromExisting(this)));
 }
 
 bool SinkSurfaceHelper::isFrozen() {
@@ -122,14 +125,16 @@ bool SinkSurfaceHelper::returnDequeuedBuffer(const sp<GraphicBuffer>& buffer,
 void SinkSurfaceHelper::sendBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& fence) {
     ATRACE_CALL();
 
-    mVDThread.submitWork(std::bind(&SinkSurfaceHelper::sendBufferTask,
+    mVDThread.submitWork(mName, "sendBuffer",
+                         std::bind(&SinkSurfaceHelper::sendBufferTask,
                                    sp<SinkSurfaceHelper>::fromExisting(this), buffer, fence));
 }
 
 void SinkSurfaceHelper::setBufferSize(uint32_t width, uint32_t height) {
     ATRACE_CALL();
 
-    mVDThread.submitWork(std::bind(&SinkSurfaceHelper::setBufferSizeTask,
+    mVDThread.submitWork(mName, "setBufferSize",
+                         std::bind(&SinkSurfaceHelper::setBufferSizeTask,
                                    sp<SinkSurfaceHelper>::fromExisting(this), width, height));
 }
 
@@ -138,7 +143,8 @@ void SinkSurfaceHelper::onBufferReleased() {
 
     // The current function _is_ called off the main thread. But, if we run this on the VD
     // thread, we'll be able to catch freezes during the dequeue.
-    mVDThread.submitWork(std::bind(&SinkSurfaceHelper::dequeueBufferTask,
+    mVDThread.submitWork(mName, "onBufferReleased",
+                         std::bind(&SinkSurfaceHelper::dequeueBufferTask,
                                    sp<SinkSurfaceHelper>::fromExisting(this)));
 }
 
@@ -256,7 +262,8 @@ void SinkSurfaceHelper::sendBufferTask(sp<GraphicBuffer> buffer, sp<Fence> fence
     }
 
     if (output.bufferReplaced) {
-        mVDThread.submitWork(std::bind(&SinkSurfaceHelper::dequeueBufferTask,
+        mVDThread.submitWork(mName, "dequeueBuffer (on replace)",
+                             std::bind(&SinkSurfaceHelper::dequeueBufferTask,
                                        sp<SinkSurfaceHelper>::fromExisting(this)));
     }
     ALOGD("%s: Queued buffer %" PRIu64 "to surface %s.", __func__, buffer->getId(),
@@ -357,6 +364,38 @@ void SinkSurfaceHelper::cancelBuffers(
     if (res != NO_ERROR) {
         ALOGE("%s: Unable to cancel buffers. Status: %d", __func__, res);
         return;
+    }
+}
+
+void SinkSurfaceHelper::dump(utils::Dumper& dumper) const {
+    std::scoped_lock _l(mDataMutex);
+    utils::Dumper::Section section(dumper, "Sink Surface Helper");
+
+    using namespace std::string_view_literals;
+    dumper.dump("isDead"sv, mIsDead);
+
+    utils::Dumper::Section bufferSection(dumper, "Internal Buffer Pool (mDequeuedBuffers)");
+    if (mDequeuedBuffers.empty()) {
+        dumper.dump("buffers"sv, "none"sv);
+        return;
+    }
+
+    for (size_t i = 0; i < mDequeuedBuffers.size(); i++) {
+        const auto& b = mDequeuedBuffers[i];
+        std::string slotLabel = "[Slot " + std::to_string(i) + "]";
+        std::string bufferInfo = "ID: " + std::to_string(b.buffer->getId()) +
+                ", Size: " + std::to_string(b.buffer->getWidth()) + "x" +
+                std::to_string(b.buffer->getHeight()) +
+                ", Format: " + std::to_string(b.buffer->getPixelFormat()) +
+                ", In-Use: " + (b.inUse ? "YES" : "NO");
+
+        dumper.dump(slotLabel, bufferInfo);
+        if (b.fence && b.fence->isValid()) {
+            std::string fenceLabel = slotLabel + " Fence";
+            dumper.dump(fenceLabel,
+                        b.fence->getSignalTime() == Fence::SIGNAL_TIME_PENDING ? "Pending"sv
+                                                                               : "Signaled"sv);
+        }
     }
 }
 

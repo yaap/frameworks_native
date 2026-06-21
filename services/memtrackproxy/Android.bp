@@ -31,7 +31,6 @@ cc_library_shared {
         "liblog",
         "libcutils",
         "libutils",
-        "android.hardware.memtrack@1.0",
         "android.hardware.memtrack-V1-ndk",
     ],
     srcs: [
@@ -44,7 +43,6 @@ cc_library_shared {
         "include/memtrackproxy",
     ],
     export_shared_lib_headers: [
-        "android.hardware.memtrack@1.0",
         "android.hardware.memtrack-V1-ndk",
     ],
 }

@@ -67,6 +67,9 @@ ndk_library {
 
     // Android O
     first_version: "26",
+    // libnativewindow bypasses denylist because all its symbols are duplicated
+    // in libandroid, which leads to symbol conflict.
+    bypass_artless_denylist: true,
 }
 
 cc_library {

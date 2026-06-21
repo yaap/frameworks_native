@@ -21,6 +21,7 @@
 #include <android/data_space.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
+#include <ftl/concat.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/Surface.h>
 #include <hardware/gralloc.h>
@@ -60,7 +61,7 @@ void VirtualDisplayThread::destroy() {
     ATRACE_CALL();
     std::scoped_lock _l(mWorkMutex);
 
-    submitWorkLocked([this]() {
+    submitWorkLocked(kInternalContextName, "destroy-task", [this]() {
         ATRACE_NAME("destroy-task");
         mState = SHUT_DOWN;
         // After this task, the worker thread should clean itself up, freeing the buffers
@@ -90,14 +91,18 @@ bool VirtualDisplayThread::Client::isFrozen() const {
     return timeSinceLastTask >= std::chrono::milliseconds(250);
 }
 
-void VirtualDisplayThread::Client::submitWork(std::function<void()>&& task) {
+void VirtualDisplayThread::Client::submitWork(const std::string& contextName,
+                                              const std::string& label,
+                                              std::function<void()>&& work) {
     ATRACE_CALL();
 
     std::scoped_lock _l(mThread->mWorkMutex);
-    mThread->submitWorkLocked(std::move(task));
+    mThread->submitWorkLocked(contextName, label, std::move(work));
 }
 
-void VirtualDisplayThread::submitWorkLocked(std::function<void()>&& task) {
+void VirtualDisplayThread::submitWorkLocked(const std::string& contextName,
+                                            const std::string& label,
+                                            std::function<void()>&& work) {
     ATRACE_CALL();
 
     VirtualDisplayThread::State state = mState.load();
@@ -105,7 +110,7 @@ void VirtualDisplayThread::submitWorkLocked(std::function<void()>&& task) {
         return;
     }
 
-    mWorkQueue.push(std::move(task));
+    mWorkQueue.push({.work = std::move(work), .contextName = contextName, .label = label});
     mCondVar.notify_one();
 }
 
@@ -134,20 +139,56 @@ bool VirtualDisplayThread::vdThreadPollAndWork() {
     mWorkQueue.pop();
 
     {
-        ATRACE_NAME("VirtualDisplayThread-RunTask");
+        ftl::Concat traceName("VirtualDisplayThread-RunTask-", ftl::truncated<64>(task.label));
+        ATRACE_NAME(traceName.c_str());
         mIsWorking = true;
+        mCurrentTaskContextName = task.contextName;
+        mCurrentTaskLabel = task.label;
         mLastWorkStartedTimeNs = std::chrono::steady_clock::now();
-
         lock.unlock();
         // This task talks to the application-provide surface sink, and can arbitrarily
         // block or deadlock!
-        task();
+        task.work();
         lock.lock();
 
         mIsWorking = false;
+        mTotalTasksProcessed++;
     }
 
     return mState != SHUT_DOWN;
+}
+
+void VirtualDisplayThread::dump(utils::Dumper& dumper) const {
+    std::scoped_lock _l(mWorkMutex);
+    const auto stateStr = [](State state) {
+        switch (state) {
+            case INITIALIZING:
+                return "INITIALIZING";
+            case RUNNING:
+                return "RUNNING";
+            case SHUTTING_DOWN:
+                return "SHUTTING_DOWN";
+            case SHUT_DOWN:
+                return "SHUT_DOWN";
+        }
+    };
+
+    using namespace std::string_view_literals;
+    dumper.dump("state"sv, std::string_view(stateStr(mState)));
+    dumper.dump("workQueueDepth"sv, mWorkQueue.size());
+    dumper.dump("totalTasksProcessed"sv, mTotalTasksProcessed);
+
+    if (mIsWorking) {
+        auto now = std::chrono::steady_clock::now();
+        auto duration =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastWorkStartedTimeNs);
+        dumper.dump("status"sv, "WORKING"sv);
+        dumper.dump("currentContext"sv, mCurrentTaskContextName);
+        dumper.dump("currentTask"sv, mCurrentTaskLabel);
+        dumper.dump("currentTaskDurationMs"sv, duration.count());
+    } else {
+        dumper.dump("status"sv, "IDLE"sv);
+    }
 }
 
 } // namespace android

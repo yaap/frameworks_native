@@ -38,6 +38,8 @@ cc_test {
         "main.cpp",
         "test_framework/core/BufferId.cpp",
         "test_framework/core/EdidBuilder.cpp",
+        "test_framework/core/ScenarioEventRecorder.cpp",
+        "test_framework/core/ScenarioEventValidation.cpp",
         "test_framework/core/TestService.cpp",
         "test_framework/hwc3/DisplayVSyncEventService.cpp",
         "test_framework/hwc3/FakeComposer.cpp",
@@ -57,6 +59,7 @@ cc_test {
         "tests/internal/AsyncFunction_test.cpp",
         "tests/internal/DisplayRefresh_test.cpp",
         "tests/internal/EdidBuilder_test.cpp",
+        "tests/internal/ScenarioEventValidation_test.cpp",
 
         // SurfaceFlinger tests
         "tests/Placeholder_test.cpp",

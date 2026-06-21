@@ -114,10 +114,6 @@ private:
                               uint32_t width,
                               const std::array<const int16_t*, NUM_BUFFERS>& readLocations);
     /**
-     * Read all currently available frames.
-     */
-    std::vector<TouchVideoFrame> readFrames();
-    /**
      * Read a single frame. May return nullopt if no data is currently available for reading.
      */
     std::optional<TouchVideoFrame> readFrame();

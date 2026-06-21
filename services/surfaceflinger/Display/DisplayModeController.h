@@ -47,7 +47,7 @@ class DisplayModeController {
 public:
     using ActiveModeListener = ftl::Function<void(PhysicalDisplayId, Fps vsyncRate, Fps renderFps)>;
 
-    DisplayModeController();
+    DisplayModeController() = default;
 
     void setHwComposer(HWComposer* composerPtr) { mComposerPtr = composerPtr; }
     void setActiveModeListener(const ActiveModeListener& listener) {
@@ -70,7 +70,13 @@ public:
     // Returns `nullptr` if the display is no longer registered (or never was).
     RefreshRateSelectorPtr selectorPtrFor(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
 
-    enum class DesiredModeAction { None, InitiateDisplayModeSwitch, InitiateRenderRateSwitch };
+    enum class DesiredModeAction {
+        None,
+        InitiateDisplayModeSwitch,
+        MergeDisplayModeSwitch,
+        InitiateRenderRateSwitch
+    };
+
     enum class ModeChangeResult { Changed, Rejected, Aborted };
 
     DesiredModeAction setDesiredMode(PhysicalDisplayId, DisplayModeRequest&&)
@@ -80,14 +86,21 @@ public:
 
     DisplayModeRequestOpt getDesiredMode(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
 
+    // Returns an array with all the displays that have a pending desired mode request that matches
+    // a given synchronization token.
+    std::vector<PhysicalDisplayId> getDisplayIdForRequest(sp<IBinder>) const EXCLUDES(mDisplayLock);
+
     // Consumes the display's desired mode if one exists. If it does not match the active resolution
     // (i.e. the DisplayModeRequest is a resolution switch), then it must match `expectedResolution`
     // for it to be consumed.
-    DisplayModeRequestOpt takeDesiredModeIfMatches(PhysicalDisplayId, ui::Size expectedResolution)
+    DisplayModeRequestOpt takeDesiredModeIfMatches(PhysicalDisplayId, ui::Size expectedResolution,
+                                                   bool shouldSyncResolutionSwitch = true)
             EXCLUDES(mDisplayLock);
 
     // TODO: Remove once `modeset_state_machine` flag is cleaned up.
     void clearDesiredMode(PhysicalDisplayId) EXCLUDES(mDisplayLock);
+    // TODO: Remove once `synced_resolution_switch` flag is cleaned up.
+    void clearPendingMode(PhysicalDisplayId) REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     DisplayModeRequestOpt getPendingMode(PhysicalDisplayId) const REQUIRES(kMainThreadContext)
             EXCLUDES(mDisplayLock);
@@ -99,6 +112,10 @@ public:
     ModeChangeResult initiateModeChange(PhysicalDisplayId, DisplayModeRequest&&,
                                         const hal::VsyncPeriodChangeConstraints&,
                                         hal::VsyncPeriodChangeTimeline& outTimeline)
+            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+
+    ModeChangeResult initiateModeChange(
+            ui::PhysicalDisplayMap<PhysicalDisplayId, DisplayModeRequest>&&)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     // TODO: Remove once `modeset_state_machine` flag is cleaned up.
@@ -139,8 +156,6 @@ public:
 
     void setSecure(PhysicalDisplayId displayId, bool secure) REQUIRES(kMainThreadContext)
             EXCLUDES(mDisplayLock);
-
-    bool supportsHdcp() const;
 
     void startHdcpNegotiation(PhysicalDisplayId displayId) REQUIRES(kMainThreadContext);
 
@@ -203,8 +218,6 @@ private:
 
     mutable std::mutex mDisplayLock;
     ui::PhysicalDisplayMap<PhysicalDisplayId, DisplayPtr> mDisplays GUARDED_BY(mDisplayLock);
-
-    bool mSupportsHdcp = false;
 };
 
 } // namespace android::display

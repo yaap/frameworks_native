@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <input/Input.h>
 #include <perfetto/config/android/android_input_event_config.pbzero.h>
 #include <perfetto/trace/android/android_input_event.pbzero.h>
 #include <perfetto/trace/evdev.pbzero.h>
@@ -186,6 +187,78 @@ public:
         inputEvent->set_type(rawEvent.type);
         inputEvent->set_code(rawEvent.code);
         inputEvent->set_value(rawEvent.value);
+    }
+
+    static void toProtoEvdevDeviceAdditionEvent(const TracedEvdevDevice& device,
+                                                ProtoEvdev& outProto) {
+        outProto.set_device_id(device.eventHubId);
+        auto* addEvent = outProto.set_add_event();
+        auto* evdevDevice = addEvent->set_device();
+        evdevDevice->set_device_num(device.evdevNodeNumber);
+        evdevDevice->set_name(device.identifier.name);
+        evdevDevice->set_phys(device.identifier.location);
+        evdevDevice->set_uniq(device.identifier.uniqueId);
+        auto* identifier = evdevDevice->set_id();
+        identifier->set_bustype(device.identifier.bus);
+        identifier->set_vendor(device.identifier.vendor);
+        identifier->set_product(device.identifier.product);
+        identifier->set_version(device.identifier.version);
+
+        evdevDevice->set_ev_bitmask(reinterpret_cast<const uint8_t*>(device.evBitmask.data()),
+                                    device.evBitmask.size() * sizeof(uint32_t));
+        evdevDevice->set_prop_bitmask(reinterpret_cast<const uint8_t*>(device.propBitmask.data()),
+                                      device.propBitmask.size() * sizeof(uint32_t));
+
+        for (const auto& [evType, bitmask] : device.eventTypeBitmasks) {
+            auto* entry = evdevDevice->add_event_type_bitmasks();
+            entry->set_key(evType);
+            entry->set_value(reinterpret_cast<const uint8_t*>(bitmask.data()),
+                             bitmask.size() * sizeof(uint32_t));
+        }
+
+        for (const auto& [axis, info] : device.absInfos) {
+            auto* entry = evdevDevice->add_absolute_axis_infos();
+            entry->set_key(axis);
+            auto* absInfo = entry->set_value();
+            absInfo->set_minimum(info.minValue);
+            absInfo->set_maximum(info.maxValue);
+            absInfo->set_fuzz(info.fuzz);
+            absInfo->set_flat(info.flat);
+            absInfo->set_resolution(info.resolution);
+        }
+
+        for (const auto& [evType, axes] : device.axisStates) {
+            auto* entry = evdevDevice->add_axis_states();
+            entry->set_key(evType);
+            auto* axisMap = entry->set_value();
+            for (const auto& [axis, value] : axes) {
+                if (value == 0) {
+                    continue;
+                }
+                auto* axisEntry = axisMap->add_axis_states();
+                axisEntry->set_key(axis);
+                axisEntry->set_value(value);
+            }
+        }
+
+        for (const auto& [axis, slotValues] : device.absMtStates) {
+            auto* entry = evdevDevice->add_abs_mt_states();
+            entry->set_key(axis);
+            auto* slotMap = entry->set_value();
+            for (size_t slot = 0; slot < slotValues.size(); slot++) {
+                if (slotValues[slot] == 0) {
+                    continue;
+                }
+                auto* slotEntry = slotMap->add_slot_values();
+                slotEntry->set_key(slot);
+                slotEntry->set_value(slotValues[slot]);
+            }
+        }
+    }
+
+    static void toProtoEvdevDeviceRemovalEvent(RawDeviceId deviceId, ProtoEvdev& outProto) {
+        outProto.set_device_id(deviceId);
+        outProto.set_remove_event();
     }
 
     static impl::TraceConfig parseConfig(ProtoConfigDecoder& protoConfig) {

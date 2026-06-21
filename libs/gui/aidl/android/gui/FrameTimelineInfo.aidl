@@ -43,4 +43,15 @@ parcelable FrameTimelineInfo {
 
     // The start time of a frame that was not drawn and squashed into this frame.
     long skippedFrameStartTimeNanos = 0;
+
+    // The amount of fixup added to the vsync time by the app to correct for jitter.
+    long vsyncResyncedJitterNanos = 0;
+
+    // The amount of time spent in dequeueBuffer waiting for an available buffer.
+    long dequeueBufferDurationNanos = 0;
+
+    // Time used by animations to compute progress and render frames.
+    // 0 is first frame of animation / non-animated frame.
+    // -1 means animation time is absent/unknown.
+    long animationTime = -1;
 }

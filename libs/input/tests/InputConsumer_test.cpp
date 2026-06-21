@@ -16,8 +16,6 @@
 
 #include <input/InputConsumerNoResampling.h>
 
-#include <gtest/gtest.h>
-
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -107,8 +105,9 @@ protected:
         return motionEvent;
     }
 
-    InputMessage nextPointerMessage(std::chrono::nanoseconds eventTime, DeviceId deviceId,
-                                    int32_t action, const Pointer& pointer);
+    InputMessageBuilder nextPointerMessageBuilder(std::chrono::nanoseconds eventTime,
+                                                  DeviceId deviceId, int32_t action,
+                                                  const Pointer& pointer);
 
     std::shared_ptr<TestInputChannel> mClientTestChannel;
     sp<Looper> mLooper;
@@ -163,17 +162,16 @@ private:
     };
 };
 
-InputMessage InputConsumerTest::nextPointerMessage(std::chrono::nanoseconds eventTime,
-                                                   DeviceId deviceId, int32_t action,
-                                                   const Pointer& pointer) {
+InputMessageBuilder InputConsumerTest::nextPointerMessageBuilder(std::chrono::nanoseconds eventTime,
+                                                                 DeviceId deviceId, int32_t action,
+                                                                 const Pointer& pointer) {
     ++mLastSeq;
     return InputMessageBuilder{InputMessage::Type::MOTION, mLastSeq}
             .eventTime(eventTime.count())
             .deviceId(deviceId)
             .source(AINPUT_SOURCE_TOUCHSCREEN)
             .action(action)
-            .pointer(pointer.asPointerBuilder())
-            .build();
+            .pointer(pointer.asPointerBuilder());
 }
 
 TEST_F(InputConsumerTest, MessageStreamBatchedInMotionEvent) {
@@ -393,7 +391,8 @@ TEST_F(InputConsumerTest, BatchedEventsMultiDeviceConsumption) {
  */
 TEST_F(InputConsumerTest, MultiDeviceResampling) {
     mClientTestChannel->enqueueMessage(
-            nextPointerMessage(0ms, /*deviceId=*/0, ACTION_DOWN, Pointer{.x = 0, .y = 0}));
+            nextPointerMessageBuilder(0ms, /*deviceId=*/0, ACTION_DOWN, Pointer{.x = 0, .y = 0})
+                    .build());
 
     mClientTestChannel->assertNoSentMessages();
 
@@ -401,12 +400,15 @@ TEST_F(InputConsumerTest, MultiDeviceResampling) {
     assertReceivedMotionEvent(
             AllOf(WithDeviceId(0), WithMotionAction(ACTION_DOWN), WithSampleCount(1)));
 
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(5ms, /*deviceId=*/0, ACTION_MOVE, Pointer{.x = 1.0f, .y = 2.0f}));
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(10ms, /*deviceId=*/0, ACTION_MOVE, Pointer{.x = 2.0f, .y = 4.0f}));
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(15ms, /*deviceId=*/1, ACTION_DOWN, Pointer{.x = 10.0f, .y = 10.0f}));
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(5ms, /*deviceId=*/0, ACTION_MOVE,
+                                                                 Pointer{.x = 1.0f, .y = 2.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(10ms, /*deviceId=*/0, ACTION_MOVE,
+                                                                 Pointer{.x = 2.0f, .y = 4.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(15ms, /*deviceId=*/1, ACTION_DOWN,
+                                                                 Pointer{.x = 10.0f, .y = 10.0f})
+                                               .build());
 
     invokeLooperCallback();
     mConsumer->consumeBatchedInputEvents(16'000'000 /*ns*/);
@@ -419,12 +421,15 @@ TEST_F(InputConsumerTest, MultiDeviceResampling) {
                              Sample{11ms,
                                     {PointerArgs{.x = 2.2f, .y = 4.4f, .isResampled = true}}})));
 
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(20ms, /*deviceId=*/1, ACTION_MOVE, Pointer{.x = 11.0f, .y = 12.0f}));
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(25ms, /*deviceId=*/1, ACTION_MOVE, Pointer{.x = 12.0f, .y = 14.0f}));
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(30ms, /*deviceId=*/0, ACTION_MOVE, Pointer{.x = 5.0f, .y = 6.0f}));
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(20ms, /*deviceId=*/1, ACTION_MOVE,
+                                                                 Pointer{.x = 11.0f, .y = 12.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(25ms, /*deviceId=*/1, ACTION_MOVE,
+                                                                 Pointer{.x = 12.0f, .y = 14.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(30ms, /*deviceId=*/0, ACTION_MOVE,
+                                                                 Pointer{.x = 5.0f, .y = 6.0f})
+                                               .build());
 
     invokeLooperCallback();
     assertOnBatchedInputEventPendingWasCalled();
@@ -436,14 +441,17 @@ TEST_F(InputConsumerTest, MultiDeviceResampling) {
                              Sample{27ms,
                                     {PointerArgs{.x = 12.4f, .y = 14.8f, .isResampled = true}}})));
 
-    mClientTestChannel->enqueueMessage(
-            nextPointerMessage(35ms, /*deviceId=*/0, ACTION_MOVE, Pointer{.x = 8.0f, .y = 9.0f}));
-    mClientTestChannel->enqueueMessage(nextPointerMessage(40ms, /*deviceId=*/1,
-                                                          AMOTION_EVENT_ACTION_UP,
-                                                          Pointer{.x = 12.0f, .y = 14.0f}));
-    mClientTestChannel->enqueueMessage(nextPointerMessage(45ms, /*deviceId=*/0,
-                                                          AMOTION_EVENT_ACTION_UP,
-                                                          Pointer{.x = 8.0f, .y = 9.0f}));
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(35ms, /*deviceId=*/0, ACTION_MOVE,
+                                                                 Pointer{.x = 8.0f, .y = 9.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(40ms, /*deviceId=*/1,
+                                                                 AMOTION_EVENT_ACTION_UP,
+                                                                 Pointer{.x = 12.0f, .y = 14.0f})
+                                               .build());
+    mClientTestChannel->enqueueMessage(nextPointerMessageBuilder(45ms, /*deviceId=*/0,
+                                                                 AMOTION_EVENT_ACTION_UP,
+                                                                 Pointer{.x = 8.0f, .y = 9.0f})
+                                               .build());
 
     invokeLooperCallback();
     mConsumer->consumeBatchedInputEvents(48'000'000 /*ns*/);

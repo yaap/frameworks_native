@@ -151,7 +151,6 @@ bool PrepareAppInodeQuota(const std::string& uuid, uid_t uid) {
         return true;
     }
 
-#if APPLY_HARD_QUOTAS
     struct dqblk dq;
     if (quotactl(QCMD(Q_GETQUOTA, USRQUOTA), device.c_str(), uid, reinterpret_cast<char*>(&dq)) !=
         0) {
@@ -184,10 +183,6 @@ bool PrepareAppInodeQuota(const std::string& uuid, uid_t uid) {
         // Hard quota already set; assume it's reasonable
         return true;
     }
-#else
-    // Hard quotas disabled
-    return true;
-#endif
 }
 
 int64_t GetInodesQuotaHardLimitsForUid(const std::string& uuid, uid_t uid) {

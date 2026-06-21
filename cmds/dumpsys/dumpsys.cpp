@@ -68,7 +68,7 @@ static void usage() {
         "       dumpsys [-t TIMEOUT] [--priority LEVEL] [--clients] [--dump] [--pid] [--thread] "
         "[--help | "
         "-l | --skip SERVICES "
-        "| SERVICE [ARGS]]\n"
+        "| [-w] SERVICE [ARGS]]\n"
         "         --help: shows this help\n"
         "         -l: only list services, do not dump them\n"
         "         -t TIMEOUT_SEC: TIMEOUT to use in seconds instead of default 10 seconds\n"
@@ -83,6 +83,7 @@ static void usage() {
         "         --skip SERVICES: dumps all services but SERVICES (comma-separated list)\n"
         "         --stability: dump binder stability information instead of usual dump\n"
         "         --thread: dump thread usage instead of usual dump\n"
+        "         -w: wait for service indefinitely to be ready before dumping\n"
         "         SERVICE [ARGS]: dumps only service SERVICE, optionally passing ARGS to it\n");
 }
 
@@ -132,6 +133,7 @@ int Dumpsys::main(int argc, char* const argv[]) {
     Vector<String16> protoServices;
     bool showListOnly = false;
     bool skipServices = false;
+    bool waitForService = false;
     bool asProto = false;
     int dumpTypeFlags = 0;
     int timeoutArgMs = 10000;
@@ -150,7 +152,7 @@ int Dumpsys::main(int argc, char* const argv[]) {
         int c;
         int optionIndex = 0;
 
-        c = getopt_long(argc, argv, "+t:T:l", longOptions, &optionIndex);
+        c = getopt_long(argc, argv, "+t:T:lw", longOptions, &optionIndex);
 
         if (c == -1) {
             break;
@@ -212,6 +214,10 @@ int Dumpsys::main(int argc, char* const argv[]) {
             showListOnly = true;
             break;
 
+        case 'w':
+            waitForService = true;
+            break;
+
         default:
             fprintf(stderr, "\n");
             usage();
@@ -242,6 +248,7 @@ int Dumpsys::main(int argc, char* const argv[]) {
     }
 
     if ((skipServices && skippedServices.empty()) ||
+            (waitForService && services.empty()) ||
             (showListOnly && (!services.empty() || !skippedServices.empty()))) {
         usage();
         return -1;
@@ -271,11 +278,13 @@ int Dumpsys::main(int argc, char* const argv[]) {
         return 0;
     }
 
+    auto serviceBehavior =
+        waitForService ? ServiceBehavior::WAIT_UNTIL_STARTED : ServiceBehavior::DUMP_IF_STARTED;
     for (size_t i = 0; i < N; i++) {
         const String16& serviceName = services[i];
         if (IsSkipped(skippedServices, serviceName)) continue;
 
-        if (startDumpThread(dumpTypeFlags, serviceName, args) == OK) {
+        if (startDumpThread(dumpTypeFlags, serviceName, args, serviceBehavior) == OK) {
             bool addSeparator = (N > 1);
             if (addSeparator) {
                 writeDumpHeader(STDOUT_FILENO, serviceName, priorityFlags);
@@ -414,8 +423,13 @@ static void reportDumpError(const String16& serviceName, status_t error, const c
 }
 
 status_t Dumpsys::startDumpThread(int dumpTypeFlags, const String16& serviceName,
-                                  const Vector<String16>& args) {
-    sp<IBinder> service = sm_->checkService(serviceName);
+                                  const Vector<String16>& args, ServiceBehavior serviceBehavior) {
+    sp<IBinder> service;
+    if (serviceBehavior == ServiceBehavior::WAIT_UNTIL_STARTED) {
+        service = sm_->waitForService(serviceName);
+    } else {
+        service = sm_->checkService(serviceName);
+    }
     if (service == nullptr) {
         std::cerr << "Can't find service: " << serviceName << std::endl;
         return NAME_NOT_FOUND;

@@ -117,49 +117,56 @@ void TracedInputListener::notifyInputDevicesChanged(const NotifyInputDevicesChan
 void TracedInputListener::notifyKey(const NotifyKeyArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifyMotion(const NotifyMotionArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifySwitch(const NotifySwitchArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifySensor(const NotifySensorArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifyVibratorState(const NotifyVibratorStateArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifyDeviceReset(const NotifyDeviceResetArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 
 void TracedInputListener::notifyPointerCaptureChanged(const NotifyPointerCaptureChangedArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
+                   StringPrintf("%s::%s(id=0x%" PRIx32 ", eventTime=%" PRId64 ")", mName, fnName,
+                                args.id, args.eventTime));
     mInnerListener.notify(args);
 }
 

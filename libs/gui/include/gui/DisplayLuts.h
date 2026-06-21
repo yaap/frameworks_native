@@ -44,11 +44,10 @@ public:
 
     DisplayLuts(base::unique_fd lutfd, std::vector<int32_t> lutoffsets,
                 std::vector<int32_t> lutdimensions, std::vector<int32_t> lutsizes,
-                std::vector<int32_t> lutsamplingKeys) {
-        fd = std::move(lutfd);
-        offsets = lutoffsets;
+                std::vector<int32_t> lutsamplingKeys)
+          : offsets(std::move(lutoffsets)), fd(std::move(lutfd)) {
         lutProperties.reserve(offsets.size());
-        for (size_t i = 0; i < lutoffsets.size(); i++) {
+        for (size_t i = 0; i < offsets.size(); i++) {
             Entry entry{lutdimensions[i], lutsizes[i], lutsamplingKeys[i]};
             lutProperties.emplace_back(entry);
         }
@@ -56,6 +55,8 @@ public:
 
     status_t writeToParcel(android::Parcel* parcel) const override;
     status_t readFromParcel(const android::Parcel* parcel) override;
+
+    void dump(std::string& out) const;
 
     const base::unique_fd& getLutFileDescriptor() const { return fd; }
 
@@ -66,8 +67,16 @@ private:
     base::unique_fd fd;
 }; // struct DisplayLuts
 
-static inline void PrintTo(const std::vector<int32_t>& offsets, ::std::ostream* os) {
-    *os << "\n    .offsets = {";
+namespace {
+// A newline character followed by N*4 spaces.
+static inline constexpr std::string IndentedNewline(uint8_t indent) {
+    return "\n" + std::string(static_cast<size_t>(indent * 4), ' ');
+}
+} // namespace
+
+static inline void PrintTo(const std::vector<int32_t>& offsets, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    *os << IndentedNewline(currentIndent) << ".offsets = {";
     for (size_t i = 0; i < offsets.size(); i++) {
         *os << offsets[i];
         if (i != offsets.size() - 1) {
@@ -77,22 +86,25 @@ static inline void PrintTo(const std::vector<int32_t>& offsets, ::std::ostream* 
     *os << "}";
 }
 
-static inline void PrintTo(const std::vector<DisplayLuts::Entry>& entries, ::std::ostream* os) {
-    *os << "\n    .lutProperties = {\n";
+static inline void PrintTo(const std::vector<DisplayLuts::Entry>& entries, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string outerNewline = IndentedNewline(currentIndent);
+    const std::string innerNewline = IndentedNewline(currentIndent + 1);
+    *os << outerNewline << ".lutProperties = [";
     for (auto& [dimension, size, samplingKey] : entries) {
-        *os << "        Entry{"
+        *os << innerNewline << "Entry{"
             << "dimension: " << dimension << ", size: " << size << ", samplingKey: " << samplingKey
-            << "}\n";
+            << "}";
     }
-    *os << "    }";
+    *os << outerNewline << "]";
 }
 
 static constexpr size_t kMaxPrintCount = 100;
 
 static inline void PrintTo(const std::vector<float>& buffer, size_t offset, int32_t dimension,
-                           size_t size, ::std::ostream* os) {
+                           size_t size, ::std::ostream* os, const uint8_t currentIndent = 0) {
     size_t range = std::min(size, kMaxPrintCount);
-    *os << "{";
+    *os << "[";
     if (dimension == 1) {
         for (size_t i = 0; i < range; i++) {
             *os << buffer[offset + i];
@@ -100,36 +112,43 @@ static inline void PrintTo(const std::vector<float>& buffer, size_t offset, int3
                 *os << ", ";
             }
         }
+        *os << "]";
     } else {
-        *os << "\n        {R channel:";
+        const std::string newline = IndentedNewline(currentIndent + 1);
+        *os << newline << "{R channel:";
         for (size_t i = 0; i < range; i++) {
             *os << buffer[offset + i];
             if (i != range - 1) {
                 *os << ", ";
             }
         }
-        *os << "}\n        {G channel:";
+        *os << "}";
+        *os << newline << "{G channel:";
         for (size_t i = 0; i < range; i++) {
             *os << buffer[offset + size + i];
             if (i != range - 1) {
                 *os << ", ";
             }
         }
-        *os << "}\n        {B channel:";
+        *os << "}";
+        *os << newline << "{B channel:";
         for (size_t i = 0; i < range; i++) {
             *os << buffer[offset + 2 * size + i];
             if (i != range - 1) {
                 *os << ", ";
             }
         }
+        *os << "}";
+        *os << IndentedNewline(currentIndent) << "]";
     }
-    *os << "}";
 }
 
-static inline void PrintTo(const std::shared_ptr<DisplayLuts> luts, ::std::ostream* os) {
+static inline void PrintTo(const std::shared_ptr<DisplayLuts>& luts, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "gui::DisplayLuts {";
     auto& fd = luts->getLutFileDescriptor();
-    *os << "\n    .pfd = " << fd.get();
+    *os << newline << ".pfd = " << fd.get();
     if (fd.ok()) {
         PrintTo(luts->offsets, os);
         PrintTo(luts->lutProperties, os);
@@ -145,20 +164,20 @@ static inline void PrintTo(const std::shared_ptr<DisplayLuts> luts, ::std::ostre
         size_t bufferSize = static_cast<size_t>(fullLength) * sizeof(float);
         float* ptr = (float*)mmap(NULL, bufferSize, PROT_READ, MAP_SHARED, fd.get(), 0);
         if (ptr == MAP_FAILED) {
-            *os << "\n    .bufferdata cannot mmap!";
+            *os << newline << ".bufferdata cannot mmap!";
             return;
         }
         std::vector<float> buffers(ptr, ptr + fullLength);
         munmap(ptr, bufferSize);
 
-        *os << "\n    .bufferdata = ";
+        *os << newline << ".bufferdata = ";
         for (size_t i = 0; i < luts->offsets.size(); i++) {
             PrintTo(buffers, static_cast<size_t>(luts->offsets[i]),
                     luts->lutProperties[i].dimension,
                     static_cast<size_t>(luts->lutProperties[i].size), os);
         }
     }
-    *os << "\n    }";
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
 } // namespace android::gui

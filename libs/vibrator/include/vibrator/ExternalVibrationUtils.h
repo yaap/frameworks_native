@@ -23,7 +23,7 @@
 
 namespace android::os {
 
-// TODO(b/345186129): remove this once flag android_os_vibrator_haptics_scale_v2_enabled removed
+// TODO(b/360314386): remove this once we finish migrating to scale factor.
 enum class HapticLevel : int32_t {
     MUTE = -100,
     VERY_LOW = -2,

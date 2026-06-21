@@ -53,4 +53,10 @@ cc_library {
     host_supported: true,
     // for vndbinder
     vendor_available: true,
+
+    target: {
+        windows: {
+            enabled: true,
+        },
+    },
 }

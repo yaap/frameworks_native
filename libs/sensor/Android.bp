@@ -21,6 +21,21 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aidl_interface {
+    name: "libsensor_aidl",
+    local_include_dir: "include",
+    srcs: [
+        "include/android/hardware/sensor/ISensorClientListener.aidl",
+    ],
+    unstable: true,
+    host_supported: true,
+    backend: {
+        cpp: {
+            enabled: true,
+        },
+    },
+}
+
 aconfig_declarations {
     name: "libsensor_flags",
     package: "com.android.hardware.libsensor.flags",
@@ -70,6 +85,7 @@ cc_library {
     static_libs: [
         "libsensor_flags_c_lib",
         "android.permission.flags-aconfig-cc",
+        "libsensor_aidl-cpp",
     ],
 
     export_include_dirs: ["include"],
@@ -79,4 +95,5 @@ cc_library {
         "libpermission",
         "libhardware",
     ],
+    export_static_lib_headers: ["libsensor_aidl-cpp"],
 }

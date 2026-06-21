@@ -1,0 +1,44 @@
+package {
+    default_team: "trendy_team_android_core_graphics_stack",
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_native_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_native_license"],
+}
+
+cc_test {
+    name: "libnativedisplay_unittest",
+    test_suites: ["device-tests"],
+
+    cppflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+        "-Wthread-safety",
+        // Allow access to buffer queue core private members
+        "-DENABLE_BQC_TESTING",
+    ],
+
+    srcs: [
+        "**/*.cpp",
+    ],
+
+    shared_libs: [
+        "libgui",
+        "liblog",
+        "libnativedisplay",
+        "libnativewindow",
+        "libui",
+        "libutils",
+        "libcutils",
+        "libEGL",
+        "libGLESv2",
+    ],
+
+    static_libs: [
+        "libgmock",
+        "libguiflags",
+    ],
+}

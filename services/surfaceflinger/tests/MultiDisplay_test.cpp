@@ -136,7 +136,7 @@ TEST_F(MultiDisplayTest, RenderLayerInMirroredVirtualDisplay) {
     createColorLayer(ui::DEFAULT_LAYER_STACK);
 
     sp<SurfaceControl> mirrorSc =
-            SurfaceComposerClient::getDefault()->mirrorDisplay(mMainDisplayId);
+            SurfaceComposerClient::getDefault()->mirrorLayerStack(mMainDisplayId);
 
     asTransaction([&](Transaction& t) {
         t.setPosition(mColorLayer, 10, 10);

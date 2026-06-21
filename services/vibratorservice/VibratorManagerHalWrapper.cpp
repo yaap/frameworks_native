@@ -64,6 +64,10 @@ void LegacyManagerHalWrapper::tryReconnect() {
     mController->tryReconnect();
 }
 
+std::shared_ptr<IVibratorManager> LegacyManagerHalWrapper::getHal() {
+    return nullptr;
+}
+
 HalResult<ManagerCapabilities> LegacyManagerHalWrapper::getCapabilities() {
     return HalResult<ManagerCapabilities>::ok(ManagerCapabilities::NONE);
 }
@@ -119,6 +123,11 @@ void AidlManagerHalWrapper::tryReconnect() {
         std::lock_guard<std::mutex> lock(mHandleMutex);
         mHandle = std::move(newHandle);
     }
+}
+
+std::shared_ptr<IVibratorManager> AidlManagerHalWrapper::getHal() {
+    std::lock_guard<std::mutex> lock(mHandleMutex);
+    return std::shared_ptr<IVibratorManager>(mHandle); // return a separate reference
 }
 
 HalResult<ManagerCapabilities> AidlManagerHalWrapper::getCapabilities() {
@@ -226,11 +235,6 @@ HalResult<void> AidlManagerHalWrapper::cancelSynced() {
 
 HalResult<void> AidlManagerHalWrapper::clearSessions() {
     return HalResultFactory::fromStatus(getHal()->clearSessions());
-}
-
-std::shared_ptr<IVibratorManager> AidlManagerHalWrapper::getHal() {
-    std::lock_guard<std::mutex> lock(mHandleMutex);
-    return mHandle;
 }
 
 }; // namespace vibrator

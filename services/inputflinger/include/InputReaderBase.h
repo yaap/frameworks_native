@@ -20,6 +20,8 @@
 #include <input/DisplayViewport.h>
 #include <input/Input.h>
 #include <input/InputDevice.h>
+#include <input/KeyCode.h>
+#include <input/MotionEventAxis.h>
 #include <input/VelocityControl.h>
 #include <input/VelocityTracker.h>
 #include <stddef.h>
@@ -28,6 +30,7 @@
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
 
+#include <map>
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -43,6 +46,13 @@
 #define MAX_VIBRATE_PATTERN_SIZE 100
 
 namespace android {
+
+// Represents the overrides to the .idc properties for an input device. Typically, this is used for
+// virtual input devices which do not have any physical .idc file.
+struct InputDeviceConfigurationOverride {
+    std::optional<std::string> deviceType;
+    std::optional<InputDeviceViewBehavior> viewBehavior;
+};
 
 // --- InputReaderConfiguration ---
 
@@ -81,8 +91,8 @@ struct InputReaderConfiguration {
         // The set of disabled input devices (disabledDevices) has changed.
         ENABLED_STATE = 1u << 9,
 
-        // The device type has been updated.
-        DEVICE_TYPE = 1u << 10,
+        // The overrides for the .idc properties of the device have been updated.
+        DEVICE_CONFIGURATION_OVERRIDES = 1u << 10,
 
         // The keyboard layout association has changed.
         KEYBOARD_LAYOUT_ASSOCIATION = 1u << 11,
@@ -102,6 +112,9 @@ struct InputReaderConfiguration {
 
         // The virtual devices list is updated
         VIRTUAL_DEVICES = 1u << 16,
+
+        // The axis remapping has changed.
+        AXIS_REMAPPING = 1u << 17,
 
         // All devices must be reopened.
         MUST_REOPEN = 1u << 31,
@@ -128,9 +141,11 @@ struct InputReaderConfiguration {
     // Used to determine which DisplayViewport should be tied to which InputDevice.
     std::unordered_map<std::string, std::string> inputDeviceDescriptorToDisplayUniqueIdAssociations;
 
-    // The associations between input device ports device types.
-    // This is used to determine which device type and source should be tied to which InputDevice.
-    std::unordered_map<std::string, std::string> deviceTypeAssociations;
+    // The associations between input device ports to overrides on .idc properties. Typically, these
+    // are used for virtual input devices which do not have any physical .idc file. If an input
+    // device has an actual physical .idc file, then this override would be ignored for that input
+    // device.
+    std::unordered_map<std::string, InputDeviceConfigurationOverride> deviceConfigurationOverrides;
 
     // The map from the input device physical port location to the input device layout info.
     // Can be used to determine the layout of the keyboard device.
@@ -162,82 +177,11 @@ struct InputReaderConfiguration {
     // speed setting still affects the scaling factor.
     bool touchpadAccelerationEnabled;
 
-    // Velocity control parameters for touchpad pointer movements on the old touchpad stack (based
-    // on TouchInputMapper).
-    //
-    // For mice, these are ignored and the values of mousePointerSpeed and
-    // mousePointerAccelerationEnabled used instead.
-    //
-    // TODO(b/281840344): remove this.
-    VelocityControlParameters pointerVelocityControlParameters;
-
     // Velocity control parameters for mouse wheel movements.
     VelocityControlParameters wheelVelocityControlParameters;
 
     // True if pointer gestures are enabled.
     bool pointerGesturesEnabled;
-
-    // Quiet time between certain pointer gesture transitions.
-    // Time to allow for all fingers or buttons to settle into a stable state before
-    // starting a new gesture.
-    nsecs_t pointerGestureQuietInterval;
-
-    // The minimum speed that a pointer must travel for us to consider switching the active
-    // touch pointer to it during a drag.  This threshold is set to avoid switching due
-    // to noise from a finger resting on the touch pad (perhaps just pressing it down).
-    float pointerGestureDragMinSwitchSpeed; // in pixels per second
-
-    // Tap gesture delay time.
-    // The time between down and up must be less than this to be considered a tap.
-    nsecs_t pointerGestureTapInterval;
-
-    // Tap drag gesture delay time.
-    // The time between the previous tap's up and the next down must be less than
-    // this to be considered a drag.  Otherwise, the previous tap is finished and a
-    // new tap begins.
-    //
-    // Note that the previous tap will be held down for this entire duration so this
-    // interval must be shorter than the long press timeout.
-    nsecs_t pointerGestureTapDragInterval;
-
-    // The distance in pixels that the pointer is allowed to move from initial down
-    // to up and still be called a tap.
-    float pointerGestureTapSlop; // in pixels
-
-    // Time after the first touch points go down to settle on an initial centroid.
-    // This is intended to be enough time to handle cases where the user puts down two
-    // fingers at almost but not quite exactly the same time.
-    nsecs_t pointerGestureMultitouchSettleInterval;
-
-    // The transition from PRESS to SWIPE or FREEFORM gesture mode is made when
-    // at least two pointers have moved at least this far from their starting place.
-    float pointerGestureMultitouchMinDistance; // in pixels
-
-    // The transition from PRESS to SWIPE gesture mode can only occur when the
-    // cosine of the angle between the two vectors is greater than or equal to than this value
-    // which indicates that the vectors are oriented in the same direction.
-    // When the vectors are oriented in the exactly same direction, the cosine is 1.0.
-    // (In exactly opposite directions, the cosine is -1.0.)
-    float pointerGestureSwipeTransitionAngleCosine;
-
-    // The transition from PRESS to SWIPE gesture mode can only occur when the
-    // fingers are no more than this far apart relative to the diagonal size of
-    // the touch pad.  For example, a ratio of 0.5 means that the fingers must be
-    // no more than half the diagonal size of the touch pad apart.
-    float pointerGestureSwipeMaxWidthRatio;
-
-    // The gesture movement speed factor relative to the size of the display.
-    // Movement speed applies when the fingers are moving in the same direction.
-    // Without acceleration, a full swipe of the touch pad diagonal in movement mode
-    // will cover this portion of the display diagonal.
-    float pointerGestureMovementSpeedRatio;
-
-    // The gesture zoom speed factor relative to the size of the display.
-    // Zoom speed applies when the fingers are mostly moving relative to each other
-    // to execute a scale gesture or similar.
-    // Without acceleration, a full swipe of the touch pad diagonal in zoom mode
-    // will cover this portion of the display diagonal.
-    float pointerGestureZoomSpeedRatio;
 
     // The latest request to enable or disable Pointer Capture.
     PointerCaptureRequest pointerCaptureRequest;
@@ -282,7 +226,21 @@ struct InputReaderConfiguration {
     bool stylusPointerIconEnabled;
 
     // Keycodes to be remapped.
-    std::map<int32_t /* fromKeyCode */, int32_t /* toKeyCode */> keyRemapping;
+    std::unordered_map<int32_t /* fromKeyCode */, int32_t /* toKeyCode */> keyRemapping;
+
+    // Keycodes to be remapped for device.
+    std::unordered_map<DeviceId,
+                       std::unordered_map<int32_t /* fromKeyCode */, int32_t /* toKeyCode */>>
+            keyRemappingPerDevice;
+
+    // Keycodes to axes remapping per device.
+    std::map<DeviceId, std::map<KeyCode, MotionEventAxis>> keyToAxisRemappingPerDevice;
+
+    // Per-device axis remapping: Only applied for joystick devices
+    std::unordered_map<
+            int32_t,
+            std::unordered_map</* fromAndroidAxisId */ int32_t, /* toAndroidAxisId */ int32_t>>
+            axisRemappingPerDevice;
 
     // True if the external mouse should have its vertical scrolling reversed, so that rotating the
     // wheel downwards scrolls the content upwards.
@@ -300,26 +258,11 @@ struct InputReaderConfiguration {
             displaysWithMouseScalingDisabled(),
             mousePointerAccelerationEnabled(true),
             touchpadAccelerationEnabled(true),
-            pointerVelocityControlParameters(1.0f, 500.0f, 3000.0f,
-                                             static_cast<float>(
-                                                     android::os::IInputConstants::
-                                                             DEFAULT_POINTER_ACCELERATION)),
             wheelVelocityControlParameters(1.0f, 15.0f, 50.0f,
                                            static_cast<float>(
                                                    android::os::IInputConstants::
                                                            DEFAULT_MOUSE_WHEEL_ACCELERATION)),
             pointerGesturesEnabled(true),
-            pointerGestureQuietInterval(100 * 1000000LL),            // 100 ms
-            pointerGestureDragMinSwitchSpeed(50),                    // 50 pixels per second
-            pointerGestureTapInterval(150 * 1000000LL),              // 150 ms
-            pointerGestureTapDragInterval(150 * 1000000LL),          // 150 ms
-            pointerGestureTapSlop(10.0f),                            // 10 pixels
-            pointerGestureMultitouchSettleInterval(100 * 1000000LL), // 100 ms
-            pointerGestureMultitouchMinDistance(15),                 // 15 pixels
-            pointerGestureSwipeTransitionAngleCosine(0.2588f),       // cosine of 75 degrees
-            pointerGestureSwipeMaxWidthRatio(0.25f),
-            pointerGestureMovementSpeedRatio(0.8f),
-            pointerGestureZoomSpeedRatio(0.3f),
             pointerCaptureRequest(),
             touchpadPointerSpeed(0),
             touchpadNaturalScrollingEnabled(true),

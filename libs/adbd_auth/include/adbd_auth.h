@@ -57,6 +57,11 @@ struct AdbdAuthCallbacksV2 : AdbdAuthCallbacksV1 {
     void (*stop_adbd_wifi)();
 };
 
+struct AdbdAuthCallbacksV3: AdbdAuthCallbacksV2 {
+    // The framework has connected to adbd_auth socket
+    void (*on_framework_connected)();
+};
+
 struct AdbdAuthContext;
 typedef struct AdbdAuthContext AdbdAuthContext;
 
@@ -203,5 +208,47 @@ bool adbd_auth_supports_feature(AdbdAuthFeature feature);
  * @param port the port number the TLS server is running on.
  */
 void adbd_auth_send_tls_server_port(AdbdAuthContext* ctx, uint16_t port) __INTRODUCED_IN(37);
+
+enum AdbdauthRegisterResult : uint32_t {
+    ADBD_AUTH_REGISTER_OK,
+    ADBD_AUTH_REGISTER_BAD_NAME, // Either instance name or service type was too long (>255)
+};
+/**
+ * Register mDNS Service
+ *
+ * @param ctx the AdbdAuthContext
+ * @param instance_name the mDNS service instance name (a-z), (A-Z), (0-9), (_), and (-)
+ *        and (UTF-8, max 256 bytes including a required NUL byte)
+ * @param service_type the mDNS service name (a-z), (A-Z), (0-9), (_), and (-)
+ *        and (UTF-8, max 256 bytes including a required NUL byte)
+ * @param port the port number of the service
+ * @return RegisterResult
+ */
+AdbdauthRegisterResult adbd_auth_register_service(AdbdAuthContext* ctx,
+                                                  const char* instance_name,
+                                                  const char* service_type,
+                                                  uint16_t port) __INTRODUCED_IN(37);
+
+enum AdbdauthUnregisterResult : uint32_t {
+    ADBD_AUTH_UNREGISTER_OK,
+    ADBD_AUTH_UNREGISTER_BAD_NAME, // Either instance name or service type was too long (>255)
+};
+/**
+ * Unregister mDNS Service
+ *
+ * @param ctx the AdbdAuthContext
+ * @param instance_name the mDNS service instance name (a-z), (A-Z), (0-9), (_), and (-)
+ *        and (UTF-8, max 256 bytes including a required NUL byte)
+ * @param service_type the mDNS service name (a-z), (A-Z), (0-9), (_), and (-)
+ *        and (UTF-8, max 256 bytes including a required NUL byte)
+ * @return UnregisterResult
+ *
+ * It is ok to call unregister on an service unknown to framework. Services are tracked there
+ * and results in a no-op.
+ *
+ */
+AdbdauthUnregisterResult adbd_auth_unregister_service(AdbdAuthContext* ctx,
+                                                      const char* instance_name,
+                                                      const char* service_type) __INTRODUCED_IN(37);
 
 __END_DECLS

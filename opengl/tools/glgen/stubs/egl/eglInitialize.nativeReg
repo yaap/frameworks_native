@@ -1,0 +1,1 @@
+{"eglInitialize", "(Landroid/opengl/EGLDisplay;[II[II)Z", (void *) android_eglInitialize },

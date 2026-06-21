@@ -151,8 +151,6 @@ Layer::Layer(const surfaceflinger::LayerCreationArgs& args)
     mDrawingState.metadata = args.metadata;
     mDrawingState.frameTimelineInfo = {};
     mDrawingState.postTime = -1;
-    mDeprecatedFrameTracker.setDisplayRefreshPeriod(
-            args.flinger->mScheduler->getPacesetterVsyncPeriod().ns());
 
     mOwnerUid = args.ownerUid;
     mOwnerPid = args.ownerPid;
@@ -391,7 +389,8 @@ bool Layer::isLayerFocusedBasedOnPriority(int32_t priority) {
 };
 
 void Layer::setFrameTimelineVsyncForBufferTransaction(const FrameTimelineInfo& info,
-                                                      nsecs_t postTime, gui::GameMode gameMode)
+                                                      nsecs_t postTime, gui::GameMode gameMode,
+                                                      int32_t systemContentPriority)
         REQUIRES(mFlinger->mStateLock) {
     mDrawingState.postTime = postTime;
 
@@ -408,15 +407,17 @@ void Layer::setFrameTimelineVsyncForBufferTransaction(const FrameTimelineInfo& i
         mDrawingState.bufferSurfaceFrameTX->setActualQueueTime(postTime);
     } else {
         mDrawingState.bufferSurfaceFrameTX =
-                createSurfaceFrameForBuffer(info, postTime, mTransactionName, gameMode);
+                createSurfaceFrameForBuffer(info, postTime, mTransactionName, gameMode,
+                                            systemContentPriority);
     }
 
-    setFrameTimelineVsyncForSkippedFrames(info, postTime, mTransactionName, gameMode);
+    setFrameTimelineVsyncForSkippedFrames(info, postTime, mTransactionName, gameMode,
+                                          systemContentPriority);
 }
 
 void Layer::setFrameTimelineVsyncForBufferlessTransaction(const FrameTimelineInfo& info,
-                                                          nsecs_t postTime,
-                                                          gui::GameMode gameMode) {
+                                                          nsecs_t postTime, gui::GameMode gameMode,
+                                                          int32_t systemContentPriority) {
     mDrawingState.frameTimelineInfo = info;
     mDrawingState.postTime = postTime;
     setTransactionFlags(eTransactionNeeded);
@@ -434,17 +435,20 @@ void Layer::setFrameTimelineVsyncForBufferlessTransaction(const FrameTimelineInf
     // targeting different vsyncs).
     auto it = mDrawingState.bufferlessSurfaceFramesTX.find(info.vsyncId);
     if (it == mDrawingState.bufferlessSurfaceFramesTX.end()) {
-        auto surfaceFrame = createSurfaceFrameForTransaction(info, postTime, gameMode);
+        auto surfaceFrame =
+                createSurfaceFrameForTransaction(info, postTime, gameMode, systemContentPriority);
         mDrawingState.bufferlessSurfaceFramesTX[info.vsyncId] = surfaceFrame;
     } else {
         if (it->second->getPresentState() == PresentState::Presented) {
             // If the SurfaceFrame was already presented, its safe to overwrite it since it must
             // have been from previous vsync.
-            it->second = createSurfaceFrameForTransaction(info, postTime, gameMode);
+            it->second = createSurfaceFrameForTransaction(info, postTime, gameMode,
+                                                          systemContentPriority);
         }
     }
 
-    setFrameTimelineVsyncForSkippedFrames(info, postTime, mTransactionName, gameMode);
+    setFrameTimelineVsyncForSkippedFrames(info, postTime, mTransactionName, gameMode,
+                                          systemContentPriority);
 }
 
 void Layer::addSurfaceFrameDroppedForBuffer(std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame,
@@ -465,13 +469,14 @@ void Layer::addSurfaceFramePresentedForBuffer(
 }
 
 std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForTransaction(
-        const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode)
-        REQUIRES(mFlinger->mStateLock) {
+        const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode,
+        int32_t systemContentPriority) REQUIRES(mFlinger->mStateLock) {
     auto surfaceFrame =
             mFlinger->mFrameTimeline->createSurfaceFrameForToken(info, mOwnerPid, mOwnerUid,
                                                                  getSequence(), mName,
                                                                  mTransactionName,
-                                                                 /*isBuffer*/ false, gameMode);
+                                                                 /*isBuffer*/ false, gameMode,
+                                                                 systemContentPriority);
     // Buffer hasn't yet been latched, so use mDrawingState
     surfaceFrame->setDesiredPresentTime(mDrawingState.desiredPresentTime);
 
@@ -488,11 +493,12 @@ std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForTransaction
 
 std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForBuffer(
         const FrameTimelineInfo& info, nsecs_t queueTime, std::string debugName,
-        gui::GameMode gameMode) REQUIRES(mFlinger->mStateLock) {
+        gui::GameMode gameMode, int32_t systemContentPriority) REQUIRES(mFlinger->mStateLock) {
     auto surfaceFrame =
             mFlinger->mFrameTimeline->createSurfaceFrameForToken(info, mOwnerPid, mOwnerUid,
                                                                  getSequence(), mName, debugName,
-                                                                 /*isBuffer*/ true, gameMode);
+                                                                 /*isBuffer*/ true, gameMode,
+                                                                 systemContentPriority);
     // Buffer hasn't yet been latched, so use mDrawingState
     surfaceFrame->setDesiredPresentTime(mDrawingState.desiredPresentTime);
     surfaceFrame->setActualStartTime(info.startTimeNanos);
@@ -506,7 +512,8 @@ std::shared_ptr<scheduler::SurfaceFrame> Layer::createSurfaceFrameForBuffer(
 }
 
 void Layer::setFrameTimelineVsyncForSkippedFrames(const FrameTimelineInfo& info, nsecs_t postTime,
-                                                  std::string debugName, gui::GameMode gameMode)
+                                                  std::string debugName, gui::GameMode gameMode,
+                                                  int32_t systemContentPriority)
         REQUIRES(mFlinger->mStateLock) {
     if (info.skippedFrameVsyncId == FrameTimelineInfo::INVALID_VSYNC_ID) {
         return;
@@ -519,7 +526,8 @@ void Layer::setFrameTimelineVsyncForSkippedFrames(const FrameTimelineInfo& info,
             mFlinger->mFrameTimeline->createSurfaceFrameForToken(skippedFrameTimelineInfo,
                                                                  mOwnerPid, mOwnerUid,
                                                                  getSequence(), mName, debugName,
-                                                                 /*isBuffer*/ false, gameMode);
+                                                                 /*isBuffer*/ false, gameMode,
+                                                                 systemContentPriority);
     // Buffer hasn't yet been latched, so use mDrawingState
     surfaceFrame->setDesiredPresentTime(mDrawingState.desiredPresentTime);
     surfaceFrame->setActualStartTime(skippedFrameTimelineInfo.skippedFrameStartTimeNanos);
@@ -613,48 +621,35 @@ void Layer::miniDump(std::string& result, const frontend::LayerSnapshot& snapsho
 }
 
 void Layer::dumpFrameStats(std::string& result) const {
-    if (FlagManager::getInstance().deprecate_frame_tracker()) {
-        FrameStats fs = FrameStats();
-        getFrameStats(&fs);
-        for (auto desired = fs.desiredPresentTimesNano.begin(),
-                  actual = fs.actualPresentTimesNano.begin(),
-                  ready = fs.frameReadyTimesNano.begin();
-             desired != fs.desiredPresentTimesNano.end() &&
-             actual != fs.actualPresentTimesNano.end() && ready != fs.frameReadyTimesNano.end();
-             ++desired, ++actual, ++ready) {
-            result.append(std::format("{}\t{}\t{}\n", *desired, *actual, *ready));
-        }
-
-        result.push_back('\n');
-    } else {
-        mDeprecatedFrameTracker.dumpStats(result);
+    FrameStats fs = FrameStats();
+    getFrameStats(&fs);
+    for (auto desired = fs.desiredPresentTimesNano.begin(),
+              actual = fs.actualPresentTimesNano.begin(), ready = fs.frameReadyTimesNano.begin();
+         desired != fs.desiredPresentTimesNano.end() && actual != fs.actualPresentTimesNano.end() &&
+         ready != fs.frameReadyTimesNano.end();
+         ++desired, ++actual, ++ready) {
+        result.append(std::format("{}\t{}\t{}\n", *desired, *actual, *ready));
     }
+
+    result.push_back('\n');
 }
 
 void Layer::clearFrameStats() {
-    if (FlagManager::getInstance().deprecate_frame_tracker()) {
-        mFrameStatsHistorySize = 0;
-    } else {
-        mDeprecatedFrameTracker.clearStats();
-    }
+    mFrameStatsHistorySize = 0;
 }
 
 void Layer::getFrameStats(FrameStats* outStats) const {
-    if (FlagManager::getInstance().deprecate_frame_tracker()) {
-        if (auto ftl = getTimeline()) {
-            nsecs_t refreshPeriod =
-                    Fps::fromValue(ftl->get().computeFps({getSequence()})).getPeriodNsecs();
-            // FPS computation requires some number of layer updates before the calculation can be
-            // made. If not enough frames are available return the projected FPS based on the
-            // pacesetter display's native refresh rate.
-            if (!refreshPeriod) {
-                refreshPeriod = mFlinger->mScheduler->getPacesetterVsyncPeriod().ns();
-            }
-            ftl->get().generateFrameStats(getSequence(), mFrameStatsHistorySize, outStats);
-            outStats->refreshPeriodNano = refreshPeriod;
+    if (auto ftl = getTimeline()) {
+        nsecs_t refreshPeriod =
+                Fps::fromValue(ftl->get().computeFps({getSequence()})).getPeriodNsecs();
+        // FPS computation requires some number of layer updates before the calculation can be
+        // made. If not enough frames are available return the projected FPS based on the
+        // pacesetter display's native refresh rate.
+        if (!refreshPeriod) {
+            refreshPeriod = mFlinger->mScheduler->getPacesetterVsyncPeriod().ns();
         }
-    } else {
-        mDeprecatedFrameTracker.getStats(outStats);
+        ftl->get().generateFrameStats(getSequence(), mFrameStatsHistorySize, outStats);
+        outStats->refreshPeriodNano = refreshPeriod;
     }
 }
 
@@ -753,7 +748,7 @@ void Layer::callReleaseBufferCallback(const sp<ITransactionCompletedListener>& l
     }
 }
 
-sp<CallbackHandle> Layer::findCallbackHandle() {
+CallbackHandle* Layer::findCallbackHandle() {
     // If we are displayed on multiple displays in a single composition cycle then we would
     // need to do careful tracking to enable the use of the mLastClientCompositionFence.
     //  For example we can only use it if all the displays are client comp, and we need
@@ -781,23 +776,21 @@ sp<CallbackHandle> Layer::findCallbackHandle() {
     // buffer. It replaces the buffer in the second transaction. The buffer in the second
     // transaction will now no longer be presented so it is released immediately and the third
     // transaction doesn't need a previous release fence.
-    sp<CallbackHandle> ch;
     for (auto& handle : mDrawingState.callbackHandles) {
-        if (handle->releasePreviousBuffer && mPreviousReleaseBufferEndpoint == handle->listener) {
-            ch = handle;
-            break;
+        if (handle.releasePreviousBuffer && mPreviousReleaseBufferEndpoint == handle.listener) {
+            return &handle;
         }
     }
-    return ch;
+    return nullptr;
 }
 
 void Layer::prepareReleaseCallbacks(ftl::Future<FenceResult> futureFenceResult,
                                     ui::LayerStack layerStack) {
-    sp<CallbackHandle> ch = findCallbackHandle();
+    CallbackHandle* ch = findCallbackHandle();
 
     if (ch != nullptr) {
         ch->previousReleaseCallbackId = mPreviousReleaseCallbackId;
-        ch->previousReleaseFences.emplace_back(std::move(futureFenceResult));
+        ch->fenceMerger.addFuture(std::move(futureFenceResult));
         ch->name = mName;
     } else {
         // If we didn't get a release callback yet (e.g. some scenarios when capturing
@@ -819,26 +812,27 @@ void Layer::prepareReleaseCallbacks(ftl::Future<FenceResult> futureFenceResult,
 }
 
 void Layer::releasePendingBuffer(nsecs_t dequeueReadyTime) {
-    for (const auto& handle : mDrawingState.callbackHandles) {
-        handle->bufferReleaseChannel = mBufferReleaseChannel;
-        handle->transformHint = mTransformHint;
-        handle->cornerRadii = mCornerRadii;
-        handle->dequeueReadyTime = dequeueReadyTime;
-        handle->currentMaxAcquiredBufferCount =
+    for (auto& handle : mDrawingState.callbackHandles) {
+        handle.bufferReleaseChannel = mBufferReleaseChannel;
+        handle.transformHint = mTransformHint;
+        handle.cornerRadii = mCornerRadii;
+        handle.dequeueReadyTime = dequeueReadyTime;
+        handle.currentMaxAcquiredBufferCount =
                 mFlinger->getMaxAcquiredBufferCountForCurrentRefreshRate(mOwnerUid);
         SFTRACE_FORMAT_INSTANT("releasePendingBuffer %s - %" PRIu64, getDebugName(),
-                               handle->previousReleaseCallbackId.framenumber);
+                               handle.previousReleaseCallbackId.framenumber);
     }
 
     for (auto& handle : mDrawingState.callbackHandles) {
-        if (handle->releasePreviousBuffer && mPreviousReleaseBufferEndpoint == handle->listener) {
-            handle->previousReleaseCallbackId = mPreviousReleaseCallbackId;
+        if (handle.releasePreviousBuffer && mPreviousReleaseBufferEndpoint == handle.listener) {
+            handle.previousReleaseCallbackId = mPreviousReleaseCallbackId;
             break;
         }
     }
 
-    mFlinger->getTransactionCallbackInvoker().addCallbackHandles(mDrawingState.callbackHandles);
-    mDrawingState.callbackHandles = {};
+    mFlinger->getTransactionCallbackInvoker().addCallbackHandles(
+            std::move(mDrawingState.callbackHandles));
+    mDrawingState.callbackHandles.clear();
 }
 
 bool Layer::setTransform(uint32_t transform) {
@@ -896,10 +890,38 @@ void Layer::resetDrawingStateBufferInfo() {
     mDrawingState.releaseBufferEndpoint = nullptr;
 }
 
+bool Layer::setRenderCommandBufferFrameId(uint64_t frameId,
+                                          nsecs_t renderCommandBufferFrameIdQueueTime,
+                                          nsecs_t postTime, nsecs_t desiredPresentTime,
+                                          bool isAutoTimestamp, const FrameTimelineInfo& info,
+                                          gui::GameMode gameMode, int32_t systemContentPriority)
+        REQUIRES(mFlinger->mStateLock) {
+    mDrawingState.desiredPresentTime = desiredPresentTime;
+    mDrawingState.isAutoTimestamp = isAutoTimestamp;
+    mDrawingState.latchedVsyncId = info.vsyncId;
+    mDrawingState.useVsyncIdForRefreshRateSelection = info.useForRefreshRateSelection;
+    mDrawingState.frameNumber = frameId;
+    mDrawingState.renderCommandBufferFrameId = frameId;
+    mDrawingState.renderCommandBufferFrameIdQueueTime = renderCommandBufferFrameIdQueueTime;
+    mDrawingState.hasRenderCommandBufferFrameId = true;
+
+    const int32_t layerId = getSequence();
+    mFlinger->mTimeStats->setPostTime(layerId, mDrawingState.frameNumber, getName().c_str(), mOwnerUid, postTime, gameMode);
+
+    setFrameTimelineVsyncForBufferTransaction(info, postTime, gameMode, systemContentPriority);
+
+    // TODO: After we deal with "latching" we should implement the "drop" logic
+    // in releasePreviousBuffer
+
+    // TODO (b/485971052): We may need to do something similar to
+    // the "dequeueTime > 0" block in setBuffer
+    return true;
+}
+
 bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
                       const BufferData& bufferData, nsecs_t postTime, nsecs_t desiredPresentTime,
-                      bool isAutoTimestamp, const FrameTimelineInfo& info, gui::GameMode gameMode)
-        REQUIRES(mFlinger->mStateLock) {
+                      bool isAutoTimestamp, const FrameTimelineInfo& info, gui::GameMode gameMode,
+                      int32_t systemContentPriority) REQUIRES(mFlinger->mStateLock) {
     SFTRACE_FORMAT("setBuffer %s - hasBuffer=%s", getDebugName(), (buffer ? "true" : "false"));
 
     if (mDrawingState.buffer) {
@@ -918,12 +940,13 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
         resetDrawingStateBufferInfo();
         setTransactionFlags(eTransactionNeeded);
         mDrawingState.bufferSurfaceFrameTX = nullptr;
-        setFrameTimelineVsyncForBufferlessTransaction(info, postTime, gameMode);
+        setFrameTimelineVsyncForBufferlessTransaction(info, postTime, gameMode,
+                                                      systemContentPriority);
         return true;
     } else {
         // release sideband stream if it exists and a non null buffer is being set
         if (mDrawingState.sidebandStream != nullptr) {
-            setSidebandStream(nullptr, info, postTime, gameMode);
+            setSidebandStream(nullptr, info, postTime, gameMode, systemContentPriority);
         }
     }
 
@@ -952,7 +975,7 @@ bool Layer::setBuffer(std::shared_ptr<renderengine::ExternalTexture>& buffer,
     mFlinger->mTimeStats->setPostTime(layerId, mDrawingState.frameNumber, getName().c_str(),
                                       mOwnerUid, postTime, gameMode);
 
-    setFrameTimelineVsyncForBufferTransaction(info, postTime, gameMode);
+    setFrameTimelineVsyncForBufferTransaction(info, postTime, gameMode, systemContentPriority);
 
     if (bufferData.dequeueTime > 0) {
         const uint64_t bufferId = mDrawingState.buffer->getId();
@@ -1070,9 +1093,17 @@ bool Layer::setDesiredHdrHeadroom(float desiredRatio) {
     return true;
 }
 
+bool Layer::setDesiredMaxHdrHeadroom(float maxDesiredHdrSdrRatio) {
+    if (mDrawingState.maxDesiredHdrSdrRatio == maxDesiredHdrSdrRatio) return false;
+    mDrawingState.maxDesiredHdrSdrRatio = maxDesiredHdrSdrRatio;
+    mFlinger->mHdrLayerInfoChanged = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
 bool Layer::setSidebandStream(const sp<NativeHandle>& sidebandStream, const FrameTimelineInfo& info,
-                              nsecs_t postTime, gui::GameMode gameMode)
-        REQUIRES(mFlinger->mStateLock) {
+                              nsecs_t postTime, gui::GameMode gameMode,
+                              int32_t systemContentPriority) REQUIRES(mFlinger->mStateLock) {
     if (mDrawingState.sidebandStream == sidebandStream) return false;
 
     if (mDrawingState.sidebandStream != nullptr && sidebandStream == nullptr) {
@@ -1086,7 +1117,8 @@ bool Layer::setSidebandStream(const sp<NativeHandle>& sidebandStream, const Fram
         releasePreviousBuffer();
         resetDrawingStateBufferInfo();
         mDrawingState.bufferSurfaceFrameTX = nullptr;
-        setFrameTimelineVsyncForBufferlessTransaction(info, postTime, gameMode);
+        setFrameTimelineVsyncForBufferlessTransaction(info, postTime, gameMode,
+                                                      systemContentPriority);
     }
     setTransactionFlags(eTransactionNeeded);
     if (!mSidebandStreamChanged.exchange(true)) {
@@ -1096,7 +1128,7 @@ bool Layer::setSidebandStream(const sp<NativeHandle>& sidebandStream, const Fram
     return true;
 }
 
-bool Layer::setTransactionCompletedListeners(const std::vector<sp<CallbackHandle>>& handles,
+bool Layer::setTransactionCompletedListeners(std::vector<CallbackHandle> handles,
                                              bool willPresent) {
     // If there is no handle, we will not send a callback so reset mReleasePreviousBuffer and return
     if (handles.empty()) {
@@ -1104,39 +1136,37 @@ bool Layer::setTransactionCompletedListeners(const std::vector<sp<CallbackHandle
         return false;
     }
 
-    std::deque<sp<CallbackHandle>> remainingHandles;
-    for (const auto& handle : handles) {
-        // If this transaction set a buffer on this layer, release its previous buffer
-        handle->releasePreviousBuffer = mReleasePreviousBuffer;
-
-        // If this layer will be presented in this frame
-        if (willPresent) {
+    if (willPresent) {
+        for (auto& handle : handles) {
+            // If this transaction set a buffer on this layer, release its previous buffer
+            handle.releasePreviousBuffer = mReleasePreviousBuffer;
             // If this transaction set an acquire fence on this layer, set its acquire time
-            handle->acquireTimeOrFence = mCallbackHandleAcquireTimeOrFence;
-            handle->frameNumber = mDrawingState.frameNumber;
-            handle->previousFrameNumber = mDrawingState.previousFrameNumber;
-            handle->previousBuffer = mDrawingState.previousBuffer;
-            if (mPreviousReleaseBufferEndpoint == handle->listener) {
+            handle.acquireTimeOrFence = mCallbackHandleAcquireTimeOrFence;
+            handle.frameNumber = mDrawingState.frameNumber;
+            handle.previousFrameNumber = mDrawingState.previousFrameNumber;
+            handle.previousBuffer = mDrawingState.previousBuffer;
+            if (mPreviousReleaseBufferEndpoint == handle.listener) {
                 // Add fence from previous screenshot now so that it can be dispatched to the
                 // client.
                 for (auto& [_, future] : mAdditionalPreviousReleaseFences) {
-                    handle->previousReleaseFences.emplace_back(std::move(future));
+                    handle.fenceMerger.addFuture(std::move(future));
                 }
                 mAdditionalPreviousReleaseFences.clear();
             }
-            // Store so latched time and release fence can be set
-            mDrawingState.callbackHandles.push_back(handle);
-
-        } else { // If this layer will NOT need to be relatched and presented this frame
-            // Queue this handle to be notified below.
-            remainingHandles.push_back(handle);
         }
-    }
-
-    if (!remainingHandles.empty()) {
-        // Notify the transaction completed threads these handles are done. These are only the
-        // handles that were not added to the mDrawingState, which will be notified later.
-        mFlinger->getTransactionCallbackInvoker().addCallbackHandles(remainingHandles);
+        // Store so latched time and release fence can be set
+        mDrawingState.callbackHandles.reserve(mDrawingState.callbackHandles.size() +
+                                              handles.size());
+        mDrawingState.callbackHandles.insert(mDrawingState.callbackHandles.end(),
+                                             std::make_move_iterator(handles.begin()),
+                                             std::make_move_iterator(handles.end()));
+    } else {
+        for (auto& handle : handles) {
+            // If this transaction set a buffer on this layer, release its previous buffer
+            handle.releasePreviousBuffer = mReleasePreviousBuffer;
+        }
+        // Notify the transaction completed threads these handles are done.
+        mFlinger->getTransactionCallbackInvoker().addCallbackHandles(std::move(handles));
     }
 
     mReleasePreviousBuffer = false;
@@ -1186,8 +1216,8 @@ bool Layer::fenceHasSignaled() const {
 }
 
 void Layer::onPreComposition(nsecs_t refreshStartTime) {
-    for (const auto& handle : mDrawingState.callbackHandles) {
-        handle->refreshStartTime = refreshStartTime;
+    for (auto& handle : mDrawingState.callbackHandles) {
+        handle.refreshStartTime = refreshStartTime;
     }
 }
 
@@ -1206,29 +1236,33 @@ bool Layer::latchSidebandStream(bool& recomputeVisibleRegions) {
     return false;
 }
 
-void Layer::updateTexImage(nsecs_t latchTime, nsecs_t expectedPresentTime, bool bgColorOnly)
+void Layer::latchBufferStatsAndHandles(nsecs_t latchTime, nsecs_t expectedPresentTime,
+                                       bool bgColorOnly)
         REQUIRES(mFlinger->mStateLock) {
     const State& s(getDrawingState());
 
-    if (!s.buffer) {
+    if (!s.buffer && !s.hasRenderCommandBufferFrameId) {
         if (bgColorOnly || mBufferInfo.mBuffer) {
             for (auto& handle : mDrawingState.callbackHandles) {
-                handle->latchTime = latchTime;
+                handle.latchTime = latchTime;
             }
         }
         return;
     }
 
     for (auto& handle : mDrawingState.callbackHandles) {
-        if (handle->frameNumber == mDrawingState.frameNumber) {
-            handle->latchTime = latchTime;
+        if (handle.frameNumber == mDrawingState.frameNumber) {
+            handle.latchTime = latchTime;
         }
     }
 
     const int32_t layerId = getSequence();
-    const uint64_t bufferId = mDrawingState.buffer->getId();
+    const uint64_t bufferId = getPendingBufferId();
     const uint64_t frameNumber = mDrawingState.frameNumber;
     const auto acquireFence = std::make_shared<FenceTime>(mDrawingState.acquireFence);
+    // TODO(b/485971052):
+    // For OOPR the fence tracing is going to produce SIGNAL_TIME_INVALID. This may
+    // cause issues
     mFlinger->mTimeStats->setAcquireFence(layerId, frameNumber, acquireFence);
     mFlinger->mTimeStats->setLatchTime(layerId, frameNumber, latchTime);
 
@@ -1244,21 +1278,32 @@ void Layer::updateTexImage(nsecs_t latchTime, nsecs_t expectedPresentTime, bool 
         // bufferSurfaceFrame could be seen here if a pending state was applied successfully and we
         // are processing the next state.
         addSurfaceFramePresentedForBuffer(bufferSurfaceFrame,
-                                          mDrawingState.acquireFenceTime->getSignalTime(),
+                                          getAcquireSignalTime(),
                                           latchTime, expectedPresentTime);
         mDrawingState.bufferSurfaceFrameTX.reset();
     }
 
-    std::deque<sp<CallbackHandle>> remainingHandles;
-    mFlinger->getTransactionCallbackInvoker()
-            .addOnCommitCallbackHandles(mDrawingState.callbackHandles, remainingHandles);
-    mDrawingState.callbackHandles = remainingHandles;
+    mFlinger->getTransactionCallbackInvoker().addOnCommitCallbackHandles(
+            mDrawingState.callbackHandles);
+}
+
+void Layer::gatherBufferInfoRenderCommandBuffer() {
+    // TODO(b/485971052): We should integrate with the pending buffer count trace
+    // and decrement here...but we aren't incrementing anywhere at the moment
+    // so we save this for latter
+    mBufferInfo.mFrameNumber = mDrawingState.frameNumber;
+    mBufferInfo.mFrameLatencyNeeded = true;
+    mBufferInfo.mDesiredPresentTime = mDrawingState.desiredPresentTime;
 }
 
 void Layer::gatherBufferInfo() {
-    mPreviousReleaseCallbackId = {getCurrentBufferId(), mBufferInfo.mFrameNumber};
+    mPreviousReleaseCallbackId = {getLatchedBufferId(), mBufferInfo.mFrameNumber};
     mPreviousReleaseBufferEndpoint = mBufferInfo.mReleaseBufferEndpoint;
     if (!mDrawingState.buffer) {
+        if (mDrawingState.hasRenderCommandBufferFrameId) {
+            gatherBufferInfoRenderCommandBuffer();
+            return;
+        }
         mBufferInfo = {};
         return;
     }
@@ -1392,14 +1437,12 @@ void Layer::onCompositionPresented(const DisplayDevice* display,
     // composition.
     if (!mBufferInfo.mFrameLatencyNeeded) return;
 
-    for (const auto& handle : mDrawingState.callbackHandles) {
-        handle->gpuCompositionDoneFence = glDoneFence;
-        handle->compositorTiming = compositorTiming;
+    for (auto& handle : mDrawingState.callbackHandles) {
+        handle.gpuCompositionDoneFence = glDoneFence;
+        handle.compositorTiming = compositorTiming;
     }
 
-    // Update mDeprecatedFrameTracker.
     nsecs_t desiredPresentTime = mBufferInfo.mDesiredPresentTime;
-    mDeprecatedFrameTracker.setDesiredPresentTime(desiredPresentTime);
 
     const int32_t layerId = getSequence();
     mFlinger->mTimeStats->setDesiredTime(layerId, mCurrentFrameNumber, desiredPresentTime);
@@ -1407,7 +1450,7 @@ void Layer::onCompositionPresented(const DisplayDevice* display,
     const auto outputLayer = findOutputLayerForDisplay(display);
     if (outputLayer && outputLayer->requiresClientComposition()) {
         nsecs_t clientCompositionTimestamp = outputLayer->getState().clientCompositionTimestamp;
-        mFlinger->mFrameTracer->traceTimestamp(layerId, getCurrentBufferId(), mCurrentFrameNumber,
+        mFlinger->mFrameTracer->traceTimestamp(layerId, getLatchedBufferId(), mCurrentFrameNumber,
                                                clientCompositionTimestamp,
                                                FrameTracer::FrameEvent::FALLBACK_COMPOSITION);
         // Update the SurfaceFrames in the drawing state
@@ -1419,15 +1462,6 @@ void Layer::onCompositionPresented(const DisplayDevice* display,
         }
     }
 
-    // The SurfaceFrame's AcquireFence is the same as this.
-    std::shared_ptr<FenceTime> frameReadyFence = mBufferInfo.mFenceTime;
-    if (frameReadyFence->isValid()) {
-        mDeprecatedFrameTracker.setFrameReadyFence(std::move(frameReadyFence));
-    } else {
-        // There was no fence for this frame, so assume that it was ready
-        // to be presented at the desired present time.
-        mDeprecatedFrameTracker.setFrameReadyTime(desiredPresentTime);
-    }
     if (display) {
         const auto activeMode = display->refreshRateSelector().getActiveMode();
         const Fps refreshRate = activeMode.fps;
@@ -1439,10 +1473,9 @@ void Layer::onCompositionPresented(const DisplayDevice* display,
         if (presentFence->isValid()) {
             mFlinger->mTimeStats->setPresentFence(layerId, mCurrentFrameNumber, presentFence,
                                                   refreshRate, renderRate, vote, gameMode);
-            mFlinger->mFrameTracer->traceFence(layerId, getCurrentBufferId(), mCurrentFrameNumber,
+            mFlinger->mFrameTracer->traceFence(layerId, getLatchedBufferId(), mCurrentFrameNumber,
                                                presentFence,
                                                FrameTracer::FrameEvent::PRESENT_FENCE);
-            mDeprecatedFrameTracker.setActualPresentFence(std::shared_ptr<FenceTime>(presentFence));
         } else if (const auto displayId = asPhysicalDisplayId(display->getDisplayIdVariant());
                    displayId.has_value() && mFlinger->getHwComposer().isConnected(*displayId)) {
             // The HWC doesn't support present fences, so use the present timestamp instead.
@@ -1460,15 +1493,13 @@ void Layer::onCompositionPresented(const DisplayDevice* display,
 
             mFlinger->mTimeStats->setPresentTime(layerId, mCurrentFrameNumber, actualPresentTime,
                                                  refreshRate, renderRate, vote, gameMode);
-            mFlinger->mFrameTracer->traceTimestamp(layerId, getCurrentBufferId(),
+            mFlinger->mFrameTracer->traceTimestamp(layerId, getLatchedBufferId(),
                                                    mCurrentFrameNumber, actualPresentTime,
                                                    FrameTracer::FrameEvent::PRESENT_FENCE);
-            mDeprecatedFrameTracker.setActualPresentTime(actualPresentTime);
         }
     }
 
     mFrameStatsHistorySize++;
-    mDeprecatedFrameTracker.advanceFrame();
     mBufferInfo.mFrameLatencyNeeded = false;
 }
 
@@ -1486,12 +1517,12 @@ bool Layer::latchBufferImpl(bool& recomputeVisibleRegions, nsecs_t latchTime,
 
     // If the head buffer's acquire fence hasn't signaled yet, return and
     // try again later
-    if (!fenceHasSignaled()) {
+    if (mDrawingState.buffer && !fenceHasSignaled()) {
         SFTRACE_NAME("!fenceHasSignaled()");
         mFlinger->onLayerUpdate();
         return false;
     }
-    updateTexImage(latchTime, expectedPresentTime, bgColorOnly);
+    latchBufferStatsAndHandles(latchTime, expectedPresentTime, bgColorOnly);
 
     // Capture the old state of the layer for comparisons later
     BufferInfo oldBufferInfo = mBufferInfo;
@@ -1631,6 +1662,25 @@ void Layer::setIsSmallDirty(frontend::LayerSnapshot* snapshot) {
     snapshot->isSmallDirty =
             mFlinger->mScheduler->isSmallDirtyArea(mOwnerAppId,
                                                    bounds.getWidth() * bounds.getHeight());
+}
+
+uint64_t Layer::getPendingBufferId() {
+    if (mDrawingState.hasRenderCommandBufferFrameId) {
+        return mDrawingState.renderCommandBufferFrameId;
+    }
+    if (mDrawingState.buffer) {
+        return mDrawingState.buffer->getId();
+    }
+    return 0;
+}
+
+nsecs_t Layer::getAcquireSignalTime() {
+  if (mDrawingState.hasRenderCommandBufferFrameId) {
+      return mDrawingState.renderCommandBufferFrameIdQueueTime;
+  } else if (mDrawingState.acquireFenceTime) {
+      return mDrawingState.acquireFenceTime->getSignalTime();
+  }
+  return 0;
 }
 
 } // namespace android

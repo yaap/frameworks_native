@@ -75,10 +75,11 @@ public:
     //                      change.
     void onDisplayModeChanged(ftl::NonNull<DisplayModePtr>, bool force);
 
-    // Pass a VSYNC sample to VsyncController. Return true if
-    // VsyncController detected that the VSYNC period changed. Enable or disable
-    // hardware VSYNCs depending on whether more samples are needed.
-    bool addResyncSample(TimePoint timestamp, ftl::Optional<Period> hwcVsyncPeriod);
+    // Pass a VSYNC sample to VsyncController. Return true if VsyncController detected that the
+    // VSYNC period changed. Enable or disable hardware VSYNCs depending on whether more samples are
+    // needed.
+    bool addResyncSample(TimePoint timestamp, ftl::Optional<Period> hwcVsyncPeriod,
+                         VSyncTracker::VsyncTimeSource source);
 
     // TODO(b/185535769): Hide behind API.
     VsyncTracker& getTracker() const { return *mTracker; }
@@ -114,6 +115,8 @@ public:
 
     PhysicalDisplayId getPhysicalDisplayId() const { return mId; }
 
+    bool isModeChangeInProgress() const;
+
 protected:
     using ControllerPtr = std::unique_ptr<VsyncController>;
 
@@ -129,7 +132,7 @@ private:
     friend class android::VsyncScheduleTest;
     friend class android::fuzz::SchedulerFuzzer;
 
-    static TrackerPtr createTracker(ftl::NonNull<DisplayModePtr> modePtr);
+    static TrackerPtr createTracker(ftl::NonNull<DisplayModePtr> modePtr, FeatureFlags features);
     static DispatchPtr createDispatch(TrackerPtr);
     static ControllerPtr createController(PhysicalDisplayId, VsyncTracker&, FeatureFlags);
 

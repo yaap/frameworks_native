@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <common/Panopticon.h>
 #include <common/trace.h>
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/LayerFE.h>
@@ -152,6 +153,9 @@ void CompositionEngine::present(CompositionRefreshArgs& args) {
     ui::DisplayVector<ftl::Future<std::monostate>> presentFutures;
     for (const auto& output : args.outputs) {
         presentFutures.push_back(output->present(args));
+        if (auto displayId = output->getDisplayId(); displayId) {
+            panopticon::terminate(std::to_string(displayId->value));
+        }
     }
 
     {
@@ -202,7 +206,7 @@ void CompositionEngine::postComposition(CompositionRefreshArgs& args) {
     ALOGV(__FUNCTION__);
 
     const bool force_slower_follower_gpu_composition =
-            FlagManager::getInstance().force_slower_follower_gpu_composition();
+            FlagManager::getInstance().force_slower_follower_gpu_composition_combined();
     for (auto& layerFE : args.layers) {
         if (layerFE->getReleaseFencePromiseStatus() ==
             LayerFE::ReleaseFencePromiseStatus::INITIALIZED) {
@@ -231,6 +235,14 @@ void CompositionEngine::postComposition(CompositionRefreshArgs& args) {
 
 FeatureFlags CompositionEngine::getFeatureFlags() const {
     return {};
+}
+
+bool CompositionEngine::isPowerHintSessionEnabled() const {
+    return mPowerHintSessionEnabled;
+}
+
+void CompositionEngine::setPowerHintSessionEnabled(bool enabled) {
+    mPowerHintSessionEnabled = enabled;
 }
 
 void CompositionEngine::dump(std::string&) const {

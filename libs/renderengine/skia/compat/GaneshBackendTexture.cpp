@@ -19,6 +19,7 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <include/core/SkImage.h>
+#include <include/core/SkImageInfo.h>
 #include <include/gpu/ganesh/GrDirectContext.h>
 #include <include/gpu/ganesh/SkImageGanesh.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
@@ -26,21 +27,27 @@
 #include <include/gpu/ganesh/vk/GrVkBackendSurface.h>
 #include <include/gpu/ganesh/vk/GrVkTypes.h>
 
-#include "skia/ColorSpaces.h"
+#include <renderengine/ColorSpaces.h>
 #include "skia/compat/SkiaBackendTexture.h"
 
 #include <android/hardware_buffer.h>
 #include <common/trace.h>
 #include <log/log_main.h>
 
+#include <format>
+
 namespace android::renderengine::skia {
 
 GaneshBackendTexture::GaneshBackendTexture(sk_sp<GrDirectContext> grContext,
                                            AHardwareBuffer* buffer, bool isOutputBuffer)
-      : SkiaBackendTexture(buffer, isOutputBuffer), mGrContext(grContext) {
+      : SkiaBackendTexture(isOutputBuffer), mGrContext(grContext) {
     SFTRACE_CALL();
     AHardwareBuffer_Desc desc;
     AHardwareBuffer_describe(buffer, &desc);
+
+    // Save this for use in makeImage() and makeSurface().
+    mColorType = AHardwareBufferUtils::GetSkColorTypeFromBufferFormat(desc.format);
+
     const bool createProtectedImage = 0 != (desc.usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT);
 
     GrBackendFormat backendFormat;
@@ -84,39 +91,73 @@ GaneshBackendTexture::~GaneshBackendTexture() {
 
 sk_sp<SkImage> GaneshBackendTexture::makeImage(SkAlphaType alphaType, ui::Dataspace dataspace,
                                                TextureReleaseProc releaseImageProc,
-                                               ReleaseContext releaseContext) {
+                                               ReleaseContext releaseContext,
+                                               ftl::Flags<ColorSpaceOptions> options) {
     if (mBackendTexture.isValid()) {
         mUpdateProc(mImageCtx, mGrContext.get());
     }
 
-    const SkColorType colorType = colorTypeForImage(alphaType);
+    SkColorType colorType = internalColorType();
+    if (alphaType == kUnknown_SkAlphaType) {
+        switch (colorType) {
+            case kRGBA_8888_SkColorType:
+                colorType = kRGB_888x_SkColorType;
+                break;
+            // TODO(skbug.com/12048): Use RGBx for f16 and 1010102. These fall through in order to
+            // preserve the behavior from before ag/37959316 where the SkiaRenderEngine would
+            // preemptively apply an opaque workaround for these color types.
+            case kRGBA_F16_SkColorType:
+            case kRGBA_1010102_SkColorType: [[fallthrough]];
+            default:
+                // No way to force this to opaque in Ganesh, so pretend the alpha type is premul
+                // and SkiaRenderEngine will apply an opaque workaround.
+                alphaType = kPremul_SkAlphaType;
+                break;
+        }
+    }
+    // Adjust alpha type to kOpaque_SkAlphaType if the color type does not have an alpha channel.
+    if (SkColorTypeIsAlwaysOpaque(colorType)) {
+        alphaType = kOpaque_SkAlphaType;
+    }
+
     sk_sp<SkImage> image =
             SkImages::BorrowTextureFrom(mGrContext.get(), mBackendTexture, kTopLeft_GrSurfaceOrigin,
-                                        colorType, alphaType, toSkColorSpace(dataspace),
+                                        colorType, alphaType, toSkColorSpace(dataspace, options),
                                         releaseImageProc, releaseContext);
     if (!image) {
-        logFatalTexture("Unable to generate SkImage.", dataspace, colorType);
+        logFatalTexture("Unable to generate SkImage.", dataspace, colorType, alphaType);
     }
     return image;
 }
 
 sk_sp<SkSurface> GaneshBackendTexture::makeSurface(ui::Dataspace dataspace,
                                                    TextureReleaseProc releaseSurfaceProc,
-                                                   ReleaseContext releaseContext) {
+                                                   ReleaseContext releaseContext,
+                                                   ftl::Flags<ColorSpaceOptions> options) {
     const SkColorType colorType = internalColorType();
     sk_sp<SkSurface> surface =
             SkSurfaces::WrapBackendTexture(mGrContext.get(), mBackendTexture,
                                            kTopLeft_GrSurfaceOrigin, 0, colorType,
-                                           toSkColorSpace(dataspace), nullptr, releaseSurfaceProc,
-                                           releaseContext);
+                                           toSkColorSpace(dataspace, options), nullptr,
+                                           releaseSurfaceProc, releaseContext);
     if (!surface) {
-        logFatalTexture("Unable to generate SkSurface.", dataspace, colorType);
+        logFatalTexture("Unable to generate SkSurface.", dataspace, colorType, kPremul_SkAlphaType);
     }
     return surface;
 }
 
+std::string GaneshBackendTexture::backendDebugInfo() const {
+    if (!mBackendTexture.isValid()) {
+        return "GaneshBackendTexture(INVALID)";
+    }
+    return std::format("GaneshBackendTexture(dimensions={}x{}, internalColorType: {}, {}))",
+                       mBackendTexture.dimensions().width(), mBackendTexture.dimensions().height(),
+                       static_cast<int>(internalColorType()),
+                       mBackendTexture.getLabel());
+}
+
 void GaneshBackendTexture::logFatalTexture(const char* msg, ui::Dataspace dataspace,
-                                           SkColorType colorType) {
+                                           SkColorType colorType, SkAlphaType alphaType) {
     switch (mBackendTexture.backend()) {
         case GrBackendApi::kOpenGL: {
             GrGLTextureInfo textureInfo;
@@ -125,12 +166,12 @@ void GaneshBackendTexture::logFatalTexture(const char* msg, ui::Dataspace datasp
             LOG_ALWAYS_FATAL("%s isTextureValid:%d dataspace:%d"
                              "\n\tGrBackendTexture: (%i x %i) hasMipmaps: %i isProtected: %i "
                              "texType: %i\n\t\tGrGLTextureInfo: success: %i fTarget: %u fFormat: %u"
-                             " colorType %i",
+                             " colorType %i alphatype: %i",
                              msg, mBackendTexture.isValid(), static_cast<int32_t>(dataspace),
                              mBackendTexture.width(), mBackendTexture.height(),
                              mBackendTexture.hasMipmaps(), mBackendTexture.isProtected(),
                              static_cast<int>(mBackendTexture.textureType()), retrievedTextureInfo,
-                             textureInfo.fTarget, textureInfo.fFormat, colorType);
+                             textureInfo.fTarget, textureInfo.fFormat, colorType, alphaType);
             break;
         }
         case GrBackendApi::kVulkan: {
@@ -140,13 +181,13 @@ void GaneshBackendTexture::logFatalTexture(const char* msg, ui::Dataspace datasp
             LOG_ALWAYS_FATAL("%s isTextureValid:%d dataspace:%d"
                              "\n\tGrBackendTexture: (%i x %i) hasMipmaps: %i isProtected: %i "
                              "texType: %i\n\t\tVkImageInfo: success: %i fFormat: %i "
-                             "fSampleCount: %u fLevelCount: %u colorType %i",
+                             "fSampleCount: %u fLevelCount: %u colorType %i alphaType: %i",
                              msg, mBackendTexture.isValid(), static_cast<int32_t>(dataspace),
                              mBackendTexture.width(), mBackendTexture.height(),
                              mBackendTexture.hasMipmaps(), mBackendTexture.isProtected(),
                              static_cast<int>(mBackendTexture.textureType()), retrievedImageInfo,
                              imageInfo.fFormat, imageInfo.fSampleCount, imageInfo.fLevelCount,
-                             colorType);
+                             colorType, alphaType);
             break;
         }
         default:

@@ -151,6 +151,8 @@ public:
     // True if any layer in this cached set has CachingHint::Disabled
     bool cachingHintExcludesLayers() const;
 
+    void setHolePunchWithoutRoundedCorners(bool enable) { mForceHolePunch = enable; }
+
 private:
     const NonBufferHash mFingerprint;
     std::chrono::steady_clock::time_point mLastUpdate = std::chrono::steady_clock::now();
@@ -171,6 +173,8 @@ private:
     ProjectionSpace mOutputSpace;
     ui::Dataspace mOutputDataspace;
     ui::Transform::RotationFlags mOrientation = ui::Transform::ROT_0;
+
+    bool mForceHolePunch = false;
 
     static const bool sDebugHighlighLayers;
 };

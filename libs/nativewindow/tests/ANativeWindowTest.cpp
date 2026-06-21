@@ -164,3 +164,63 @@ TEST_F(ANativeWindowTest, setDequeueTimeout_causesDequeueTimeout) {
     EXPECT_EQ(TIMED_OUT, dequeueResult);
     EXPECT_GE(end - start, timeout);
 }
+
+TEST_F(ANativeWindowTest, ANWPresentModeTest) {
+    // Test LATEST acquiring
+    ASSERT_EQ(OK,
+              native_window_set_present_mode(mWindow.get(),
+                                             ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY));
+    ANativeWindowBuffer* buffer;
+    int fd;
+    ASSERT_EQ(OK, native_window_set_buffer_count(mWindow.get(), 4));
+
+    // Queue frame 1
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    // Queue frame 2
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    // Queue frame 3
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    BufferItem item;
+    ASSERT_EQ(OK, mItemConsumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(3, item.mFrameNumber);
+    ASSERT_EQ(OK, mItemConsumer->releaseBuffer(item));
+
+    // Test FIFO acquiring
+    ASSERT_EQ(OK, native_window_set_present_mode(mWindow.get(), ANATIVEWINDOW_PRESENT_DEFAULT));
+
+    // Queue frame 4
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    // Queue frame 5
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    // Queue frame 6
+    ASSERT_EQ(OK, ANativeWindow_dequeueBuffer(mWindow.get(), &buffer, &fd));
+    close(fd);
+    ASSERT_EQ(OK, ANativeWindow_queueBuffer(mWindow.get(), buffer, -1));
+
+    ASSERT_EQ(OK, mItemConsumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(4, item.mFrameNumber);
+    ASSERT_EQ(OK, mItemConsumer->releaseBuffer(item));
+
+    ASSERT_EQ(OK, mItemConsumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(5, item.mFrameNumber);
+    ASSERT_EQ(OK, mItemConsumer->releaseBuffer(item));
+
+    ASSERT_EQ(OK, mItemConsumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(6, item.mFrameNumber);
+    ASSERT_EQ(OK, mItemConsumer->releaseBuffer(item));
+}

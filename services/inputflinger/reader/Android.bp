@@ -44,7 +44,7 @@ filegroup {
         "Macros.cpp",
         "TouchVideoDevice.cpp",
         "controller/PeripheralController.cpp",
-        "mapper/CapturedTouchpadEventConverter.cpp",
+        "mapper/AbsoluteTouchpadEventConverter.cpp",
         "mapper/CursorInputMapper.cpp",
         "mapper/ExternalStylusInputMapper.cpp",
         "mapper/InputMapper.cpp",
@@ -66,6 +66,7 @@ filegroup {
         "mapper/accumulator/MultiTouchMotionAccumulator.cpp",
         "mapper/accumulator/SingleTouchMotionAccumulator.cpp",
         "mapper/accumulator/TouchButtonAccumulator.cpp",
+        "mapper/gestures/GestureConverterCommon.cpp",
         "mapper/gestures/GesturesLogcatAdapter.cpp",
         "mapper/gestures/HardwareProperties.cpp",
         "mapper/gestures/HardwareStateConverter.cpp",
@@ -82,7 +83,6 @@ cc_defaults {
     srcs: [":libinputreader_sources"],
     shared_libs: [
         "android.companion.virtualdevice.flags-aconfig-cc",
-        "libPlatformProperties",
         "libbase",
         "libcap",
         "libcrypto",
@@ -96,6 +96,7 @@ cc_defaults {
         "libutils",
     ],
     static_libs: [
+        "libPlatformProperties",
         "libchrome-gestures",
         "libexpresslog",
         "libstatslog_express",

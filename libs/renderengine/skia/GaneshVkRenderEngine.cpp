@@ -21,6 +21,8 @@
 #include <include/gpu/ganesh/vk/GrVkBackendSemaphore.h>
 
 #include <android-base/stringprintf.h>
+#include <common/Panopticon.h>
+
 #include <common/trace.h>
 #include <log/log_main.h>
 #include <sync/sync.h>
@@ -56,12 +58,14 @@ static void unref_semaphore(void* semaphore) {
 std::unique_ptr<SkiaGpuContext> GaneshVkRenderEngine::createContext(
         VulkanInterface& vulkanInterface) {
     auto driverVersion = vulkanInterface.driverVersion();
-    auto& cache = persistentCache(&driverVersion, sizeof(driverVersion));
-    return SkiaGpuContext::MakeVulkan_Ganesh(vulkanInterface.createSkiaVulkanBackendContext(),
-                                             cache);
+    GrContextOptions::PersistentCache& cache =
+            ganeshPersistentCache(&driverVersion, sizeof(driverVersion));
+    return SkiaGpuContext::MakeVulkan_Ganesh(
+        vulkanInterface.createSkiaVulkanBackendContext(/*threadSafeVMA=*/false),
+        cache);
 }
 
-void GaneshVkRenderEngine::waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) {
+void GaneshVkRenderEngine::waitFenceImpl(SkiaGpuContext* context, base::borrowed_fd fenceFd) {
     if (fenceFd.get() < 0) return;
 
     const int dupedFd = dup(fenceFd.get());
@@ -86,6 +90,7 @@ base::unique_fd GaneshVkRenderEngine::flushAndSubmit(SkiaGpuContext* context,
         SFTRACE_NAME("flush surface");
         // TODO: Investigate feasibility of combining this "surface flush" into the "context flush"
         // below.
+        auto slice = panopticon::slice(panopticon::SliceType::CG_Skia_flush);
         context->grDirectContext()->flush(dstSurface.get());
     }
 
@@ -102,6 +107,7 @@ base::unique_fd GaneshVkRenderEngine::flushAndSubmit(SkiaGpuContext* context,
         flushInfo.fFinishedProc = unref_semaphore;
         flushInfo.fFinishedContext = destroySemaphoreInfo;
     }
+    auto slice = panopticon::slice(panopticon::SliceType::CG_Skia_submit);
     GrSemaphoresSubmitted submitted = grContext->flush(flushInfo);
     grContext->submit(GrSyncCpu::kNo);
     int drawFenceFd = -1;
@@ -113,7 +119,7 @@ base::unique_fd GaneshVkRenderEngine::flushAndSubmit(SkiaGpuContext* context,
         flushInfo.fFinishedProc(destroySemaphoreInfo);
     }
     base::unique_fd res(drawFenceFd);
-    ShaderCache::get().onVkFrameFlushed(grContext.get());
+    ShaderCache::get(SkiaBackend::Ganesh).onGaneshVkFrameFlushed(grContext.get());
     return res;
 }
 

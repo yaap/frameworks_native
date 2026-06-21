@@ -54,7 +54,7 @@ typedef struct AParcel AParcel;
  * \param parcel A parcel returned by AIBinder_prepareTransaction or AIBinder_transact when a
  * transaction is being aborted.
  */
-void AParcel_delete(AParcel* parcel) __INTRODUCED_IN(29);
+void AParcel_delete(AParcel* _Nullable parcel) __INTRODUCED_IN(29);
 
 /**
  * Sets the position within the parcel.
@@ -72,7 +72,7 @@ void AParcel_delete(AParcel* parcel) __INTRODUCED_IN(29);
  *
  * \return STATUS_OK on success. If position is negative, then STATUS_BAD_VALUE will be returned.
  */
-binder_status_t AParcel_setDataPosition(const AParcel* parcel, int32_t position)
+binder_status_t AParcel_setDataPosition(const AParcel* _Nonnull parcel, int32_t position)
         __INTRODUCED_IN(29);
 
 /**
@@ -88,7 +88,7 @@ binder_status_t AParcel_setDataPosition(const AParcel* parcel, int32_t position)
  * is X, writeBool is called, and then position is Y, readBool can be called from position X will
  * return the same value, and then position will be Y.
  */
-int32_t AParcel_getDataPosition(const AParcel* parcel) __INTRODUCED_IN(29);
+int32_t AParcel_getDataPosition(const AParcel* _Nonnull parcel) __INTRODUCED_IN(29);
 
 /**
  * This is called to allocate a buffer for a C-style string (null-terminated). The returned buffer
@@ -107,7 +107,8 @@ int32_t AParcel_getDataPosition(const AParcel* parcel) __INTRODUCED_IN(29);
  * \return true if the allocation succeeded, false otherwise. If length is -1, a true return here
  * means that a 'null' value (or equivalent) was successfully stored.
  */
-typedef bool (*AParcel_stringAllocator)(void* stringData, int32_t length, char** buffer);
+typedef bool (*_Nullable AParcel_stringAllocator)(void* _Nullable stringData, int32_t length,
+                                                  char* _Nullable* _Nullable buffer);
 
 /**
  * This is called to allocate an array of size 'length'. If length is -1, then a 'null' array (or
@@ -121,7 +122,7 @@ typedef bool (*AParcel_stringAllocator)(void* stringData, int32_t length, char**
  * \return true if allocation succeeded. If length is -1, a true return here means that a 'null'
  * value (or equivalent) was successfully stored.
  */
-typedef bool (*AParcel_stringArrayAllocator)(void* arrayData, int32_t length);
+typedef bool (*_Nullable AParcel_stringArrayAllocator)(void* _Nullable arrayData, int32_t length);
 
 /**
  * This is called to allocate a string inside of an array that was allocated by an
@@ -143,8 +144,9 @@ typedef bool (*AParcel_stringArrayAllocator)(void* arrayData, int32_t length);
  * \return true if the allocation succeeded, false otherwise. If length is -1, a true return here
  * means that a 'null' value (or equivalent) was successfully stored.
  */
-typedef bool (*AParcel_stringArrayElementAllocator)(void* arrayData, size_t index, int32_t length,
-                                                    char** buffer);
+typedef bool (*_Nullable AParcel_stringArrayElementAllocator)(void* _Nullable arrayData,
+                                                              size_t index, int32_t length,
+                                                              char* _Nullable* _Nullable buffer);
 
 /**
  * This returns the length and buffer of an array at a specific index in an arrayData object.
@@ -160,8 +162,8 @@ typedef bool (*AParcel_stringArrayElementAllocator)(void* arrayData, size_t inde
  * \param a buffer of size outLength or more representing the string at the provided index. This is
  * not required to be null-terminated. If the object at index is null, then this should be null.
  */
-typedef const char* (*AParcel_stringArrayElementGetter)(const void* arrayData, size_t index,
-                                                        int32_t* outLength);
+typedef const char* _Nullable (*_Nullable AParcel_stringArrayElementGetter)(
+        const void* _Nullable arrayData, size_t index, int32_t* _Nullable outLength);
 
 /**
  * This is called to allocate an array of size 'length'. If length is -1, then a 'null' array (or
@@ -175,7 +177,8 @@ typedef const char* (*AParcel_stringArrayElementGetter)(const void* arrayData, s
  * \return true if allocation succeeded. If length is -1, a true return here means that a 'null'
  * value (or equivalent) was successfully stored.
  */
-typedef bool (*AParcel_parcelableArrayAllocator)(void* arrayData, int32_t length);
+typedef bool (*_Nullable AParcel_parcelableArrayAllocator)(void* _Nullable arrayData,
+                                                           int32_t length);
 
 /**
  * This is called to parcel the underlying data from an arrayData object at index.
@@ -188,8 +191,9 @@ typedef bool (*AParcel_parcelableArrayAllocator)(void* arrayData, int32_t length
  *
  * \return status (usually returned from other parceling functions). STATUS_OK for success.
  */
-typedef binder_status_t (*AParcel_writeParcelableElement)(AParcel* parcel, const void* arrayData,
-                                                          size_t index);
+typedef binder_status_t (*_Nullable AParcel_writeParcelableElement)(AParcel* _Nonnull parcel,
+                                                                    const void* _Nullable arrayData,
+                                                                    size_t index);
 
 /**
  * This is called to set an underlying value in an arrayData object at index.
@@ -202,8 +206,9 @@ typedef binder_status_t (*AParcel_writeParcelableElement)(AParcel* parcel, const
  *
  * \return status (usually returned from other parceling functions). STATUS_OK for success.
  */
-typedef binder_status_t (*AParcel_readParcelableElement)(const AParcel* parcel, void* arrayData,
-                                                         size_t index);
+typedef binder_status_t (*_Nullable AParcel_readParcelableElement)(const AParcel* _Nonnull parcel,
+                                                                   void* _Nullable arrayData,
+                                                                   size_t index);
 
 // @START-PRIMITIVE-VECTOR-GETTERS
 /**
@@ -223,7 +228,8 @@ typedef binder_status_t (*AParcel_readParcelableElement)(const AParcel* parcel, 
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_int32ArrayAllocator)(void* arrayData, int32_t length, int32_t** outBuffer);
+typedef bool (*_Nullable AParcel_int32ArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                      int32_t* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -242,7 +248,8 @@ typedef bool (*AParcel_int32ArrayAllocator)(void* arrayData, int32_t length, int
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_uint32ArrayAllocator)(void* arrayData, int32_t length, uint32_t** outBuffer);
+typedef bool (*_Nullable AParcel_uint32ArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                       uint32_t* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -261,7 +268,8 @@ typedef bool (*AParcel_uint32ArrayAllocator)(void* arrayData, int32_t length, ui
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_int64ArrayAllocator)(void* arrayData, int32_t length, int64_t** outBuffer);
+typedef bool (*_Nullable AParcel_int64ArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                      int64_t* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -280,7 +288,8 @@ typedef bool (*AParcel_int64ArrayAllocator)(void* arrayData, int32_t length, int
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_uint64ArrayAllocator)(void* arrayData, int32_t length, uint64_t** outBuffer);
+typedef bool (*_Nullable AParcel_uint64ArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                       uint64_t* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -299,7 +308,8 @@ typedef bool (*AParcel_uint64ArrayAllocator)(void* arrayData, int32_t length, ui
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_floatArrayAllocator)(void* arrayData, int32_t length, float** outBuffer);
+typedef bool (*_Nullable AParcel_floatArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                      float* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -318,7 +328,8 @@ typedef bool (*AParcel_floatArrayAllocator)(void* arrayData, int32_t length, flo
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_doubleArrayAllocator)(void* arrayData, int32_t length, double** outBuffer);
+typedef bool (*_Nullable AParcel_doubleArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                       double* _Nullable* _Nullable outBuffer);
 
 /**
  * This allocates an array of size 'length' inside of arrayData and returns whether or not there was
@@ -331,7 +342,7 @@ typedef bool (*AParcel_doubleArrayAllocator)(void* arrayData, int32_t length, do
  *
  * \return whether the allocation succeeded.
  */
-typedef bool (*AParcel_boolArrayAllocator)(void* arrayData, int32_t length);
+typedef bool (*_Nullable AParcel_boolArrayAllocator)(void* _Nullable arrayData, int32_t length);
 
 /**
  * This is called to get the underlying data from an arrayData object at index.
@@ -343,7 +354,7 @@ typedef bool (*AParcel_boolArrayAllocator)(void* arrayData, int32_t length);
  *
  * \return the value of the array at index index.
  */
-typedef bool (*AParcel_boolArrayGetter)(const void* arrayData, size_t index);
+typedef bool (*_Nullable AParcel_boolArrayGetter)(const void* _Nullable arrayData, size_t index);
 
 /**
  * This is called to set an underlying value in an arrayData object at index.
@@ -354,7 +365,8 @@ typedef bool (*AParcel_boolArrayGetter)(const void* arrayData, size_t index);
  * \param index the index of the value to be set.
  * \param value the value to set at index index.
  */
-typedef void (*AParcel_boolArraySetter)(void* arrayData, size_t index, bool value);
+typedef void (*_Nullable AParcel_boolArraySetter)(void* _Nullable arrayData, size_t index,
+                                                  bool value);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -373,7 +385,8 @@ typedef void (*AParcel_boolArraySetter)(void* arrayData, size_t index, bool valu
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_charArrayAllocator)(void* arrayData, int32_t length, char16_t** outBuffer);
+typedef bool (*_Nullable AParcel_charArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                     char16_t* _Nullable* _Nullable outBuffer);
 
 /**
  * This is called to get the underlying data from an arrayData object.
@@ -392,7 +405,8 @@ typedef bool (*AParcel_charArrayAllocator)(void* arrayData, int32_t length, char
  * \return whether or not the allocation was successful (or whether a null array is represented when
  * length is -1).
  */
-typedef bool (*AParcel_byteArrayAllocator)(void* arrayData, int32_t length, int8_t** outBuffer);
+typedef bool (*_Nullable AParcel_byteArrayAllocator)(void* _Nullable arrayData, int32_t length,
+                                                     int8_t* _Nullable* _Nullable outBuffer);
 
 // @END-PRIMITIVE-VECTOR-GETTERS
 
@@ -407,7 +421,8 @@ typedef bool (*AParcel_byteArrayAllocator)(void* arrayData, int32_t length, int8
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeStrongBinder(AParcel* parcel, AIBinder* binder) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeStrongBinder(AParcel* _Nonnull parcel, AIBinder* _Nullable binder)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads an AIBinder from the next location in a non-null parcel. One strong ref-count of ownership
@@ -420,8 +435,8 @@ binder_status_t AParcel_writeStrongBinder(AParcel* parcel, AIBinder* binder) __I
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_readStrongBinder(const AParcel* parcel, AIBinder** binder)
-        __INTRODUCED_IN(29);
+binder_status_t AParcel_readStrongBinder(const AParcel* _Nonnull parcel,
+                                         AIBinder* _Nullable* _Nonnull binder) __INTRODUCED_IN(29);
 
 /**
  * Writes a file descriptor to the next location in a non-null parcel. This does not take ownership
@@ -436,7 +451,8 @@ binder_status_t AParcel_readStrongBinder(const AParcel* parcel, AIBinder** binde
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeParcelFileDescriptor(AParcel* parcel, int fd) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeParcelFileDescriptor(AParcel* _Nonnull parcel, int fd)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads an int from the next location in a non-null parcel.
@@ -453,7 +469,7 @@ binder_status_t AParcel_writeParcelFileDescriptor(AParcel* parcel, int fd) __INT
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_readParcelFileDescriptor(const AParcel* parcel, int* fd)
+binder_status_t AParcel_readParcelFileDescriptor(const AParcel* _Nonnull parcel, int* _Nonnull fd)
         __INTRODUCED_IN(29);
 
 /**
@@ -472,7 +488,7 @@ binder_status_t AParcel_readParcelFileDescriptor(const AParcel* parcel, int* fd)
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeStatusHeader(AParcel* parcel, const AStatus* status)
+binder_status_t AParcel_writeStatusHeader(AParcel* _Nonnull parcel, const AStatus* _Nonnull status)
         __INTRODUCED_IN(29);
 
 /**
@@ -486,8 +502,8 @@ binder_status_t AParcel_writeStatusHeader(AParcel* parcel, const AStatus* status
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_readStatusHeader(const AParcel* parcel, AStatus** status)
-        __INTRODUCED_IN(29);
+binder_status_t AParcel_readStatusHeader(const AParcel* _Nonnull parcel,
+                                         AStatus* _Nonnull* _Nonnull status) __INTRODUCED_IN(29);
 
 /**
  * Writes utf-8 string value to the next location in a non-null parcel.
@@ -502,8 +518,8 @@ binder_status_t AParcel_readStatusHeader(const AParcel* parcel, AStatus** status
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeString(AParcel* parcel, const char* string, int32_t length)
-        __INTRODUCED_IN(29);
+binder_status_t AParcel_writeString(AParcel* _Nonnull parcel, const char* _Nullable string,
+                                    int32_t length) __INTRODUCED_IN(29);
 
 /**
  * Reads and allocates utf-8 string value from the next location in a non-null parcel.
@@ -521,7 +537,7 @@ binder_status_t AParcel_writeString(AParcel* parcel, const char* string, int32_t
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_readString(const AParcel* parcel, void* stringData,
+binder_status_t AParcel_readString(const AParcel* _Nonnull parcel, void* _Nullable stringData,
                                    AParcel_stringAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -542,8 +558,8 @@ binder_status_t AParcel_readString(const AParcel* parcel, void* stringData,
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeStringArray(AParcel* parcel, const void* arrayData, int32_t length,
-                                         AParcel_stringArrayElementGetter getter)
+binder_status_t AParcel_writeStringArray(AParcel* _Nonnull parcel, const void* _Nullable arrayData,
+                                         int32_t length, AParcel_stringArrayElementGetter getter)
         __INTRODUCED_IN(29);
 
 /**
@@ -567,7 +583,7 @@ binder_status_t AParcel_writeStringArray(AParcel* parcel, const void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readStringArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_stringArrayAllocator allocator,
                                         AParcel_stringArrayElementAllocator elementAllocator)
         __INTRODUCED_IN(29);
@@ -585,7 +601,8 @@ binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeParcelableArray(AParcel* parcel, const void* arrayData, int32_t length,
+binder_status_t AParcel_writeParcelableArray(AParcel* _Nonnull parcel,
+                                             const void* _Nullable arrayData, int32_t length,
                                              AParcel_writeParcelableElement elementWriter)
         __INTRODUCED_IN(29);
 
@@ -605,7 +622,8 @@ binder_status_t AParcel_writeParcelableArray(AParcel* parcel, const void* arrayD
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readParcelableArray(const AParcel* _Nonnull parcel,
+                                            void* _Nullable arrayData,
                                             AParcel_parcelableArrayAllocator allocator,
                                             AParcel_readParcelableElement elementReader)
         __INTRODUCED_IN(29);
@@ -621,7 +639,7 @@ binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayDa
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeInt32(AParcel* parcel, int32_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeInt32(AParcel* _Nonnull parcel, int32_t value) __INTRODUCED_IN(29);
 
 /**
  * Writes uint32_t value to the next location in a non-null parcel.
@@ -633,7 +651,7 @@ binder_status_t AParcel_writeInt32(AParcel* parcel, int32_t value) __INTRODUCED_
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeUint32(AParcel* parcel, uint32_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeUint32(AParcel* _Nonnull parcel, uint32_t value) __INTRODUCED_IN(29);
 
 /**
  * Writes int64_t value to the next location in a non-null parcel.
@@ -645,7 +663,7 @@ binder_status_t AParcel_writeUint32(AParcel* parcel, uint32_t value) __INTRODUCE
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeInt64(AParcel* parcel, int64_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeInt64(AParcel* _Nonnull parcel, int64_t value) __INTRODUCED_IN(29);
 
 /**
  * Writes uint64_t value to the next location in a non-null parcel.
@@ -657,7 +675,7 @@ binder_status_t AParcel_writeInt64(AParcel* parcel, int64_t value) __INTRODUCED_
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeUint64(AParcel* parcel, uint64_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeUint64(AParcel* _Nonnull parcel, uint64_t value) __INTRODUCED_IN(29);
 
 /**
  * Writes float value to the next location in a non-null parcel.
@@ -669,7 +687,7 @@ binder_status_t AParcel_writeUint64(AParcel* parcel, uint64_t value) __INTRODUCE
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeFloat(AParcel* parcel, float value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeFloat(AParcel* _Nonnull parcel, float value) __INTRODUCED_IN(29);
 
 /**
  * Writes double value to the next location in a non-null parcel.
@@ -681,7 +699,7 @@ binder_status_t AParcel_writeFloat(AParcel* parcel, float value) __INTRODUCED_IN
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeDouble(AParcel* parcel, double value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeDouble(AParcel* _Nonnull parcel, double value) __INTRODUCED_IN(29);
 
 /**
  * Writes bool value to the next location in a non-null parcel.
@@ -693,7 +711,7 @@ binder_status_t AParcel_writeDouble(AParcel* parcel, double value) __INTRODUCED_
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeBool(AParcel* parcel, bool value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeBool(AParcel* _Nonnull parcel, bool value) __INTRODUCED_IN(29);
 
 /**
  * Writes char16_t value to the next location in a non-null parcel.
@@ -705,7 +723,7 @@ binder_status_t AParcel_writeBool(AParcel* parcel, bool value) __INTRODUCED_IN(2
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeChar(AParcel* parcel, char16_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeChar(AParcel* _Nonnull parcel, char16_t value) __INTRODUCED_IN(29);
 
 /**
  * Writes int8_t value to the next location in a non-null parcel.
@@ -717,7 +735,7 @@ binder_status_t AParcel_writeChar(AParcel* parcel, char16_t value) __INTRODUCED_
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeByte(AParcel* parcel, int8_t value) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeByte(AParcel* _Nonnull parcel, int8_t value) __INTRODUCED_IN(29);
 
 /**
  * Reads into int32_t value from the next location in a non-null parcel.
@@ -729,7 +747,8 @@ binder_status_t AParcel_writeByte(AParcel* parcel, int8_t value) __INTRODUCED_IN
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readInt32(const AParcel* parcel, int32_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readInt32(const AParcel* _Nonnull parcel, int32_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into uint32_t value from the next location in a non-null parcel.
@@ -741,7 +760,8 @@ binder_status_t AParcel_readInt32(const AParcel* parcel, int32_t* value) __INTRO
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readUint32(const AParcel* parcel, uint32_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readUint32(const AParcel* _Nonnull parcel, uint32_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into int64_t value from the next location in a non-null parcel.
@@ -753,7 +773,8 @@ binder_status_t AParcel_readUint32(const AParcel* parcel, uint32_t* value) __INT
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readInt64(const AParcel* parcel, int64_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readInt64(const AParcel* _Nonnull parcel, int64_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into uint64_t value from the next location in a non-null parcel.
@@ -765,7 +786,8 @@ binder_status_t AParcel_readInt64(const AParcel* parcel, int64_t* value) __INTRO
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readUint64(const AParcel* parcel, uint64_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readUint64(const AParcel* _Nonnull parcel, uint64_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into float value from the next location in a non-null parcel.
@@ -777,7 +799,8 @@ binder_status_t AParcel_readUint64(const AParcel* parcel, uint64_t* value) __INT
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readFloat(const AParcel* parcel, float* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readFloat(const AParcel* _Nonnull parcel, float* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into double value from the next location in a non-null parcel.
@@ -789,7 +812,8 @@ binder_status_t AParcel_readFloat(const AParcel* parcel, float* value) __INTRODU
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readDouble(const AParcel* parcel, double* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readDouble(const AParcel* _Nonnull parcel, double* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into bool value from the next location in a non-null parcel.
@@ -801,7 +825,8 @@ binder_status_t AParcel_readDouble(const AParcel* parcel, double* value) __INTRO
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readBool(const AParcel* parcel, bool* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readBool(const AParcel* _Nonnull parcel, bool* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into char16_t value from the next location in a non-null parcel.
@@ -813,7 +838,8 @@ binder_status_t AParcel_readBool(const AParcel* parcel, bool* value) __INTRODUCE
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readChar(const AParcel* parcel, char16_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readChar(const AParcel* _Nonnull parcel, char16_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Reads into int8_t value from the next location in a non-null parcel.
@@ -825,7 +851,8 @@ binder_status_t AParcel_readChar(const AParcel* parcel, char16_t* value) __INTRO
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readByte(const AParcel* parcel, int8_t* value) __INTRODUCED_IN(29);
+binder_status_t AParcel_readByte(const AParcel* _Nonnull parcel, int8_t* _Nonnull value)
+        __INTRODUCED_IN(29);
 
 /**
  * Writes an array of int32_t to the next location in a non-null parcel.
@@ -838,7 +865,8 @@ binder_status_t AParcel_readByte(const AParcel* parcel, int8_t* value) __INTRODU
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeInt32Array(AParcel* parcel, const int32_t* arrayData, int32_t length)
+binder_status_t AParcel_writeInt32Array(AParcel* _Nonnull parcel,
+                                        const int32_t* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -852,7 +880,8 @@ binder_status_t AParcel_writeInt32Array(AParcel* parcel, const int32_t* arrayDat
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeUint32Array(AParcel* parcel, const uint32_t* arrayData, int32_t length)
+binder_status_t AParcel_writeUint32Array(AParcel* _Nonnull parcel,
+                                         const uint32_t* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -866,7 +895,8 @@ binder_status_t AParcel_writeUint32Array(AParcel* parcel, const uint32_t* arrayD
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeInt64Array(AParcel* parcel, const int64_t* arrayData, int32_t length)
+binder_status_t AParcel_writeInt64Array(AParcel* _Nonnull parcel,
+                                        const int64_t* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -880,7 +910,8 @@ binder_status_t AParcel_writeInt64Array(AParcel* parcel, const int64_t* arrayDat
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeUint64Array(AParcel* parcel, const uint64_t* arrayData, int32_t length)
+binder_status_t AParcel_writeUint64Array(AParcel* _Nonnull parcel,
+                                         const uint64_t* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -894,8 +925,8 @@ binder_status_t AParcel_writeUint64Array(AParcel* parcel, const uint64_t* arrayD
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeFloatArray(AParcel* parcel, const float* arrayData, int32_t length)
-        __INTRODUCED_IN(29);
+binder_status_t AParcel_writeFloatArray(AParcel* _Nonnull parcel, const float* _Nullable arrayData,
+                                        int32_t length) __INTRODUCED_IN(29);
 
 /**
  * Writes an array of double to the next location in a non-null parcel.
@@ -908,7 +939,8 @@ binder_status_t AParcel_writeFloatArray(AParcel* parcel, const float* arrayData,
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeDoubleArray(AParcel* parcel, const double* arrayData, int32_t length)
+binder_status_t AParcel_writeDoubleArray(AParcel* _Nonnull parcel,
+                                         const double* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -926,8 +958,9 @@ binder_status_t AParcel_writeDoubleArray(AParcel* parcel, const double* arrayDat
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeBoolArray(AParcel* parcel, const void* arrayData, int32_t length,
-                                       AParcel_boolArrayGetter getter) __INTRODUCED_IN(29);
+binder_status_t AParcel_writeBoolArray(AParcel* _Nonnull parcel, const void* _Nullable arrayData,
+                                       int32_t length, AParcel_boolArrayGetter getter)
+        __INTRODUCED_IN(29);
 
 /**
  * Writes an array of char16_t to the next location in a non-null parcel.
@@ -940,7 +973,8 @@ binder_status_t AParcel_writeBoolArray(AParcel* parcel, const void* arrayData, i
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeCharArray(AParcel* parcel, const char16_t* arrayData, int32_t length)
+binder_status_t AParcel_writeCharArray(AParcel* _Nonnull parcel,
+                                       const char16_t* _Nullable arrayData, int32_t length)
         __INTRODUCED_IN(29);
 
 /**
@@ -954,8 +988,8 @@ binder_status_t AParcel_writeCharArray(AParcel* parcel, const char16_t* arrayDat
  *
  * \return STATUS_OK on successful write.
  */
-binder_status_t AParcel_writeByteArray(AParcel* parcel, const int8_t* arrayData, int32_t length)
-        __INTRODUCED_IN(29);
+binder_status_t AParcel_writeByteArray(AParcel* _Nonnull parcel, const int8_t* _Nullable arrayData,
+                                       int32_t length) __INTRODUCED_IN(29);
 
 /**
  * Reads an array of int32_t from the next location in a non-null parcel.
@@ -972,7 +1006,7 @@ binder_status_t AParcel_writeByteArray(AParcel* parcel, const int8_t* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readInt32Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readInt32Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_int32ArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -990,7 +1024,7 @@ binder_status_t AParcel_readInt32Array(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readUint32Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readUint32Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_uint32ArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1008,7 +1042,7 @@ binder_status_t AParcel_readUint32Array(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readInt64Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readInt64Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_int64ArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1026,7 +1060,7 @@ binder_status_t AParcel_readInt64Array(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readUint64Array(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readUint64Array(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_uint64ArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1044,7 +1078,7 @@ binder_status_t AParcel_readUint64Array(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readFloatArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readFloatArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                        AParcel_floatArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1062,7 +1096,7 @@ binder_status_t AParcel_readFloatArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readDoubleArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readDoubleArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                         AParcel_doubleArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1081,7 +1115,7 @@ binder_status_t AParcel_readDoubleArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readBoolArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readBoolArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_boolArrayAllocator allocator,
                                       AParcel_boolArraySetter setter) __INTRODUCED_IN(29);
 
@@ -1100,7 +1134,7 @@ binder_status_t AParcel_readBoolArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readCharArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readCharArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_charArrayAllocator allocator) __INTRODUCED_IN(29);
 
 /**
@@ -1118,7 +1152,7 @@ binder_status_t AParcel_readCharArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on successful read.
  */
-binder_status_t AParcel_readByteArray(const AParcel* parcel, void* arrayData,
+binder_status_t AParcel_readByteArray(const AParcel* _Nonnull parcel, void* _Nullable arrayData,
                                       AParcel_byteArrayAllocator allocator) __INTRODUCED_IN(29);
 
 // @END-PRIMITIVE-READ-WRITE
@@ -1132,7 +1166,7 @@ binder_status_t AParcel_readByteArray(const AParcel* parcel, void* arrayData,
  *
  * \return STATUS_OK on success.
  */
-binder_status_t AParcel_reset(AParcel* parcel) __INTRODUCED_IN(31);
+binder_status_t AParcel_reset(AParcel* _Nonnull parcel) __INTRODUCED_IN(31);
 
 /**
  * Gets the size of the parcel.
@@ -1143,7 +1177,35 @@ binder_status_t AParcel_reset(AParcel* parcel) __INTRODUCED_IN(31);
  *
  * \return The size of the parcel.
  */
-int32_t AParcel_getDataSize(const AParcel* parcel) __INTRODUCED_IN(31);
+int32_t AParcel_getDataSize(const AParcel* _Nonnull parcel) __INTRODUCED_IN(31);
+
+/**
+ * Gets the capacity of the parcel.
+ *
+ * Available since API level 37.
+ *
+ * \param parcel The parcel of which to get the capacity.
+ *
+ * \return The capacity of the parcel in bytes.
+ */
+size_t AParcel_getDataCapacity(const AParcel* _Nonnull parcel) __INTRODUCED_IN(37);
+
+/**
+ * Sets the capacity of the parcel.
+ *
+ * Available since API level 37.
+ *
+ * Capacity can only grow. If the provided capacity is less than the current
+ * capacity, the parcel is left unchanged. If the provided capacity is less
+ * than the parcel data size, the parcel is left unchanged.
+ *
+ * \param parcel The parcel to modify.
+ * \param capacity The new capacity in bytes.
+ *
+ * \return STATUS_OK on success.
+ */
+binder_status_t AParcel_setDataCapacity(AParcel* _Nonnull parcel, size_t capacity)
+        __INTRODUCED_IN(37);
 
 /**
  * Copy the data of a parcel to other parcel.
@@ -1157,8 +1219,8 @@ int32_t AParcel_getDataSize(const AParcel* parcel) __INTRODUCED_IN(31);
  *
  * \return STATUS_OK on success.
  */
-binder_status_t AParcel_appendFrom(const AParcel* from, AParcel* to, int32_t start, int32_t size)
-        __INTRODUCED_IN(31);
+binder_status_t AParcel_appendFrom(const AParcel* _Nonnull from, AParcel* _Nonnull to,
+                                   int32_t start, int32_t size) __INTRODUCED_IN(31);
 
 /**
  * Creates a parcel.
@@ -1167,7 +1229,7 @@ binder_status_t AParcel_appendFrom(const AParcel* from, AParcel* to, int32_t sta
  *
  * \return A parcel which is not related to any IBinder objects.
  */
-AParcel* AParcel_create() __INTRODUCED_IN(31);
+AParcel* _Nonnull AParcel_create() __INTRODUCED_IN(31);
 
 /**
  * Marshals the raw bytes of the Parcel to a buffer.
@@ -1190,8 +1252,8 @@ AParcel* AParcel_create() __INTRODUCED_IN(31);
  * \return STATUS_OK on success, STATUS_INVALID_OPERATION if parcel contains binders or file
  * descriptors. STATUS_BAD_VALUE if the buffer size is less than parcel size.
  */
-binder_status_t AParcel_marshal(const AParcel* parcel, uint8_t* buffer, size_t start, size_t len)
-        __INTRODUCED_IN(33);
+binder_status_t AParcel_marshal(const AParcel* _Nonnull parcel, uint8_t* _Nonnull buffer,
+                                size_t start, size_t len) __INTRODUCED_IN(33);
 
 /**
  * Set the data in the parcel to the raw bytes from the buffer.
@@ -1204,8 +1266,8 @@ binder_status_t AParcel_marshal(const AParcel* parcel, uint8_t* buffer, size_t s
  *
  * \return STATUS_OK on success.
  */
-binder_status_t AParcel_unmarshal(AParcel* parcel, const uint8_t* buffer, size_t len)
-        __INTRODUCED_IN(33);
+binder_status_t AParcel_unmarshal(AParcel* _Nonnull parcel, const uint8_t* _Nonnull buffer,
+                                  size_t len) __INTRODUCED_IN(33);
 
 __END_DECLS
 

@@ -29,10 +29,12 @@ MODULE_LIBRARY_DEPS += \
 	$(LIBBINDER_DIR)/trusty/rust/binder_rpc_unstable_bindgen \
 	$(call FIND_CRATE,downcast-rs) \
 	$(call FIND_CRATE,libc) \
+	$(call FIND_CRATE,static_assertions) \
 	trusty/user/base/lib/trusty-sys \
 
 MODULE_RUSTFLAGS += \
 	--cfg 'trusty' \
+	--cfg 'feature="std"' \
 
 ifeq (false,$(call TOBOOL,$(USE_SYSTEM_BINDER)))
 MODULE_RUSTFLAGS += \

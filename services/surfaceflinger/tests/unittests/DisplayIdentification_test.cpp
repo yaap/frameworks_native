@@ -528,9 +528,9 @@ TEST(DisplayIdentificationTest, parseDisplayIdentificationDataWithStableEdidIds)
     ASSERT_TRUE(tertiaryInfo);
 
     // Display IDs should be unique.
-    EXPECT_EQ(12535292641168014882u, primaryInfo->id.value);
-    EXPECT_EQ(4067182673952280501u, secondaryInfo->id.value);
-    EXPECT_EQ(14712168404707886855u, tertiaryInfo->id.value);
+    EXPECT_EQ(11097499058342280738u, primaryInfo->id.value);
+    EXPECT_EQ(16539125038779109301u, secondaryInfo->id.value);
+    EXPECT_EQ(8211862055411566343u, tertiaryInfo->id.value);
 }
 
 TEST(DisplayIdentificationTest, resolveDisplayIdCollision) {
@@ -565,8 +565,8 @@ TEST(DisplayIdentificationTest, generateEdidDisplayId) {
             generateEdidDisplayId(secondExternalDisplayEdidOpt.value());
 
     // Display IDs should be unique.
-    EXPECT_EQ(4067182673952280501u, firstExternalDisplayId.value);
-    EXPECT_EQ(14712168404707886855u, secondExternalDisplayId.value);
+    EXPECT_EQ(16539125038779109301u, firstExternalDisplayId.value);
+    EXPECT_EQ(8211862055411566343u, secondExternalDisplayId.value);
 }
 
 TEST(DisplayIdentificationTest, deviceProductInfo) {
@@ -671,7 +671,7 @@ TEST(DisplayIdentificationTest, deviceProductInfo) {
 // the flag is removed.
 TEST(DisplayIdentificationTest, deviceProductInfoWithEdidStructureMetadataAndVideoInputType) {
     SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
-                              parse_edid_version_and_input_type,
+                              parse_edid_version_and_input_type_v2,
                       true);
 
     {

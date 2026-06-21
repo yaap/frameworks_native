@@ -154,7 +154,7 @@ struct ComposerClientObserver final : public ComposerClientForwarder {
         auto onVsync(int64_t in_display, int64_t in_timestamp, int32_t in_vsyncPeriodNanos)
                 -> ::ndk::ScopedAStatus override {
             if (auto controller = mController.lock()) {
-                controller->callbacks().onVSyncCallbackSent(events::VSync{
+                controller->onVSyncCallbackSent(events::VSync{
                         .displayId = in_display,
                         .expectedAt =
                                 events::VSync::TimePoint(std::chrono::nanoseconds(in_timestamp)),
@@ -202,7 +202,7 @@ struct ComposerClientObserver final : public ComposerClientForwarder {
     auto setPowerMode(int64_t in_display, PowerMode in_mode) -> ndk::ScopedAStatus override {
         LOG(VERBOSE) << __func__;
         if (auto observer = mController.lock()) {
-            observer->callbacks().onPowerModeChanged(
+            observer->onPowerModeChanged(
                     events::PowerMode{.displayId = in_display, .mode = in_mode});
         }
 
@@ -212,7 +212,7 @@ struct ComposerClientObserver final : public ComposerClientForwarder {
     auto setVsyncEnabled(int64_t in_display, bool in_enabled) -> ndk::ScopedAStatus override {
         LOG(VERBOSE) << __func__;
         if (auto observer = mController.lock()) {
-            observer->callbacks().onVsyncEnabledChanged(
+            observer->onVsyncEnabledChanged(
                     events::VSyncEnabled{.displayId = in_display, .enabled = in_enabled});
         }
         return Base::setVsyncEnabled(in_display, in_enabled);
@@ -372,7 +372,7 @@ struct ComposerClientObserver final : public ComposerClientForwarder {
 
             if (cmd.presentOrValidateDisplay) {
                 if (auto observer = mController.lock()) {
-                    observer->callbacks().onDisplayPresented(
+                    observer->onDisplayPresented(
                             events::DisplayPresented{.displayId = cmd.display,
                                                      .expectedPresentTime = expectedPresentTime,
                                                      .receivedAt = receivedTime});
@@ -436,7 +436,7 @@ struct ObservingComposer::ObservingComposerImpl final : public ComposerForwarder
     // Finalizers should be last so their destructors are invoked first.
     ftl::FinalizerFtl1 mCleanup{[this] {
         if (auto controller = mController.lock()) {
-            controller->callbacks().onClientDestroyed(events::ClientDestroyed{});
+            controller->onClientDestroyed(events::ClientDestroyed{});
         }
     }};
 };

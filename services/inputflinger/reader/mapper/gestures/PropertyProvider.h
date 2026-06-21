@@ -68,7 +68,7 @@ public:
 
     std::string dump() const;
 
-    std::string getName() const { return mName; }
+    const std::string& getName() const { return mName; }
 
     size_t getCount() const { return mCount; }
 

@@ -1,0 +1,46 @@
+// Build the unit tests,
+
+package {
+    default_team: "trendy_team_windowing_infra_",
+}
+
+cc_test {
+    name: "libipcrenderbuffer_test",
+
+    cppflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+        "-Wthread-safety",
+    ],
+
+    srcs: [
+        "IPCRecordingCanvas_test.cpp",
+    ],
+    defaults: ["skia_deps"],
+
+    shared_libs: [
+        "libbase",
+        "libcutils",
+        "libutils",
+        "libgui",
+        "liblog",
+        "libbinder",
+        "libperfetto",
+        "libtracing_perfetto",
+        "libperfetto_c",
+        "libandroid",
+        "libjnigraphics",
+    ],
+
+    data: [
+        "testdata/*",
+    ],
+
+    static_libs: [
+        "libgmock",
+        "libipcrenderbuffer_static",
+        "libperfetto_client_experimental",
+        "libskia",
+    ],
+}

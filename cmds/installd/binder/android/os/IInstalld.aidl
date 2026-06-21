@@ -31,16 +31,19 @@ interface IInstalld {
     void migrateAppData(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
             int userId, int flags);
     void clearAppData(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
-            int userId, int flags, long ceDataInode);
+            int userId, int flags, long ceDataInode, long pccCeDataInode);
     void destroyAppData(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
-            int userId, int flags, long ceDataInode);
+            int userId, int flags, long ceDataInode, long pccCeDataInode);
+    void destroyPccData(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
+         int userId, int flags, long ceDataInode);
 
     void fixupAppData(@nullable @utf8InCpp String uuid, int flags);
 
     long[] getAppSize(@nullable @utf8InCpp String uuid, in @utf8InCpp String[] packageNames,
-            int userId, int flags, int appId, in long[] ceDataInodes,
+            int userId, int flags, int appId, int pccId, in long[] ceDataInodes,
             in @utf8InCpp String[] codePaths);
-    long[] getUserSize(@nullable @utf8InCpp String uuid, int userId, int flags, in int[] appIds);
+    long[] getUserSize(@nullable @utf8InCpp String uuid, int userId, int flags, in int[] appIds,
+            in int[] pccIds);
     long[] getExternalSize(@nullable @utf8InCpp String uuid, int userId, int flags, in int[] appIds);
 
     @nullable
@@ -54,7 +57,7 @@ interface IInstalld {
     void setAppQuota(@nullable @utf8InCpp String uuid, int userId, int appId, long cacheQuota);
 
     void moveCompleteApp(@nullable @utf8InCpp String fromUuid, @nullable @utf8InCpp String toUuid,
-            @utf8InCpp String packageName, int appId,
+            @utf8InCpp String packageName, int appId, int pccId,
             @utf8InCpp String seInfo, int targetSdkVersion, @utf8InCpp String fromCodePath);
 
     // Returns false if it is cancelled. Returns true if it is completed or have other errors.
@@ -116,7 +119,7 @@ interface IInstalld {
     long snapshotAppData(@nullable @utf8InCpp String uuid, in @utf8InCpp String packageName,
             int userId, int snapshotId, int storageFlags);
     void restoreAppDataSnapshot(@nullable @utf8InCpp String uuid, in @utf8InCpp String packageName,
-            int appId, @utf8InCpp String seInfo, int user, int snapshotId, int storageflags);
+            int appId, int pccId, @utf8InCpp String seInfo, int user, int snapshotId, int storageflags);
     void destroyAppDataSnapshot(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
             int userId, long ceSnapshotInode, int snapshotId, int storageFlags);
     void destroyCeSnapshotsNotSpecified(@nullable @utf8InCpp String uuid, int userId,
@@ -146,6 +149,60 @@ interface IInstalld {
     IFsveritySetupAuthToken createFsveritySetupAuthToken(in ParcelFileDescriptor authFd, int uid);
     int enableFsverity(in IFsveritySetupAuthToken authToken, @utf8InCpp String filePath,
             @utf8InCpp String packageName);
+
+    /**
+     * Callback interface for long-running app data operations.
+     */
+    oneway interface IAppDataOperationCallback {
+        const int STATUS_UNKNOWN = 0;
+        const int STATUS_RUNNING = 1;
+        const int STATUS_SUCCESS = 2;
+        const int STATUS_FAILURE = 3;
+
+        /**
+         * Called when the status of the operation changes.
+         *
+         * @param status One of the STATUS_* constants.
+         * @param message Optional descriptive message (e.g., error details).
+         * @param failedFiles Optional list of files that failed to copy/move.
+         */
+        void onStatusChanged(int status, @nullable @utf8InCpp String message,
+                in @nullable @utf8InCpp String[] failedFiles);
+    }
+
+    /**
+     * Asynchronously copies a file or directory from one app data location to another.
+     *
+     * @param uuid The volume UUID (or null for internal storage).
+     * @param fromPath The absolute source path.
+     * @param toPath The absolute destination path.
+     * @param userId The user ID the destination path belongs to.
+     * @param appId The app ID the destination path belongs to (used for ownership).
+     * @param seInfo The SELinux label to apply to the destination.
+     * @param flags Operation flags.
+     * @param callerUid The UID of the caller who requested the operation.
+     * @param callback Callback for status updates.
+     */
+    oneway void copyAppDataPath(@nullable @utf8InCpp String uuid, @utf8InCpp String fromPath,
+            @utf8InCpp String toPath, int userId, int appId, @utf8InCpp String seInfo, int flags,
+            int callerUid, IAppDataOperationCallback callback);
+
+    /**
+     * Asynchronously moves a file or directory from one app data location to another.
+     *
+     * @param uuid The volume UUID (or null for internal storage).
+     * @param fromPath The absolute source path.
+     * @param toPath The absolute destination path.
+     * @param userId The user ID the destination path belongs to.
+     * @param appId The app ID the destination path belongs to (used for ownership).
+     * @param seInfo The SELinux label to apply to the destination.
+     * @param flags Operation flags.
+     * @param callerUid The UID of the caller who requested the operation.
+     * @param callback Callback for status updates.
+     */
+    oneway void moveAppDataPath(@nullable @utf8InCpp String uuid, @utf8InCpp String fromPath,
+            @utf8InCpp String toPath, int userId, int appId, @utf8InCpp String seInfo, int flags,
+            int callerUid, IAppDataOperationCallback callback);
 
     const int FLAG_STORAGE_DE = 0x1;
     const int FLAG_STORAGE_CE = 0x2;

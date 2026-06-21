@@ -99,7 +99,7 @@ protected:
     public:
         MockEventThreadConnection(impl::EventThread* eventThread, uid_t callingUid,
                                   EventRegistrationFlags eventRegistration)
-              : EventThreadConnection(eventThread, callingUid, eventRegistration) {}
+              : EventThreadConnection(eventThread, callingUid, getpid(), eventRegistration) {}
         MOCK_METHOD1(postEvent, status_t(const DisplayEventReceiver::Event& event));
     };
 
@@ -946,8 +946,6 @@ TEST_F(EventThreadTest, postHcpLevelsChanged) {
 }
 
 TEST_F(EventThreadTest, postOnModeChangedAndFrameRateOverride) {
-    SET_FLAG_FOR_TEST(flags::supported_refresh_rate_update, true);
-
     setupEventThread();
     const std::vector<FrameRateOverride> overrides = {
             {.uid = 1, .frameRateHz = 20},

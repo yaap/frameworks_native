@@ -69,6 +69,15 @@ public:
             std::unique_ptr<RpcTransportCtxFactory> rpcTransportCtxFactory);
 
     /**
+     * Get the UID of the process at the other end of this session
+     * and write it to uid.
+     *
+     * Returns true, if a valid uid present
+     *         false, otherwise
+     */
+    LIBBINDER_EXPORTED bool getClientUid(uid_t* uid) const;
+
+    /**
      * Set the maximum number of incoming threads allowed to be made (for things like callbacks).
      * By default, this is 0. This must be called before setting up this connection as a client.
      * Server sessions will inherits this value from RpcServer. Each thread will serve a
@@ -233,7 +242,7 @@ private:
     friend RpcServer;
     friend RpcServerTrusty;
     friend RpcState;
-    explicit RpcSession(std::unique_ptr<RpcTransportCtx> ctx);
+    explicit RpcSession(std::unique_ptr<RpcTransportCtx> ctx, std::optional<uid_t> uid);
 
     static constexpr size_t kDefaultMaxOutgoingConnections = 10;
 
@@ -336,19 +345,20 @@ private:
     // Object representing exclusive access to a connection.
     class ExclusiveConnection {
     public:
-        [[nodiscard]] static status_t find(const sp<RpcSession>& session, ConnectionUse use,
+        // `session` must be valid for the lifetime of `connection`.
+        [[nodiscard]] static status_t find(RpcSession* session, ConnectionUse use,
                                            ExclusiveConnection* connection);
 
         ~ExclusiveConnection();
         const sp<RpcConnection>& get() { return mConnection; }
 
     private:
-        static void findConnection(uint64_t tid, sp<RpcConnection>* exclusive,
-                                   sp<RpcConnection>* available,
+        static void findConnection(uint64_t tid, RpcConnection** exclusive,
+                                   RpcConnection** available,
                                    std::vector<sp<RpcConnection>>& sockets,
                                    size_t socketsIndexHint);
 
-        sp<RpcSession> mSession; // avoid deallocation
+        RpcSession* mSession = nullptr;
         sp<RpcConnection> mConnection;
 
         // whether this is being used for a nested transaction (being on the same
@@ -387,11 +397,14 @@ private:
 
     std::unique_ptr<RpcState> mRpcBinderState;
 
+    std::optional<uid_t> mClientUid;
+
     RpcMutex mMutex; // for all below
 
     bool mStartedSetup = false;
     size_t mMaxIncomingThreads = 0;
     size_t mMaxOutgoingConnections = kDefaultMaxOutgoingConnections;
+    // If mStartedSetup=true, OK to access without a lock + always has a value.
     std::optional<uint32_t> mProtocolVersion;
     FileDescriptorTransportMode mFileDescriptorTransportMode = FileDescriptorTransportMode::NONE;
 

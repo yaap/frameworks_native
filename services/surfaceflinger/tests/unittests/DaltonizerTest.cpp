@@ -35,7 +35,7 @@ public:
     ColorBlindnessType getType() const { return mDaltonizer.mType; }
 };
 
-constexpr float TOLERANCE = 0.01f;
+constexpr float TOLERANCE = 0.001f;
 
 static bool isIdentityMatrix(mat4& matrix) {
     for (size_t i = 0; i < 4; ++i) {
@@ -121,6 +121,142 @@ TEST(DaltonizerTest, LevelZeroColorMatrixEqIdentityMatrix) {
     mat4 matrix = daltonizer();
 
     ASSERT_TRUE(isIdentityMatrix(matrix));
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmConstructionDefaultValues) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+    DaltonizerTest test(daltonizer);
+
+    EXPECT_EQ(test.getLevel(), 0.7f);
+    ASSERT_TRUE(test.isDirty());
+    EXPECT_EQ(test.getType(), ColorBlindnessType::None);
+    mat4 matrix = daltonizer();
+    ASSERT_TRUE(isIdentityMatrix(matrix));
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmNotDirtyAfterColorMatrixReturned) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+
+    mat4 matrix = daltonizer();
+    DaltonizerTest test(daltonizer);
+
+    ASSERT_FALSE(test.isDirty());
+    ASSERT_TRUE(isIdentityMatrix(matrix));
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmLevelOutOfRangeTooLowIgnored) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+
+    // Get matrix to reset isDirty == false.
+    mat4 matrix = daltonizer();
+
+    daltonizer.setLevel(-1);
+    DaltonizerTest test(daltonizer);
+
+    EXPECT_EQ(test.getLevel(), 0.7f);
+    ASSERT_FALSE(test.isDirty());
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmLevelOutOfRangeTooHighIgnored) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+
+    // Get matrix to reset isDirty == false.
+    mat4 matrix = daltonizer();
+
+    daltonizer.setLevel(11);
+    DaltonizerTest test(daltonizer);
+
+    EXPECT_EQ(test.getLevel(), 0.7f);
+    ASSERT_FALSE(test.isDirty());
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmColorCorrectionMatrixNonIdentical) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+
+    daltonizer.setType(ColorBlindnessType::Protanomaly);
+    daltonizer.setMode(ColorBlindnessMode::Correction);
+
+    mat4 matrix = daltonizer();
+
+    ASSERT_FALSE(isIdentityMatrix(matrix));
+}
+
+TEST(DaltonizerTest, UpdatedAlgorithmLevelZeroColorMatrixEqIdentityMatrix) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+
+    daltonizer.setType(ColorBlindnessType::Protanomaly);
+    daltonizer.setMode(ColorBlindnessMode::Correction);
+    daltonizer.setLevel(0);
+
+    mat4 matrix = daltonizer();
+
+    ASSERT_TRUE(isIdentityMatrix(matrix));
+}
+
+TEST(DaltonizerTest, TestProtanopiaCorrectionKeepsRed) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+    daltonizer.setType(ColorBlindnessType::Protanomaly);
+    daltonizer.setMode(ColorBlindnessMode::Correction);
+    daltonizer.setLevel(10);
+
+    mat4 matrix = daltonizer();
+
+    // Expect a matrix with 1, 0, 0 in the top row, which multiplies against the red channel.
+    //   |  1.0, 0.0, 0.0, |
+    //   |  x.x, x.x, x.x, |
+    //   |  x.x, x.x, x.x  |
+
+    size_t row = 0;
+    ASSERT_EQ(matrix[0][row], 1);
+    ASSERT_EQ(matrix[1][row], 0);
+    ASSERT_EQ(matrix[2][row], 0);
+}
+
+TEST(DaltonizerTest, TestDeuteranopiaCorrectionKeepsGreen) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+    daltonizer.setType(ColorBlindnessType::Deuteranomaly);
+    daltonizer.setMode(ColorBlindnessMode::Correction);
+    daltonizer.setLevel(10);
+
+    mat4 matrix = daltonizer();
+
+    // Expect a matrix with 0, 1, 0 in the second row, which multiplies against the green channel.
+    //   |  x.x, x.x, x.x, |
+    //   |  0.0, 1.0, 0.0, |
+    //   |  x.x, x.x, x.x  |
+
+    size_t row = 1;
+    ASSERT_EQ(matrix[0][row], 0);
+    ASSERT_EQ(matrix[1][row], 1);
+    ASSERT_EQ(matrix[2][row], 0);
+}
+
+TEST(DaltonizerTest, TestTritanopiaCorrectionKeepsBlue) {
+    Daltonizer daltonizer;
+    daltonizer.setUseUpdatedAlgorithm(true);
+    daltonizer.setType(ColorBlindnessType::Tritanomaly);
+    daltonizer.setMode(ColorBlindnessMode::Correction);
+    daltonizer.setLevel(10);
+
+    mat4 matrix = daltonizer();
+
+    // Expect a matrix with 0, 0, 1 in the third row, which multiplies against the blue channel.
+    //   |  x.x, x.x, x.x, |
+    //   |  x.x, x.x, x.x  |
+    //   |  0.0, 0.0, 1.0, |
+
+    size_t row = 2;
+    ASSERT_EQ(matrix[0][row], 0);
+    ASSERT_EQ(matrix[1][row], 0);
+    ASSERT_EQ(matrix[2][row], 1);
 }
 
 } /* namespace android */

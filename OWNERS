@@ -1,4 +1,8 @@
 # See frameworks/base/OWNERS.md
+
+# The goal of these OWNERS is general health of frameworks/native.
+
+devinmoore@google.com #{LAST_RESORT_SUGGESTION}
 jiyong@google.com #{LAST_RESORT_SUGGESTION}
 michaelwr@google.com #{LAST_RESORT_SUGGESTION}
-smoreland@google.com #{LAST_RESORT_SUGGESTION}
+timmurray@google.com #{LAST_RESORT_SUGGESTION}

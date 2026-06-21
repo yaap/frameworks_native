@@ -98,7 +98,11 @@ private:
         ~Service();
     };
 
-    using ServiceCallbackMap = std::map<std::string, std::vector<sp<IServiceCallback>>>;
+    struct RegistrationCallback {
+        sp<IServiceCallback> callback;
+        Access::CallingContext ctx;
+    };
+    using ServiceCallbackMap = std::map<std::string, std::vector<RegistrationCallback>>;
     using ClientCallbackMap = std::map<std::string, std::vector<sp<IClientCallback>>>;
     using ServiceMap = std::map<std::string, Service>;
 
@@ -113,6 +117,10 @@ private:
     // Also updates mHasClients (of what the last callback was)
     void sendClientCallbackNotifications(const std::string& serviceName, bool hasClients,
                                          const char* context);
+    // Dispatches registration callbacks to the registered listeners.
+    void dispatchRegistrationCallbacks(const std::string& serviceName, const sp<IBinder>& binder,
+                                       bool allowIsolated,
+                                       const std::vector<RegistrationCallback>& callbacks);
     // removes a callback from mNameToClientCallback, deleting the entry if the vector is empty
     // this updates the iterator to the next location
     void removeClientCallback(const wp<IBinder>& who, ClientCallbackMap::iterator* it);

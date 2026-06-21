@@ -20,6 +20,7 @@
 #include <android/data_space.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
+#include <ftl/concat.h>
 #include <ftl/enum.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/Surface.h>
@@ -31,6 +32,7 @@
 #include <ui/GraphicBuffer.h>
 #include <utils/Errors.h>
 #include <utils/Trace.h>
+#include "../../Utils/Dumper.h"
 
 #include <cstdint>
 #include <mutex>
@@ -39,10 +41,10 @@
 #include <utility>
 
 #include "DisplayHardware/HWComposer.h"
+#include "DisplayHardware/HwcSlotTracker.h"
 #include "compositionengine/DisplaySurface.h"
 
 #include "SinkSurfaceHelper.h"
-#include "VirtualDisplayBufferSlotTracker.h"
 #include "VirtualDisplaySurface.h"
 
 namespace android {
@@ -132,6 +134,7 @@ void VirtualDisplaySurface::prepareSurfacesLocked() {
     // Since the renderer can be used for GPU compositing at any point, make sure we are generating
     // buffers we can send over to the app.
     mRendererConsumer->setConsumerUsageBits(getRendererUsage() | mSinkUsage);
+    mRendererConsumer->setDefaultBufferSize(mSinkWidth, mSinkHeight);
 
     if (isHalDisplay()) {
         std::tie(mOutputConsumer, mOutputSurface) =
@@ -345,21 +348,40 @@ void VirtualDisplaySurface::onFrameCommitted() {
 }
 
 void VirtualDisplaySurface::dumpAsString(String8& result) const {
+    std::string out;
+    utils::Dumper dumper(out);
     std::scoped_lock _l(mMutex);
+
+    // Add an initial indent to match the nesting level of other components in the display dump.
+    utils::Dumper::Indent indent(dumper);
+    utils::Dumper::Section section(dumper, "VirtualDisplaySurface");
 
     std::string displayIdStr = std::visit([](auto&& arg) { return to_string(arg); }, mDisplayId);
     std::string type = isGpuDisplay() ? "GPU" : "HWC";
 
-    result.append("    VirtualDisplaySurface\n");
-    result.appendFormat("        type=%s\n", type.c_str());
-    result.appendFormat("        mName=%s\n", mName.c_str());
-    result.appendFormat("        mDisplayId=%s\n", displayIdStr.c_str());
-    result.appendFormat("        mSinkName=%s\n", mSinkHelper->getName().c_str());
-    result.appendFormat("        mSinkFormat=%d\n", mSinkFormat);
-    result.appendFormat("        mSinkUsage=%" PRIu64 "\n", mSinkUsage);
-    result.appendFormat("        mSinkDataSpace=%d\n", mSinkDataSpace);
-    result.appendFormat("        mSinkWidth=%d\n", mSinkWidth);
-    result.appendFormat("        mSinkHeight=%d\n", mSinkHeight);
+    using namespace std::string_view_literals;
+    dumper.dump("type"sv, type);
+    dumper.dump("mName"sv, mName);
+    dumper.dump("mDisplayId"sv, displayIdStr);
+    dumper.dump("mSinkName"sv, mSinkHelper->getName());
+    dumper.dump("mSinkFormat"sv, mSinkFormat);
+    dumper.dump("mSinkUsage"sv, mSinkUsage);
+    dumper.dump("mSinkDataSpace"sv, mSinkDataSpace);
+    dumper.dump("mSinkWidth"sv, mSinkWidth);
+    dumper.dump("mSinkHeight"sv, mSinkHeight);
+
+    if (mCurrentFrame) {
+        utils::Dumper::Section frameSection(dumper, "Current Frame Info"sv);
+        dumper.dump("compositionType"sv, ftl::enum_string(mCurrentFrame->compositionType));
+        dumper.dump("mustRecompose"sv, mCurrentFrame->mustRecompose);
+        dumper.dump("hasClientTarget"sv,
+                    mCurrentFrame->clientComposedBufferItem.mGraphicBuffer != nullptr);
+        dumper.dump("hasOutputBuffer"sv, mCurrentFrame->outputBuffer != nullptr);
+    }
+
+    mSinkHelper->dump(dumper);
+
+    result.append(out.c_str());
 }
 
 void VirtualDisplaySurface::resizeBuffers(const ui::Size& newSize) {
@@ -394,16 +416,20 @@ void VirtualDisplaySurface::applyResizeLocked(const ui::Size& newSize) {
 
     mSinkHelper->setBufferSize(mSinkWidth, mSinkHeight);
 
-    status_t ret = mOutputConsumer->setDefaultBufferSize(mSinkWidth, mSinkHeight);
-    if (ret != NO_ERROR) {
-        ALOGE("%s: Unable to set output consumer default buffer size %dx%d", __func__, mSinkWidth,
-              mSinkHeight);
-    }
+    status_t ret;
+    if (isHalDisplay()) {
+        ret = mOutputConsumer->setDefaultBufferSize(mSinkWidth, mSinkHeight);
 
-    ret = mOutputSurface->setBuffersDimensions(mSinkWidth, mSinkHeight);
-    if (ret != NO_ERROR) {
-        ALOGE("%s: Unable to set output surface buffer size %dx%d", __func__, mSinkWidth,
-              mSinkHeight);
+        if (ret != NO_ERROR) {
+            ALOGE("%s: Unable to set output consumer default buffer size %dx%d", __func__,
+                  mSinkWidth, mSinkHeight);
+        }
+
+        ret = mOutputSurface->setBuffersDimensions(mSinkWidth, mSinkHeight);
+        if (ret != NO_ERROR) {
+            ALOGE("%s: Unable to set output surface buffer size %dx%d", __func__, mSinkWidth,
+                  mSinkHeight);
+        }
     }
 
     ret = mRendererConsumer->setDefaultBufferSize(mSinkWidth, mSinkHeight);

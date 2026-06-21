@@ -19,6 +19,7 @@
 #include <android-base/thread_annotations.h>
 #include <ftl/enum.h>
 #include <math/mat4.h>
+#include <renderengine/ColorSpaces.h>
 #include <renderengine/RenderEngine.h>
 
 #include <cstddef>
@@ -97,7 +98,8 @@ public:
             sk_sp<SkRuntimeEffect> runtimeEffect, const mat4& colorTransform,
             float maxDisplayLuminance, float currentDisplayLuminanceNits, float maxLuminance,
             AHardwareBuffer* buffer,
-            aidl::android::hardware::graphics::composer3::RenderIntent renderIntent);
+            aidl::android::hardware::graphics::composer3::RenderIntent renderIntent,
+            ftl::Flags<ColorSpaceOptions> options = ColorSpaceOptions::None);
 
     std::array<sk_sp<SkRuntimeEffect>, kEffectCount> mKnownEffects;
 

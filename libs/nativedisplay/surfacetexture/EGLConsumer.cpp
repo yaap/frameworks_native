@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// #define LOG_NDEBUG 0
+
 #define GL_GLEXT_PROTOTYPES
 #define EGL_EGLEXT_PROTOTYPES
 
@@ -22,15 +24,18 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <cutils/compiler.h>
+#include <ftl/small_map.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueue.h>
-#include <surfacetexture/EGLConsumer.h>
-#include <surfacetexture/SurfaceTexture.h>
 #include <inttypes.h>
 #include <private/gui/SyncFeatures.h>
+#include <ui/GraphicBuffer.h>
 #include <utils/Log.h>
 #include <utils/String8.h>
 #include <utils/Trace.h>
+
+#include <surfacetexture/EGLConsumer.h>
+#include <surfacetexture/SurfaceTexture.h>
 
 #define PROT_CONTENT_EXT_STR "EGL_EXT_protected_content"
 #define EGL_PROTECTED_CONTENT_EXT 0x32C0
@@ -135,9 +140,10 @@ status_t EGLConsumer::releaseTexImage(SurfaceTexture& st) {
     }
 
     // Update the EGLConsumer state.
-    int buf = st.mCurrentTexture;
-    if (buf != BufferQueue::INVALID_BUFFER_SLOT) {
-        EGC_LOGV("releaseTexImage: (slot=%d, mOpMode=%d)", buf, (int)st.mOpMode);
+    const sp<GraphicBuffer>& buf = st.mCurrentTexture;
+    if (buf != nullptr) {
+        EGC_LOGV("releaseTexImage: (bufferId=%" PRIu64 ", mOpMode=%d)", buf->getId(),
+                 (int)st.mOpMode);
 
         // if we're detached, we just use the fence that was created in
         // detachFromContext() so... basically, nothing more to do here.
@@ -145,22 +151,23 @@ status_t EGLConsumer::releaseTexImage(SurfaceTexture& st) {
             // Do whatever sync ops we need to do before releasing the slot.
             err = syncForReleaseLocked(mEglDisplay, st);
             if (err != NO_ERROR) {
-                EGC_LOGE("syncForReleaseLocked failed (slot=%d), err=%d", buf, err);
+                EGC_LOGE("syncForReleaseLocked failed (bufferId=%" PRIu64 "), err=%d", buf->getId(),
+                         err);
                 return err;
             }
         }
 
-        err = st.releaseBufferLocked(buf, st.mSlots[buf].mGraphicBuffer);
+        err = st.releaseBufferLocked(buf);
         if (err < NO_ERROR) {
             EGC_LOGE("releaseTexImage: failed to release buffer: %s (%d)", strerror(-err), err);
             return err;
         }
 
         if (mReleasedTexImage == nullptr) {
-            mReleasedTexImage = new EglImage(getDebugTexImageBuffer());
+            mReleasedTexImage = sp<EglImage>::make(getDebugTexImageBuffer());
         }
 
-        st.mCurrentTexture = BufferQueue::INVALID_BUFFER_SLOT;
+        st.mCurrentTexture = nullptr;
         mCurrentTextureImage = mReleasedTexImage;
         st.mCurrentCrop.makeInvalid();
         st.mCurrentTransform = 0;
@@ -189,9 +196,9 @@ sp<GraphicBuffer> EGLConsumer::getDebugTexImageBuffer() {
         // The first time, create the debug texture in case the application
         // continues to use it.
         sp<GraphicBuffer> buffer =
-                new GraphicBuffer(kDebugData.width, kDebugData.height, PIXEL_FORMAT_RGBA_8888,
-                                  DEFAULT_USAGE_FLAGS | GraphicBuffer::USAGE_SW_WRITE_RARELY,
-                                  "[EGLConsumer debug texture]");
+                sp<GraphicBuffer>::make(kDebugData.width, kDebugData.height, PIXEL_FORMAT_RGBA_8888,
+                                        DEFAULT_USAGE_FLAGS | GraphicBuffer::USAGE_SW_WRITE_RARELY,
+                                        "[EGLConsumer debug texture]");
         uint32_t* bits;
         buffer->lock(GraphicBuffer::USAGE_SW_WRITE_RARELY, reinterpret_cast<void**>(&bits));
         uint32_t stride = buffer->getStride();
@@ -210,92 +217,76 @@ sp<GraphicBuffer> EGLConsumer::getDebugTexImageBuffer() {
     return sReleasedTexImageBuffer;
 }
 
-void EGLConsumer::onAcquireBufferLocked(BufferItem* item, SurfaceTexture& st) {
+void EGLConsumer::onAcquireBufferLocked(BufferItem* item) {
     // If item->mGraphicBuffer is not null, this buffer has not been acquired
     // before, so any prior EglImage created is using a stale buffer. This
     // replaces any old EglImage with a new one (using the new buffer).
-    int slot = item->mSlot;
-    if (item->mGraphicBuffer != nullptr || mEglSlots[slot].mEglImage.get() == nullptr) {
-        mEglSlots[slot].mEglImage = new EglImage(st.mSlots[slot].mGraphicBuffer);
+    if (!mEglData.contains(item->mGraphicBuffer)) {
+        mEglData.emplace_or_replace(item->mGraphicBuffer, EglData());
+        mEglData.get(item->mGraphicBuffer)->get().mEglImage =
+                sp<EglImage>::make(item->mGraphicBuffer);
     }
-}
-
-void EGLConsumer::onReleaseBufferLocked(int buf) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-    (void)buf;
-#else
-    mEglSlots[buf].mEglFence = EGL_NO_SYNC_KHR;
-#endif
 }
 
 status_t EGLConsumer::updateAndReleaseLocked(const BufferItem& item, PendingRelease* pendingRelease,
                                              SurfaceTexture& st) {
     status_t err = NO_ERROR;
 
-    int slot = item.mSlot;
+    const sp<GraphicBuffer>& buffer = item.mGraphicBuffer;
 
     if (st.mOpMode != SurfaceTexture::OpMode::attachedToGL) {
         EGC_LOGE("updateAndRelease: EGLConsumer is not attached to an OpenGL "
                  "ES context");
-        st.releaseBufferLocked(slot, st.mSlots[slot].mGraphicBuffer);
+        st.releaseBufferLocked(buffer);
         return INVALID_OPERATION;
     }
 
     // Confirm state.
     err = checkAndUpdateEglStateLocked(st);
     if (err != NO_ERROR) {
-        st.releaseBufferLocked(slot, st.mSlots[slot].mGraphicBuffer);
+        st.releaseBufferLocked(buffer);
         return err;
     }
 
     // Ensure we have a valid EglImageKHR for the slot, creating an EglImage
-    // if nessessary, for the gralloc buffer currently in the slot in
+    // if necessary, for the gralloc buffer currently in the slot in
     // ConsumerBase.
     // We may have to do this even when item.mGraphicBuffer == NULL (which
     // means the buffer was previously acquired).
-    err = mEglSlots[slot].mEglImage->createIfNeeded(mEglDisplay);
+    err = mEglData.get(buffer)->get().mEglImage->createIfNeeded(mEglDisplay);
     if (err != NO_ERROR) {
-        EGC_LOGW("updateAndRelease: unable to createImage on display=%p slot=%d", mEglDisplay,
-                 slot);
-        st.releaseBufferLocked(slot, st.mSlots[slot].mGraphicBuffer);
+        EGC_LOGW("updateAndRelease: unable to createImage on display=%p id=%" PRIu64, mEglDisplay,
+                 buffer->getId());
+        st.releaseBufferLocked(buffer);
         return UNKNOWN_ERROR;
     }
 
     // Do whatever sync ops we need to do before releasing the old slot.
-    if (slot != st.mCurrentTexture) {
+    if (buffer != st.mCurrentTexture) {
         err = syncForReleaseLocked(mEglDisplay, st);
         if (err != NO_ERROR) {
             // Release the buffer we just acquired.  It's not safe to
             // release the old buffer, so instead we just drop the new frame.
             // As we are still under lock since acquireBuffer, it is safe to
             // release by slot.
-            st.releaseBufferLocked(slot, st.mSlots[slot].mGraphicBuffer);
+            st.releaseBufferLocked(buffer);
             return err;
         }
     }
 
-    EGC_LOGV("updateAndRelease: (slot=%d buf=%p) -> (slot=%d buf=%p)", st.mCurrentTexture,
-             mCurrentTextureImage != nullptr ? mCurrentTextureImage->graphicBufferHandle()
-                                             : nullptr,
-             slot, st.mSlots[slot].mGraphicBuffer->handle);
+    EGC_LOGV("updateAndRelease: (buf=%" PRIu64 ") -> (buf=%" PRIu64 ")",
+             mCurrentTextureImage ? mCurrentTextureImage->graphicBuffer()->getId() : 0,
+             buffer->getId());
 
     // Hang onto the pointer so that it isn't freed in the call to
     // releaseBufferLocked() if we're in shared buffer mode and both buffers are
     // the same.
-    sp<EglImage> nextTextureImage = mEglSlots[slot].mEglImage;
+    sp<EglImage> nextTextureImage = mEglData.get(buffer)->get().mEglImage;
 
     // release old buffer
-    if (st.mCurrentTexture != BufferQueue::INVALID_BUFFER_SLOT) {
+    if (st.mCurrentTexture) {
         if (pendingRelease == nullptr) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-            status_t status = st.releaseBufferLocked(st.mCurrentTexture,
-                                                     mCurrentTextureImage->graphicBuffer());
-#else
-            status_t status =
-                    st.releaseBufferLocked(st.mCurrentTexture,
-                                           mCurrentTextureImage->graphicBuffer(), mEglDisplay,
-                                           mEglSlots[st.mCurrentTexture].mEglFence);
-#endif
+            status_t status = st.releaseBufferLocked(st.mCurrentTexture);
             if (status < NO_ERROR) {
                 EGC_LOGE("updateAndRelease: failed to release buffer: %s (%d)", strerror(-status),
                          status);
@@ -303,14 +294,13 @@ status_t EGLConsumer::updateAndReleaseLocked(const BufferItem& item, PendingRele
                 // keep going, with error raised [?]
             }
         } else {
-            pendingRelease->currentTexture = st.mCurrentTexture;
             pendingRelease->graphicBuffer = mCurrentTextureImage->graphicBuffer();
             pendingRelease->isPending = true;
         }
     }
 
     // Update the EGLConsumer state.
-    st.mCurrentTexture = slot;
+    st.mCurrentTexture = buffer;
     mCurrentTextureImage = nextTextureImage;
     st.mCurrentCrop = item.mCrop;
     st.mCurrentTransform = item.mTransform;
@@ -338,15 +328,15 @@ status_t EGLConsumer::bindTextureImageLocked(SurfaceTexture& st) {
     }
 
     glBindTexture(st.mTexTarget, st.mTexName);
-    if (st.mCurrentTexture == BufferQueue::INVALID_BUFFER_SLOT && mCurrentTextureImage == nullptr) {
+    if (!st.mCurrentTexture && mCurrentTextureImage == nullptr) {
         EGC_LOGE("bindTextureImage: no currently-bound texture");
         return NO_INIT;
     }
 
     status_t err = mCurrentTextureImage->createIfNeeded(mEglDisplay);
     if (err != NO_ERROR) {
-        EGC_LOGW("bindTextureImage: can't create image on display=%p slot=%d", mEglDisplay,
-                 st.mCurrentTexture);
+        EGC_LOGW("bindTextureImage: can't create image on display=%p bufferId=%" PRIu64,
+                 mEglDisplay, st.mCurrentTexture ? st.mCurrentTexture->getId() : 0);
         return UNKNOWN_ERROR;
     }
     mCurrentTextureImage->bindToTextureTarget(st.mTexTarget);
@@ -359,8 +349,8 @@ status_t EGLConsumer::bindTextureImageLocked(SurfaceTexture& st) {
         glBindTexture(st.mTexTarget, st.mTexName);
         status_t result = mCurrentTextureImage->createIfNeeded(mEglDisplay, true);
         if (result != NO_ERROR) {
-            EGC_LOGW("bindTextureImage: can't create image on display=%p slot=%d", mEglDisplay,
-                     st.mCurrentTexture);
+            EGC_LOGW("bindTextureImage: can't create image on display=%p bufferId=%" PRIu64,
+                     mEglDisplay, st.mCurrentTexture ? st.mCurrentTexture->getId() : 0);
             return UNKNOWN_ERROR;
         }
         mCurrentTextureImage->bindToTextureTarget(st.mTexTarget);
@@ -436,12 +426,16 @@ status_t EGLConsumer::detachFromContext(SurfaceTexture& st) {
 status_t EGLConsumer::attachToContext(uint32_t tex, SurfaceTexture& st) {
     // Initialize mCurrentTextureImage if there is a current buffer from past
     // attached state.
-    int slot = st.mCurrentTexture;
-    if (slot != BufferItem::INVALID_BUFFER_SLOT) {
-        if (!mEglSlots[slot].mEglImage.get()) {
-            mEglSlots[slot].mEglImage = new EglImage(st.mSlots[slot].mGraphicBuffer);
+    const sp<GraphicBuffer> buffer = st.mCurrentTexture;
+    if (buffer) {
+        if (!mEglData.contains(buffer)) {
+            mEglData.emplace_or_replace(buffer, EglData());
         }
-        mCurrentTextureImage = mEglSlots[slot].mEglImage;
+        auto& eglSlot = mEglData.get(buffer)->get();
+        if (eglSlot.mEglImage == nullptr) {
+            eglSlot.mEglImage = sp<EglImage>::make(buffer);
+        }
+        mCurrentTextureImage = eglSlot.mEglImage;
     }
 
     EGLDisplay dpy = eglGetCurrentDisplay();
@@ -483,7 +477,7 @@ status_t EGLConsumer::attachToContext(uint32_t tex, SurfaceTexture& st) {
 status_t EGLConsumer::syncForReleaseLocked(EGLDisplay dpy, SurfaceTexture& st) {
     EGC_LOGV("syncForReleaseLocked");
 
-    if (st.mCurrentTexture != BufferQueue::INVALID_BUFFER_SLOT) {
+    if (st.mCurrentTexture) {
         if (SyncFeatures::getInstance().useNativeFenceSync()) {
             EGLSyncKHR sync = eglCreateSyncKHR(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
             if (sync == EGL_NO_SYNC_KHR) {
@@ -499,51 +493,13 @@ status_t EGLConsumer::syncForReleaseLocked(EGLDisplay dpy, SurfaceTexture& st) {
                          eglGetError());
                 return UNKNOWN_ERROR;
             }
-            sp<Fence> fence(new Fence(fenceFd));
-            status_t err = st.addReleaseFenceLocked(st.mCurrentTexture,
-                                                    mCurrentTextureImage->graphicBuffer(), fence);
-            if (err != OK) {
-                EGC_LOGE("syncForReleaseLocked: error adding release fence: "
-                         "%s (%d)",
-                         strerror(-err), err);
-                return err;
-            }
+            sp<Fence> fence = sp<Fence>::make(fenceFd);
+            st.mCurrentFence =
+                    Fence::merge("EGLConsumer::syncForReleaseLocked", st.mCurrentFence, fence);
         } else if (st.mUseFenceSync && SyncFeatures::getInstance().useFenceSync()) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
             // Basically all clients are using native fence syncs. If they aren't, we lose nothing
             // by waiting here, because the alternative can cause deadlocks (b/339705065).
             glFinish();
-#else
-            EGLSyncKHR fence = mEglSlots[st.mCurrentTexture].mEglFence;
-            if (fence != EGL_NO_SYNC_KHR) {
-                // There is already a fence for the current slot.  We need to
-                // wait on that before replacing it with another fence to
-                // ensure that all outstanding buffer accesses have completed
-                // before the producer accesses it.
-                EGLint result = eglClientWaitSyncKHR(dpy, fence, 0, 1000000000);
-                if (result == EGL_FALSE) {
-                    EGC_LOGE("syncForReleaseLocked: error waiting for previous "
-                             "fence: %#x",
-                             eglGetError());
-                    return UNKNOWN_ERROR;
-                } else if (result == EGL_TIMEOUT_EXPIRED_KHR) {
-                    EGC_LOGE("syncForReleaseLocked: timeout waiting for previous "
-                             "fence");
-                    return TIMED_OUT;
-                }
-                eglDestroySyncKHR(dpy, fence);
-            }
-
-            // Create a fence for the outstanding accesses in the current
-            // OpenGL ES context.
-            fence = eglCreateSyncKHR(dpy, EGL_SYNC_FENCE_KHR, nullptr);
-            if (fence == EGL_NO_SYNC_KHR) {
-                EGC_LOGE("syncForReleaseLocked: error creating fence: %#x", eglGetError());
-                return UNKNOWN_ERROR;
-            }
-            glFlush();
-            mEglSlots[st.mCurrentTexture].mEglFence = fence;
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
         }
     }
 
@@ -603,16 +559,33 @@ status_t EGLConsumer::doGLFenceWaitLocked(SurfaceTexture& st) const {
     return NO_ERROR;
 }
 
-void EGLConsumer::onFreeBufferLocked(int slotIndex) {
-    if (mEglSlots[slotIndex].mEglImage != nullptr &&
-        mEglSlots[slotIndex].mEglImage == mCurrentTextureImage) {
+void EGLConsumer::onFreeBufferLocked(const SurfaceTexture& st, const sp<GraphicBuffer>& buffer) {
+    if (!buffer) {
+        EGC_LOGV("onFreeBufferLocked: buffer was null");
+        return;
+    }
+    EGC_LOGV("onFreeBufferLocked: buffer %" PRIu64, buffer->getId());
+
+    if (!mEglData.contains(buffer)) {
+        EGC_LOGE("onFreeBufferLocked: buffer %" PRIu64 " not found in mEglData", buffer->getId());
+        return;
+    }
+
+    auto& eglSlot = mEglData.get(buffer)->get();
+
+    if (eglSlot.mEglImage != nullptr && eglSlot.mEglImage == mCurrentTextureImage) {
         mCurrentTextureImage.clear();
     }
-    mEglSlots[slotIndex].mEglImage.clear();
+
+    mEglData.erase(buffer);
 }
 
 void EGLConsumer::onAbandonLocked() {
     mCurrentTextureImage.clear();
+    mEglData = {};
+    mEglDisplay = EGL_NO_DISPLAY;
+    mEglContext = EGL_NO_CONTEXT;
+    mReleasedTexImage = nullptr;
 }
 
 EGLConsumer::EglImage::EglImage(sp<GraphicBuffer> graphicBuffer)

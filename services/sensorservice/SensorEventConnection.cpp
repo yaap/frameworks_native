@@ -38,13 +38,25 @@ constexpr int kTargetSdkUnknown = 0;
 }  // namespace
 
 SensorService::SensorEventConnection::SensorEventConnection(
-        const sp<SensorService>& service, uid_t uid, String8 packageName, bool isDataInjectionMode,
-        const String16& opPackageName, const String16& attributionTag)
-    : mService(service), mUid(uid), mWakeLockRefCount(0), mHasLooperCallbacks(false),
-      mDead(false), mDataInjectionMode(isDataInjectionMode), mEventCache(nullptr),
-      mCacheSize(0), mMaxCacheSize(0), mTimeOfLastEventDrop(0), mEventsDropped(0),
-      mPackageName(packageName), mOpPackageName(opPackageName), mAttributionTag(attributionTag),
-      mTargetSdk(kTargetSdkUnknown), mDestroyed(false) {
+        const sp<SensorService>& service, uid_t uid, pid_t pid, String8 packageName,
+        bool isDataInjectionMode, const String16& opPackageName, const String16& attributionTag)
+      : mService(service),
+        mUid(uid),
+        mPid(pid),
+        mWakeLockRefCount(0),
+        mHasLooperCallbacks(false),
+        mDead(false),
+        mDataInjectionMode(isDataInjectionMode),
+        mEventCache(nullptr),
+        mCacheSize(0),
+        mMaxCacheSize(0),
+        mTimeOfLastEventDrop(0),
+        mEventsDropped(0),
+        mPackageName(packageName),
+        mOpPackageName(opPackageName),
+        mAttributionTag(attributionTag),
+        mTargetSdk(kTargetSdkUnknown),
+        mDestroyed(false) {
     mUserId = multiuser_get_user_id(mUid);
     mChannel = new BitTube(mService->mSocketBufferSize);
 #if DEBUG_CONNECTIONS
@@ -94,11 +106,25 @@ void SensorService::SensorEventConnection::dump(String8& result) {
                         mPackageName.c_str(), mWakeLockRefCount, mUid, mCacheSize, mMaxCacheSize,
                         hasSensorAccess() ? "true" : "false");
     for (auto& it : mSensorInfo) {
-        const FlushInfo& flushInfo = it.second;
+        const SensorConnectionRecord& record = it.second;
         result.appendFormat("\t %s 0x%08x | first flush pending: %s | pending flush events %d \n",
                             mService->getSensorName(it.first).c_str(), it.first,
-                            flushInfo.mFirstFlushPending ? "true" : "false",
-                            flushInfo.mPendingFlushEventsToSend);
+                            record.mFirstFlushPending ? "true" : "false",
+                            record.mPendingFlushEventsToSend);
+        int64_t totalTime, activeTime;
+        record.mStats.getDuration(&totalTime, &activeTime);
+        time_t registrationTime = record.mStats.mRegistrationTime;
+        struct tm timeinfo;
+        localtime_r(&registrationTime, &timeinfo);
+        int64_t activeSec = activeTime / 1000000000LL;
+        int64_t suspendedSec = (totalTime - activeTime) / 1000000000LL;
+        result.appendFormat(
+                "\t\tSession Start: %02d:%02d:%02d | Active Duration: %02lld:%02lld:%02lld | "
+                "Suspended Duration: %02lld:%02lld:%02lld\n",
+                timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, (long long)(activeSec / 3600),
+                (long long)((activeSec % 3600) / 60), (long long)(activeSec % 60),
+                (long long)(suspendedSec / 3600), (long long)((suspendedSec % 3600) / 60),
+                (long long)(suspendedSec % 60));
     }
 #if DEBUG_CONNECTIONS
     result.appendFormat("\t events recvd: %d | sent %d | cache %d | dropped %d |"
@@ -136,14 +162,14 @@ void SensorService::SensorEventConnection::dump(util::ProtoOutputStream* proto) 
     proto->write(CACHE_SIZE, int32_t(mCacheSize));
     proto->write(MAX_CACHE_SIZE, int32_t(mMaxCacheSize));
     for (auto& it : mSensorInfo) {
-        const FlushInfo& flushInfo = it.second;
+        const SensorConnectionRecord& record = it.second;
         const uint64_t token = proto->start(FLUSH_INFOS);
         proto->write(FlushInfoProto::SENSOR_NAME,
                 std::string(mService->getSensorName(it.first)));
         proto->write(FlushInfoProto::SENSOR_HANDLE, it.first);
-        proto->write(FlushInfoProto::FIRST_FLUSH_PENDING, flushInfo.mFirstFlushPending);
+        proto->write(FlushInfoProto::FIRST_FLUSH_PENDING, record.mFirstFlushPending);
         proto->write(FlushInfoProto::PENDING_FLUSH_EVENTS_TO_SEND,
-                flushInfo.mPendingFlushEventsToSend);
+                record.mPendingFlushEventsToSend);
         proto->end(token);
     }
 #if DEBUG_CONNECTIONS
@@ -166,7 +192,8 @@ bool SensorService::SensorEventConnection::addSensor(int32_t handle) {
         mSensorInfo.count(handle) > 0) {
         return false;
     }
-    mSensorInfo[handle] = FlushInfo();
+    mSensorInfo.emplace(handle, SensorConnectionRecord::UsageStats(
+                                    elapsedRealtimeNano(), time(nullptr), hasSensorAccess()));
     return true;
 }
 
@@ -217,8 +244,8 @@ void SensorService::SensorEventConnection::setFirstFlushPending(int32_t handle,
                                 bool value) {
     Mutex::Autolock _l(mConnectionLock);
     if (mSensorInfo.count(handle) > 0) {
-        FlushInfo& flushInfo = mSensorInfo[handle];
-        flushInfo.mFirstFlushPending = value;
+        SensorConnectionRecord& record = mSensorInfo[handle];
+        record.mFirstFlushPending = value;
     }
 }
 
@@ -277,8 +304,8 @@ bool SensorService::SensorEventConnection::incrementPendingFlushCountIfHasAccess
     if (hasSensorAccess()) {
         Mutex::Autolock _l(mConnectionLock);
         if (mSensorInfo.count(handle) > 0) {
-            FlushInfo& flushInfo = mSensorInfo[handle];
-            flushInfo.mPendingFlushEventsToSend++;
+            SensorConnectionRecord& record = mSensorInfo[handle];
+            record.mPendingFlushEventsToSend++;
         }
         return true;
     } else {
@@ -316,11 +343,11 @@ status_t SensorService::SensorEventConnection::sendEvents(
                 continue;
             }
 
-            FlushInfo& flushInfo = mSensorInfo[sensor_handle];
+            SensorConnectionRecord& record = mSensorInfo[sensor_handle];
             // Check if there is a pending flush_complete event for this sensor on this connection.
-            if (buffer[i].type == SENSOR_TYPE_META_DATA && flushInfo.mFirstFlushPending == true &&
+            if (buffer[i].type == SENSOR_TYPE_META_DATA && record.mFirstFlushPending == true &&
                     mapFlushEventsToConnections[i] == this) {
-                flushInfo.mFirstFlushPending = false;
+                record.mFirstFlushPending = false;
                 ALOGD_IF(DEBUG_CONNECTIONS, "First flush event for sensor==%d ",
                         buffer[i].meta_data.sensor);
                 ++i;
@@ -329,7 +356,7 @@ status_t SensorService::SensorEventConnection::sendEvents(
 
             // If there is a pending flush complete event for this sensor on this connection,
             // ignore the event and proceed to the next.
-            if (flushInfo.mFirstFlushPending) {
+            if (record.mFirstFlushPending) {
                 ++i;
                 continue;
             }
@@ -440,8 +467,8 @@ status_t SensorService::SensorEventConnection::sendEvents(
 }
 
 bool SensorService::SensorEventConnection::hasSensorAccess() {
-    return mService->isUidActive(mUid)
-        && !mService->mSensorPrivacyPolicy->isSensorPrivacyEnabled();
+    return mService->isUidActive(mUid) && !mService->isPidFrozen(mPid) &&
+            !mService->mSensorPrivacyPolicy->isSensorPrivacyEnabled();
 }
 
 bool SensorService::SensorEventConnection::noteOpIfRequired(const sensors_event_t& event) {
@@ -563,8 +590,8 @@ void SensorService::SensorEventConnection::sendPendingFlushEventsLocked() {
             continue;
         }
 
-        FlushInfo& flushInfo = it.second;
-        while (flushInfo.mPendingFlushEventsToSend > 0) {
+        SensorConnectionRecord& record = it.second;
+        while (record.mPendingFlushEventsToSend > 0) {
             flushCompleteEvent.meta_data.sensor = handle;
             bool wakeUpSensor = si->getSensor().isWakeUpSensor();
             if (wakeUpSensor) {
@@ -578,7 +605,7 @@ void SensorService::SensorEventConnection::sendPendingFlushEventsLocked() {
             }
             ALOGD_IF(DEBUG_CONNECTIONS, "sent dropped flush complete event==%d ",
                     flushCompleteEvent.meta_data.sensor);
-            flushInfo.mPendingFlushEventsToSend--;
+            record.mPendingFlushEventsToSend--;
         }
     }
 }
@@ -655,10 +682,10 @@ void SensorService::SensorEventConnection::countFlushCompleteEventsLocked(
                 continue;
             }
 
-            FlushInfo& flushInfo = mSensorInfo[scratch[j].meta_data.sensor];
-            flushInfo.mPendingFlushEventsToSend++;
+            SensorConnectionRecord& record = mSensorInfo[scratch[j].meta_data.sensor];
+            record.mPendingFlushEventsToSend++;
             ALOGD_IF(DEBUG_CONNECTIONS, "increment pendingFlushCount %d",
-                     flushInfo.mPendingFlushEventsToSend);
+                     record.mPendingFlushEventsToSend);
         }
     }
     return;
@@ -949,6 +976,37 @@ int SensorService::SensorEventConnection::computeMaxCacheSizeLocked() const {
        return MAX_SOCKET_BUFFER_SIZE_BATCHED/sizeof(sensors_event_t);
    }
    return fifoWakeUpSensors + fifoNonWakeUpSensors;
+}
+
+void SensorService::SensorEventConnection::getSensorDurationStats(int32_t handle,
+                                                                  int64_t* totalDurationNs,
+                                                                  int64_t* activeDurationNs) {
+    Mutex::Autolock _l(mConnectionLock);
+    if (mSensorInfo.count(handle) > 0) {
+        mSensorInfo[handle].mStats.getDuration(totalDurationNs, activeDurationNs);
+    } else {
+        *totalDurationNs = 0;
+        *activeDurationNs = 0;
+    }
+}
+
+void SensorService::SensorEventConnection::onSensorAccessChanged(bool hasAccess) {
+    Mutex::Autolock _l(mConnectionLock);
+    nsecs_t now = elapsedRealtimeNano();
+    for (auto& it : mSensorInfo) {
+        SensorConnectionRecord& record = it.second;
+        if (record.mStats.mIsActive == hasAccess) {
+            continue;
+        }
+
+        if (hasAccess) {
+            record.mStats.mIsActive = true;
+            record.mStats.mLastActiveSnapshot = now;
+        } else {
+            record.mStats.mIsActive = false;
+            record.mStats.mTotalActiveTime += now - record.mStats.mLastActiveSnapshot;
+        }
+    }
 }
 
 } // namespace android

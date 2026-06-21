@@ -41,8 +41,14 @@ use binder_ndk_sys::{
     APersistableBundle_writeToParcel, APERSISTABLEBUNDLE_ALLOCATOR_FAILED,
     APERSISTABLEBUNDLE_KEY_NOT_FOUND,
 };
-use std::ffi::{c_char, c_void, CStr, CString, NulError};
-use std::ptr::{null_mut, slice_from_raw_parts_mut, NonNull};
+
+use alloc::boxed::Box;
+use alloc::ffi::{CString, NulError};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::ffi::{c_char, c_void, CStr};
+use core::mem::size_of;
+use core::ptr::{null_mut, slice_from_raw_parts_mut, NonNull};
 use zerocopy::FromZeros;
 
 /// A mapping from string keys to values of various types.

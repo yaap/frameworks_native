@@ -54,7 +54,7 @@ public:
                       factory, selectorPtr->getActiveMode().fps, timeStats) {
         const auto displayId = selectorPtr->getActiveMode().modePtr->getPhysicalDisplayId();
         registerDisplay(displayId, ui::DisplayConnectionType::Internal, std::move(selectorPtr),
-                        std::move(controller), std::move(tracker), displayId);
+                        std::move(controller), std::move(tracker));
 
         ON_CALL(*this, postMessage).WillByDefault([](sp<MessageHandler>&& handler) {
             // Execute task to prevent broken promise exception on destruction.
@@ -73,12 +73,8 @@ public:
         Scheduler::onFrameSignal(compositor, vsyncId, expectedVsyncTime);
     }
 
-    void setEventThread(Cycle cycle, std::unique_ptr<EventThread> eventThreadPtr) {
-        if (cycle == Cycle::Render) {
-            mRenderEventThread = std::move(eventThreadPtr);
-        } else {
-            mLastCompositeEventThread = std::move(eventThreadPtr);
-        }
+    void setEventThread(std::unique_ptr<EventThread> eventThreadPtr) {
+        mEventThread = std::move(eventThreadPtr);
     }
 
     auto refreshRateSelector() { return pacesetterSelectorPtr(); }
@@ -86,21 +82,15 @@ public:
     void registerDisplay(
             PhysicalDisplayId displayId, ui::DisplayConnectionType connectionType,
             RefreshRateSelectorPtr selectorPtr,
-            std::optional<PhysicalDisplayId> defaultPacesetterId = {},
             std::shared_ptr<VSyncTracker> vsyncTracker = std::make_shared<mock::VSyncTracker>()) {
-        if (!FlagManager::getInstance().pacesetter_selection() && !defaultPacesetterId) {
-            defaultPacesetterId = displayId;
-        }
         registerDisplay(displayId, connectionType, std::move(selectorPtr),
-                        std::make_unique<mock::VsyncController>(), vsyncTracker,
-                        defaultPacesetterId);
+                        std::make_unique<mock::VsyncController>(), vsyncTracker);
     }
 
     void registerDisplay(PhysicalDisplayId displayId, ui::DisplayConnectionType connectionType,
                          RefreshRateSelectorPtr selectorPtr,
                          std::unique_ptr<VsyncController> controller,
-                         std::shared_ptr<VSyncTracker> tracker,
-                         std::optional<PhysicalDisplayId> defaultPacesetterId) {
+                         std::shared_ptr<VSyncTracker> tracker) {
         ftl::FakeGuard guard(kMainThreadContext);
         Scheduler::registerDisplayInternal(displayId, connectionType, std::move(selectorPtr),
                                            std::shared_ptr<VsyncSchedule>(
@@ -109,8 +99,7 @@ public:
                                                                              mock::VSyncDispatch>(),
                                                                      std::move(controller),
                                                                      mockRequestHardwareVsync
-                                                                             .AsStdFunction())),
-                                           defaultPacesetterId);
+                                                                             .AsStdFunction())));
     }
 
     testing::MockFunction<void(PhysicalDisplayId, bool)> mockRequestHardwareVsync;
@@ -124,9 +113,9 @@ public:
         return mPacesetterDisplayId;
     }
 
-    bool designatePacesetterDisplay(std::optional<PhysicalDisplayId> displayId = std::nullopt) {
+    bool designatePacesetterDisplay() {
         ftl::FakeGuard guard(kMainThreadContext);
-        return Scheduler::designatePacesetterDisplay(displayId);
+        return Scheduler::designatePacesetterDisplay();
     }
 
     std::optional<hal::PowerMode> getDisplayPowerMode(PhysicalDisplayId id) {

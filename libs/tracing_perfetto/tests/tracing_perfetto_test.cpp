@@ -16,7 +16,6 @@
 
 #include "tracing_perfetto.h"
 
-#include <android_os.h>
 #include <flag_macros.h>
 #include <thread>
 #include <unistd.h>
@@ -63,8 +62,6 @@ using ::perfetto::protos::FtraceEventBundle;
 using ::perfetto::protos::InternedData;
 
 using ::perfetto::shlib::test_utils::TracingSession;
-
-const auto PERFETTO_SDK_TRACING = ACONFIG_FLAG(android::os, perfetto_sdk_tracing);
 
 // TODO(b/303199244): Add tests for all the library functions.
 class TracingPerfettoTest : public testing::Test {
@@ -135,8 +132,7 @@ void verifyAtraceEvent(const Trace& trace, const std::string& expected_name) {
   EXPECT_TRUE(found);
 }
 
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfetto,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+TEST_F(TracingPerfettoTest, traceInstantWithPerfetto) {
   std::string event_category = "input";
   std::string event_name = "traceInstantWithPerfetto";
 
@@ -150,8 +146,40 @@ TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfetto,
   verifyTrackEvent(trace, event_category, event_name);
 }
 
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithAtrace,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+TEST_F(TracingPerfettoTest, traceFormatBegin) {
+  std::string event_category = "input";
+  std::string event_name_format = "traceFormatBegin %d %s";
+  std::string event_name_expected = "traceFormatBegin 123 test";
+
+  TracingSession tracing_session =
+      TracingSession::Builder().add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceFormatBegin(TRACE_CATEGORY_INPUT,
+                                     event_name_format.c_str(), 123, "test");
+  tracing_perfetto::traceEnd(TRACE_CATEGORY_INPUT);
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyTrackEvent(trace, event_category, event_name_expected);
+}
+
+TEST_F(TracingPerfettoTest, traceFormatInstant) {
+  std::string event_category = "input";
+  std::string event_name_format = "traceFormatInstant %d %s";
+  std::string event_name_expected = "traceFormatInstant 456 test";
+
+  TracingSession tracing_session =
+      TracingSession::Builder().add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceFormatInstant(TRACE_CATEGORY_INPUT,
+                                       event_name_format.c_str(), 456, "test");
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyTrackEvent(trace, event_category, event_name_expected);
+}
+
+TEST_F(TracingPerfettoTest, traceInstantWithAtrace) {
   std::string event_category = "input";
   std::string event_name = "traceInstantWithAtrace";
 
@@ -165,8 +193,7 @@ TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithAtrace,
   verifyAtraceEvent(trace, event_name);
 }
 
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtrace,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+TEST_F(TracingPerfettoTest, traceInstantWithPerfettoAndAtrace) {
   std::string event_category = "input";
   std::string event_name = "traceInstantWithPerfettoAndAtrace";
 
@@ -182,8 +209,7 @@ TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtrace,
   verifyAtraceEvent(trace, event_name);
 }
 
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceAndPreferTrackEvent,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+TEST_F(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceAndPreferTrackEvent) {
   std::string event_category = "input";
   std::string event_name = "traceInstantWithPerfettoAndAtraceAndPreferTrackEvent";
 
@@ -200,8 +226,7 @@ TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceAndPrefe
   verifyTrackEvent(trace, event_category, event_name);
 }
 
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceConcurrently,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+TEST_F(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceConcurrently) {
   std::string event_category = "input";
   std::string event_name = "traceInstantWithPerfettoAndAtraceConcurrently";
 

@@ -60,6 +60,7 @@ public:
         args.name = "testlayer";
         args.addToRoot = true;
         args.layerIdToMirror = layerIdToMirror;
+        args.croppedByLayerId = id;
         return args;
     }
 
@@ -69,10 +70,32 @@ public:
                                                                 /*mirror=*/UNASSIGNED_LAYER_ID));
     }
 
+    static std::unique_ptr<RequestedLayerState> rootLayer(uint32_t id, ui::LayerStack layerStack) {
+        RequestedLayerState layer(createArgs(/*id=*/id, /*canBeRoot=*/true,
+                                             /*parentId=*/UNASSIGNED_LAYER_ID,
+                                             /*layerIdToMirror=*/UNASSIGNED_LAYER_ID));
+        layer.layerStack = layerStack;
+        return std::make_unique<RequestedLayerState>(layer);
+    }
+
     static std::unique_ptr<RequestedLayerState> childLayer(uint32_t id, uint32_t parentId) {
         return std::make_unique<RequestedLayerState>(createArgs(/*id=*/id, /*canBeRoot=*/false,
                                                                 parentId,
                                                                 /*mirror=*/UNASSIGNED_LAYER_ID));
+    }
+
+    static std::unique_ptr<RequestedLayerState> mirrorDisplayLayer(
+            uint32_t layerId, uint64_t displayIdToMirror,
+            ui::LayerStack layerStack = ui::DEFAULT_LAYER_STACK) {
+        LayerCreationArgs mirrorArgs(std::make_optional(layerId));
+        mirrorArgs.name = "testlayer";
+        mirrorArgs.addToRoot = true;
+        mirrorArgs.displayIdToMirror = DisplayId::fromValue(displayIdToMirror);
+        // TODO: b/308135949 - Add layer_state_t to LayerCreationArgs so that `layerStack` can be
+        // populated without having to construct a `RequestedLayerState`.
+        RequestedLayerState layer(mirrorArgs);
+        layer.layerStack = layerStack;
+        return std::make_unique<RequestedLayerState>(layer);
     }
 
     static std::vector<QueuedTransactionState> setZTransaction(uint32_t id, int32_t z) {

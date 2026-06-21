@@ -179,6 +179,7 @@ public:
     }
 
     status_t getDataspace(ui::Dataspace* outDataspace) const;
+    status_t getSmpte2094_50(std::optional<std::vector<uint8_t>>* outSmpte2094_50) const;
 
     // This function is privileged.  It requires access to the allocator
     // device or service, which usually involves adding suitable selinux

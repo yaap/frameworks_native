@@ -21,9 +21,6 @@
 #include <SurfaceFlingerProperties.h>
 #include <android-base/properties.h>
 #include <android/dlext.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
-#include <com_android_graphics_graphicsenv_flags.h>
-#include <configstore/Utils.h>
 #include <dlfcn.h>
 #include <graphicsenv/GraphicsEnv.h>
 
@@ -35,10 +32,6 @@
 #include "egl_object.h"
 #include "egl_tls.h"
 #include "private/EGL/display.h"
-
-using namespace android::hardware::configstore;
-using namespace android::hardware::configstore::V1_0;
-namespace graphicsenv_flags = com::android::graphics::graphicsenv::flags;
 
 namespace android {
 
@@ -163,35 +156,23 @@ static EGLDisplay getPlatformDisplayAngle(EGLNativeDisplayType display, egl_conn
             }
         }
 
-        if (graphicsenv_flags::angle_feature_overrides()) {
-            // Get the list of ANGLE features to enable from Global.Settings.
-            const auto& eglFeatures = GraphicsEnv::getInstance().getAngleEglFeatures();
-            for (const std::string& eglFeature : eglFeatures) {
-                enabled.push_back(eglFeature.c_str());
-            }
+        // Get the list of ANGLE features to enable from Global.Settings.
+        const auto& eglFeatures = GraphicsEnv::getInstance().getAngleEglFeatures();
+        for (const std::string& eglFeature : eglFeatures) {
+            enabled.push_back(eglFeature.c_str());
+        }
 
-            // Get the list of ANGLE features to enable/disable from gpuservice.
-            GraphicsEnv::getInstance().getAngleFeatureOverrides(enabled, disabled);
-            if (!enabled.empty()) {
-                enabled.push_back(nullptr);
-                attrs.push_back(EGL_FEATURE_OVERRIDES_ENABLED_ANGLE);
-                attrs.push_back(reinterpret_cast<EGLAttrib>(enabled.data()));
-            }
-            if (!disabled.empty()) {
-                disabled.push_back(nullptr);
-                attrs.push_back(EGL_FEATURE_OVERRIDES_DISABLED_ANGLE);
-                attrs.push_back(reinterpret_cast<EGLAttrib>(disabled.data()));
-            }
-        } else {
-            const auto& eglFeatures = GraphicsEnv::getInstance().getAngleEglFeatures();
-            if (!eglFeatures.empty()) {
-                for (const std::string& eglFeature : eglFeatures) {
-                    enabled.push_back(eglFeature.c_str());
-                }
-                enabled.push_back(nullptr);
-                attrs.push_back(EGL_FEATURE_OVERRIDES_ENABLED_ANGLE);
-                attrs.push_back(reinterpret_cast<EGLAttrib>(enabled.data()));
-            }
+        // Get the list of ANGLE features to enable/disable from gpuservice.
+        GraphicsEnv::getInstance().getAngleFeatureOverrides(enabled, disabled);
+        if (!enabled.empty()) {
+            enabled.push_back(nullptr);
+            attrs.push_back(EGL_FEATURE_OVERRIDES_ENABLED_ANGLE);
+            attrs.push_back(reinterpret_cast<EGLAttrib>(enabled.data()));
+        }
+        if (!disabled.empty()) {
+            disabled.push_back(nullptr);
+            attrs.push_back(EGL_FEATURE_OVERRIDES_DISABLED_ANGLE);
+            attrs.push_back(reinterpret_cast<EGLAttrib>(disabled.data()));
         }
 
         attrs.push_back(EGL_PLATFORM_ANGLE_TYPE_ANGLE);

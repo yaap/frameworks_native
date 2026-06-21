@@ -80,6 +80,8 @@ enum {
     AHARDWAREBUFFER_FORMAT_RAW10                    = 0x25,
     /* same as HAL_PIXEL_FORMAT_RAW12 */
     AHARDWAREBUFFER_FORMAT_RAW12                    = 0x26,
+    /* same as HAL_PIXEL_FORMAT_RAW14 */
+    AHARDWAREBUFFER_FORMAT_RAW14                    = 0x2C,
     /* same as HAL_PIXEL_FORMAT_RAW_OPAQUE */
     AHARDWAREBUFFER_FORMAT_RAW_OPAQUE               = 0x24,
     /* same as HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED */

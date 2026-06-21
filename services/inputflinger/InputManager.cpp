@@ -20,11 +20,12 @@
 
 #include <memory>
 
-#include "InputDispatcherFactory.h"
 #include "InputManager.h"
 #include "InputReader.h"
 #include "InputTracingThreadedBackend.h"
+#include "InteractionReporter.h"
 #include "UnwantedInteractionBlocker.h"
+#include "dispatcher/InputDispatcher.h"
 
 #include <aidl/com/android/server/inputflinger/IInputFlingerRust.h>
 #include <android-base/properties.h>
@@ -33,6 +34,7 @@
 #include <binder/IPCThreadState.h>
 #include <com_android_input_flags.h>
 #include <inputflinger_bootstrap.rs.h>
+#include <jni.h>
 #include <log/log.h>
 #include <private/android_filesystem_config.h>
 
@@ -124,22 +126,32 @@ std::shared_ptr<IInputFlingerRust> createInputFlingerRust() {
  *     -> PointerChoreographer
  *     -> InputProcessor
  *     -> InputDeviceMetricsCollector
+ *     -> InteractionReporter
  *     -> InputDispatcher
  */
 InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
                            InputDispatcherPolicyInterface& dispatcherPolicy,
                            PointerChoreographerPolicyInterface& choreographerPolicy,
-                           InputFilterPolicyInterface& inputFilterPolicy, JNIEnv* env) {
+                           InputFilterPolicyInterface& inputFilterPolicy, JavaVM* vm,
+                           bool createInteractionReporter) {
     mInputFlingerRust = createInputFlingerRust();
 
     std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend =
-            input_trace::impl::createInputTracingBackendIfEnabled(env);
-    mDispatcher = createInputDispatcher(dispatcherPolicy, env, tracingBackend);
+            input_trace::impl::createInputTracingBackendIfEnabled(vm);
+    mDispatcher = std::make_unique<inputdispatcher::InputDispatcher>(dispatcherPolicy,
+                                                                     tracingBackend, vm);
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputDispatcher", *mDispatcher));
 
+    if (createInteractionReporter) {
+        // On devices without the Attention service, we can skip the InteractionReporter stage.
+        mInteractionReporter = std::make_unique<InteractionReporter>(*mTracingStages.back());
+        mTracingStages.emplace_back(std::make_unique<TracedInputListener>("InteractionReporter",
+                                                                          *mInteractionReporter));
+    }
+
     mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
-                                                 inputFilterPolicy, env);
+                                                 inputFilterPolicy, vm);
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
 
@@ -163,7 +175,7 @@ InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
             std::make_unique<TracedInputListener>("UnwantedInteractionBlocker", *mBlocker));
 
     mReader = std::make_unique<InputReader>(std::make_unique<EventHub>(), readerPolicy,
-                                            *mTracingStages.back(), env, tracingBackend);
+                                            *mTracingStages.back(), vm, tracingBackend);
 }
 
 InputManager::~InputManager() {
@@ -228,6 +240,10 @@ InputDispatcherInterface& InputManager::getDispatcher() {
 
 InputFilterInterface& InputManager::getInputFilter() {
     return *mInputFilter;
+}
+
+InteractionReporterInterface& InputManager::getInteractionReporter() {
+    return *mInteractionReporter;
 }
 
 void InputManager::monitor() {

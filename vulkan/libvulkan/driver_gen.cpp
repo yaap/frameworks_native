@@ -81,7 +81,7 @@ VKAPI_ATTR VkResult checkedBindImageMemory2(VkDevice device, uint32_t bindInfoCo
     if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_1]) {
         return BindImageMemory2(device, bindInfoCount, pBindInfos);
     } else {
-        Logger(device).Err(device, "VK_VERSION_1_1 not enabled. vkBindImageMemory2 not executed.");
+        Logger(device).Err(device, "VK_BASE_VERSION_1_1 not enabled. vkBindImageMemory2 not executed.");
         return VK_SUCCESS;
     }
 }
@@ -161,15 +161,137 @@ VKAPI_ATTR void checkedGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2
     if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_1]) {
         GetDeviceQueue2(device, pQueueInfo, pQueue);
     } else {
-        Logger(device).Err(device, "VK_VERSION_1_1 not enabled. vkGetDeviceQueue2 not executed.");
+        Logger(device).Err(device, "VK_BASE_VERSION_1_1 not enabled. vkGetDeviceQueue2 not executed.");
     }
 }
 
-VKAPI_ATTR VkResult checkedReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwapchainImagesInfoEXT* pReleaseInfo) {
+VKAPI_ATTR VkResult checkedCreatePrivateDataSlot(VkDevice device, const VkPrivateDataSlotCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkPrivateDataSlot* pPrivateDataSlot) {
+    if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_3]) {
+        return CreatePrivateDataSlot(device, pCreateInfo, pAllocator, pPrivateDataSlot);
+    } else {
+        Logger(device).Err(device, "VK_BASE_VERSION_1_3 not enabled. vkCreatePrivateDataSlot not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedCreatePrivateDataSlotEXT(VkDevice device, const VkPrivateDataSlotCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkPrivateDataSlot* pPrivateDataSlot) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_private_data]) {
+        return CreatePrivateDataSlotEXT(device, pCreateInfo, pAllocator, pPrivateDataSlot);
+    } else {
+        Logger(device).Err(device, "VK_EXT_private_data not enabled. vkCreatePrivateDataSlotEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR void checkedDestroyPrivateDataSlot(VkDevice device, VkPrivateDataSlot privateDataSlot, const VkAllocationCallbacks* pAllocator) {
+    if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_3]) {
+        DestroyPrivateDataSlot(device, privateDataSlot, pAllocator);
+    } else {
+        Logger(device).Err(device, "VK_BASE_VERSION_1_3 not enabled. vkDestroyPrivateDataSlot not executed.");
+    }
+}
+
+VKAPI_ATTR void checkedDestroyPrivateDataSlotEXT(VkDevice device, VkPrivateDataSlot privateDataSlot, const VkAllocationCallbacks* pAllocator) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_private_data]) {
+        DestroyPrivateDataSlotEXT(device, privateDataSlot, pAllocator);
+    } else {
+        Logger(device).Err(device, "VK_EXT_private_data not enabled. vkDestroyPrivateDataSlotEXT not executed.");
+    }
+}
+
+VKAPI_ATTR VkResult checkedSetPrivateData(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t data) {
+    if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_3]) {
+        return SetPrivateData(device, objectType, objectHandle, privateDataSlot, data);
+    } else {
+        Logger(device).Err(device, "VK_BASE_VERSION_1_3 not enabled. vkSetPrivateData not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedSetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t data) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_private_data]) {
+        return SetPrivateDataEXT(device, objectType, objectHandle, privateDataSlot, data);
+    } else {
+        Logger(device).Err(device, "VK_EXT_private_data not enabled. vkSetPrivateDataEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR void checkedGetPrivateData(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t* pData) {
+    if (GetData(device).hook_extensions[ProcHook::EXTENSION_CORE_1_3]) {
+        GetPrivateData(device, objectType, objectHandle, privateDataSlot, pData);
+    } else {
+        Logger(device).Err(device, "VK_BASE_VERSION_1_3 not enabled. vkGetPrivateData not executed.");
+    }
+}
+
+VKAPI_ATTR void checkedGetPrivateDataEXT(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t* pData) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_private_data]) {
+        GetPrivateDataEXT(device, objectType, objectHandle, privateDataSlot, pData);
+    } else {
+        Logger(device).Err(device, "VK_EXT_private_data not enabled. vkGetPrivateDataEXT not executed.");
+    }
+}
+
+VKAPI_ATTR VkResult checkedWaitForPresent2KHR(VkDevice device, VkSwapchainKHR swapchain, const VkPresentWait2InfoKHR* pPresentWait2Info) {
+    if (GetData(device).hook_extensions[ProcHook::KHR_present_wait2]) {
+        return WaitForPresent2KHR(device, swapchain, pPresentWait2Info);
+    } else {
+        Logger(device).Err(device, "VK_KHR_present_wait2 not enabled. vkWaitForPresent2KHR not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedReleaseSwapchainImagesKHR(VkDevice device, const VkReleaseSwapchainImagesInfoKHR* pReleaseInfo) {
+    if (GetData(device).hook_extensions[ProcHook::KHR_swapchain_maintenance1]) {
+        return ReleaseSwapchainImagesKHR(device, pReleaseInfo);
+    } else {
+        Logger(device).Err(device, "VK_KHR_swapchain_maintenance1 not enabled. vkReleaseSwapchainImagesKHR not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwapchainImagesInfoKHR* pReleaseInfo) {
     if (GetData(device).hook_extensions[ProcHook::EXT_swapchain_maintenance1]) {
         return ReleaseSwapchainImagesEXT(device, pReleaseInfo);
     } else {
         Logger(device).Err(device, "VK_EXT_swapchain_maintenance1 not enabled. vkReleaseSwapchainImagesEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedSetSwapchainPresentTimingQueueSizeEXT(VkDevice device, VkSwapchainKHR swapchain, uint32_t size) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_present_timing]) {
+        return SetSwapchainPresentTimingQueueSizeEXT(device, swapchain, size);
+    } else {
+        Logger(device).Err(device, "VK_EXT_present_timing not enabled. vkSetSwapchainPresentTimingQueueSizeEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedGetSwapchainTimingPropertiesEXT(VkDevice device, VkSwapchainKHR swapchain, VkSwapchainTimingPropertiesEXT* pSwapchainTimingProperties, uint64_t* pSwapchainTimingPropertiesCounter) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_present_timing]) {
+        return GetSwapchainTimingPropertiesEXT(device, swapchain, pSwapchainTimingProperties, pSwapchainTimingPropertiesCounter);
+    } else {
+        Logger(device).Err(device, "VK_EXT_present_timing not enabled. vkGetSwapchainTimingPropertiesEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedGetSwapchainTimeDomainPropertiesEXT(VkDevice device, VkSwapchainKHR swapchain, VkSwapchainTimeDomainPropertiesEXT* pSwapchainTimeDomainProperties, uint64_t* pTimeDomainsCounter) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_present_timing]) {
+        return GetSwapchainTimeDomainPropertiesEXT(device, swapchain, pSwapchainTimeDomainProperties, pTimeDomainsCounter);
+    } else {
+        Logger(device).Err(device, "VK_EXT_present_timing not enabled. vkGetSwapchainTimeDomainPropertiesEXT not executed.");
+        return VK_SUCCESS;
+    }
+}
+
+VKAPI_ATTR VkResult checkedGetPastPresentationTimingEXT(VkDevice device, const VkPastPresentationTimingInfoEXT* pPastPresentationTimingInfo, VkPastPresentationTimingPropertiesEXT* pPastPresentationTimingProperties) {
+    if (GetData(device).hook_extensions[ProcHook::EXT_present_timing]) {
+        return GetPastPresentationTimingEXT(device, pPastPresentationTimingInfo, pPastPresentationTimingProperties);
+    } else {
+        Logger(device).Err(device, "VK_EXT_present_timing not enabled. vkGetPastPresentationTimingEXT not executed.");
         return VK_SUCCESS;
     }
 }
@@ -249,6 +371,20 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkCreatePrivateDataSlot",
+        ProcHook::DEVICE,
+        ProcHook::EXTENSION_CORE_1_3,
+        reinterpret_cast<PFN_vkVoidFunction>(CreatePrivateDataSlot),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedCreatePrivateDataSlot),
+    },
+    {
+        "vkCreatePrivateDataSlotEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_private_data,
+        reinterpret_cast<PFN_vkVoidFunction>(CreatePrivateDataSlotEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedCreatePrivateDataSlotEXT),
+    },
+    {
         "vkCreateSwapchainKHR",
         ProcHook::DEVICE,
         ProcHook::KHR_swapchain,
@@ -282,6 +418,20 @@ const ProcHook g_proc_hooks[] = {
         ProcHook::EXTENSION_CORE_1_0,
         reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance),
         nullptr,
+    },
+    {
+        "vkDestroyPrivateDataSlot",
+        ProcHook::DEVICE,
+        ProcHook::EXTENSION_CORE_1_3,
+        reinterpret_cast<PFN_vkVoidFunction>(DestroyPrivateDataSlot),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedDestroyPrivateDataSlot),
+    },
+    {
+        "vkDestroyPrivateDataSlotEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_private_data,
+        reinterpret_cast<PFN_vkVoidFunction>(DestroyPrivateDataSlotEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedDestroyPrivateDataSlotEXT),
     },
     {
         "vkDestroySurfaceKHR",
@@ -368,6 +518,13 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkGetPastPresentationTimingEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_present_timing,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPastPresentationTimingEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedGetPastPresentationTimingEXT),
+    },
+    {
         "vkGetPastPresentationTimingGOOGLE",
         ProcHook::DEVICE,
         ProcHook::GOOGLE_display_timing,
@@ -403,10 +560,24 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkGetPhysicalDeviceFeatures2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceFeatures2KHR),
+        nullptr,
+    },
+    {
         "vkGetPhysicalDeviceFormatProperties2",
         ProcHook::INSTANCE,
         ProcHook::EXTENSION_CORE_1_1,
         reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceFormatProperties2),
+        nullptr,
+    },
+    {
+        "vkGetPhysicalDeviceFormatProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceFormatProperties2KHR),
         nullptr,
     },
     {
@@ -417,10 +588,24 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkGetPhysicalDeviceImageFormatProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceImageFormatProperties2KHR),
+        nullptr,
+    },
+    {
         "vkGetPhysicalDeviceMemoryProperties2",
         ProcHook::INSTANCE,
         ProcHook::EXTENSION_CORE_1_1,
         reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceMemoryProperties2),
+        nullptr,
+    },
+    {
+        "vkGetPhysicalDeviceMemoryProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceMemoryProperties2KHR),
         nullptr,
     },
     {
@@ -438,6 +623,13 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkGetPhysicalDeviceProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2KHR),
+        nullptr,
+    },
+    {
         "vkGetPhysicalDeviceQueueFamilyProperties2",
         ProcHook::INSTANCE,
         ProcHook::EXTENSION_CORE_1_1,
@@ -445,10 +637,24 @@ const ProcHook g_proc_hooks[] = {
         nullptr,
     },
     {
+        "vkGetPhysicalDeviceQueueFamilyProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceQueueFamilyProperties2KHR),
+        nullptr,
+    },
+    {
         "vkGetPhysicalDeviceSparseImageFormatProperties2",
         ProcHook::INSTANCE,
         ProcHook::EXTENSION_CORE_1_1,
         reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceSparseImageFormatProperties2),
+        nullptr,
+    },
+    {
+        "vkGetPhysicalDeviceSparseImageFormatProperties2KHR",
+        ProcHook::INSTANCE,
+        ProcHook::KHR_get_physical_device_properties2,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceSparseImageFormatProperties2KHR),
         nullptr,
     },
     {
@@ -492,6 +698,20 @@ const ProcHook g_proc_hooks[] = {
         ProcHook::KHR_surface,
         reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceSurfaceSupportKHR),
         nullptr,
+    },
+    {
+        "vkGetPrivateData",
+        ProcHook::DEVICE,
+        ProcHook::EXTENSION_CORE_1_3,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPrivateData),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedGetPrivateData),
+    },
+    {
+        "vkGetPrivateDataEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_private_data,
+        reinterpret_cast<PFN_vkVoidFunction>(GetPrivateDataEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedGetPrivateDataEXT),
     },
     {
         "vkGetRefreshCycleDurationGOOGLE",
@@ -543,6 +763,20 @@ const ProcHook g_proc_hooks[] = {
         reinterpret_cast<PFN_vkVoidFunction>(checkedGetSwapchainStatusKHR),
     },
     {
+        "vkGetSwapchainTimeDomainPropertiesEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_present_timing,
+        reinterpret_cast<PFN_vkVoidFunction>(GetSwapchainTimeDomainPropertiesEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedGetSwapchainTimeDomainPropertiesEXT),
+    },
+    {
+        "vkGetSwapchainTimingPropertiesEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_present_timing,
+        reinterpret_cast<PFN_vkVoidFunction>(GetSwapchainTimingPropertiesEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedGetSwapchainTimingPropertiesEXT),
+    },
+    {
         "vkQueuePresentKHR",
         ProcHook::DEVICE,
         ProcHook::KHR_swapchain,
@@ -571,11 +805,46 @@ const ProcHook g_proc_hooks[] = {
         reinterpret_cast<PFN_vkVoidFunction>(checkedReleaseSwapchainImagesEXT),
     },
     {
+        "vkReleaseSwapchainImagesKHR",
+        ProcHook::DEVICE,
+        ProcHook::KHR_swapchain_maintenance1,
+        reinterpret_cast<PFN_vkVoidFunction>(ReleaseSwapchainImagesKHR),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedReleaseSwapchainImagesKHR),
+    },
+    {
         "vkSetHdrMetadataEXT",
         ProcHook::DEVICE,
         ProcHook::EXT_hdr_metadata,
         reinterpret_cast<PFN_vkVoidFunction>(SetHdrMetadataEXT),
         reinterpret_cast<PFN_vkVoidFunction>(checkedSetHdrMetadataEXT),
+    },
+    {
+        "vkSetPrivateData",
+        ProcHook::DEVICE,
+        ProcHook::EXTENSION_CORE_1_3,
+        reinterpret_cast<PFN_vkVoidFunction>(SetPrivateData),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedSetPrivateData),
+    },
+    {
+        "vkSetPrivateDataEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_private_data,
+        reinterpret_cast<PFN_vkVoidFunction>(SetPrivateDataEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedSetPrivateDataEXT),
+    },
+    {
+        "vkSetSwapchainPresentTimingQueueSizeEXT",
+        ProcHook::DEVICE,
+        ProcHook::EXT_present_timing,
+        reinterpret_cast<PFN_vkVoidFunction>(SetSwapchainPresentTimingQueueSizeEXT),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedSetSwapchainPresentTimingQueueSizeEXT),
+    },
+    {
+        "vkWaitForPresent2KHR",
+        ProcHook::DEVICE,
+        ProcHook::KHR_present_wait2,
+        reinterpret_cast<PFN_vkVoidFunction>(WaitForPresent2KHR),
+        reinterpret_cast<PFN_vkVoidFunction>(checkedWaitForPresent2KHR),
     },
     // clang-format on
 };
@@ -602,15 +871,22 @@ ProcHook::Extension GetProcHookExtension(const char* name) {
     if (strcmp(name, "VK_KHR_android_surface") == 0) return ProcHook::KHR_android_surface;
     if (strcmp(name, "VK_KHR_get_surface_capabilities2") == 0) return ProcHook::KHR_get_surface_capabilities2;
     if (strcmp(name, "VK_KHR_incremental_present") == 0) return ProcHook::KHR_incremental_present;
+    if (strcmp(name, "VK_KHR_get_physical_device_properties2") == 0) return ProcHook::KHR_get_physical_device_properties2;
     if (strcmp(name, "VK_KHR_shared_presentable_image") == 0) return ProcHook::KHR_shared_presentable_image;
     if (strcmp(name, "VK_KHR_surface") == 0) return ProcHook::KHR_surface;
     if (strcmp(name, "VK_KHR_surface_protected_capabilities") == 0) return ProcHook::KHR_surface_protected_capabilities;
     if (strcmp(name, "VK_KHR_swapchain") == 0) return ProcHook::KHR_swapchain;
     if (strcmp(name, "VK_EXT_swapchain_maintenance1") == 0) return ProcHook::EXT_swapchain_maintenance1;
     if (strcmp(name, "VK_EXT_surface_maintenance1") == 0) return ProcHook::EXT_surface_maintenance1;
+    if (strcmp(name, "VK_KHR_present_id") == 0) return ProcHook::KHR_present_id;
+    if (strcmp(name, "VK_KHR_present_id2") == 0) return ProcHook::KHR_present_id2;
+    if (strcmp(name, "VK_EXT_present_timing") == 0) return ProcHook::EXT_present_timing;
+    if (strcmp(name, "VK_KHR_present_wait2") == 0) return ProcHook::KHR_present_wait2;
+    if (strcmp(name, "VK_EXT_private_data") == 0) return ProcHook::EXT_private_data;
+    if (strcmp(name, "VK_KHR_swapchain_maintenance1") == 0) return ProcHook::KHR_swapchain_maintenance1;
+    if (strcmp(name, "VK_KHR_surface_maintenance1") == 0) return ProcHook::KHR_surface_maintenance1;
     if (strcmp(name, "VK_ANDROID_external_memory_android_hardware_buffer") == 0) return ProcHook::ANDROID_external_memory_android_hardware_buffer;
     if (strcmp(name, "VK_KHR_bind_memory2") == 0) return ProcHook::KHR_bind_memory2;
-    if (strcmp(name, "VK_KHR_get_physical_device_properties2") == 0) return ProcHook::KHR_get_physical_device_properties2;
     if (strcmp(name, "VK_KHR_device_group_creation") == 0) return ProcHook::KHR_device_group_creation;
     if (strcmp(name, "VK_KHR_external_memory_capabilities") == 0) return ProcHook::KHR_external_memory_capabilities;
     if (strcmp(name, "VK_KHR_external_semaphore_capabilities") == 0) return ProcHook::KHR_external_semaphore_capabilities;
@@ -706,6 +982,14 @@ bool InitDriverTable(VkDevice dev,
     INIT_PROC_EXT(ANDROID_native_buffer, false, dev, GetSwapchainGrallocUsage4ANDROID);
     INIT_PROC_EXT(ANDROID_native_buffer, true, dev, AcquireImageANDROID);
     INIT_PROC_EXT(ANDROID_native_buffer, true, dev, QueueSignalReleaseImageANDROID);
+    INIT_PROC(false, dev, CreatePrivateDataSlot);
+    INIT_PROC_EXT(EXT_private_data, true, dev, CreatePrivateDataSlotEXT);
+    INIT_PROC(false, dev, DestroyPrivateDataSlot);
+    INIT_PROC_EXT(EXT_private_data, true, dev, DestroyPrivateDataSlotEXT);
+    INIT_PROC(false, dev, SetPrivateData);
+    INIT_PROC_EXT(EXT_private_data, true, dev, SetPrivateDataEXT);
+    INIT_PROC(false, dev, GetPrivateData);
+    INIT_PROC_EXT(EXT_private_data, true, dev, GetPrivateDataEXT);
     // clang-format on
 
     return success;

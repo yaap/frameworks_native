@@ -30,22 +30,6 @@ namespace android {
 
 [[clang::no_destroy]] Vector<int32_t> gTextBuffers;
 
-class LogTextOutput : public BufferedTextOutput
-{
-public:
-    LogTextOutput() : BufferedTextOutput(MULTITHREADED) { }
-    virtual ~LogTextOutput() { }
-
-protected:
-    virtual status_t writeLines(const struct iovec& vec, size_t N)
-    {
-        //android_writevLog(&vec, N);       <-- this is now a no-op
-        if (N != 1) ALOGI("WARNING: writeLines N=%zu\n", N);
-        ALOGI("%.*s", (int)vec.iov_len, (const char*) vec.iov_base);
-        return NO_ERROR;
-    }
-};
-
 class FdTextOutput : public BufferedTextOutput
 {
 public:
@@ -65,7 +49,6 @@ private:
     int mFD;
 };
 
-TextOutput& alog(*new LogTextOutput());
 TextOutput& aout(*new FdTextOutput(STDOUT_FILENO));
 TextOutput& aerr(*new FdTextOutput(STDERR_FILENO));
 

@@ -85,6 +85,26 @@ cc_library_headers {
     },
 }
 
+cc_library_headers {
+    name: "libbinder_internal_headers",
+    export_include_dirs: ["include_private"],
+    vendor_available: true,
+    recovery_available: true,
+    host_supported: true,
+    native_bridge_supported: true,
+    cmake_snapshot_supported: true,
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.media",
+        "com.android.media.swcodec",
+    ],
+    min_sdk_version: "29",
+    visibility: [
+        ":__subpackages__",
+        "//frameworks/base/core/jni",
+    ],
+}
+
 cc_cmake_snapshot {
     name: "binder_sdk",
     dist: {
@@ -233,9 +253,9 @@ filegroup {
 filegroup {
     name: "libbinder_observer_sources",
     srcs: [
-        "BinderObserver.cpp",
-        "BinderObserverConfig.cpp",
-        "BinderStatsPusher.cpp",
+        "observer/BinderObserver.cpp",
+        "observer/BinderObserverConfig.cpp",
+        "observer/BinderStatsPusher.cpp",
     ],
     visibility: [
         ":__subpackages__",
@@ -258,6 +278,7 @@ cc_defaults {
         "FdTrigger.cpp",
         "IInterface.cpp",
         "IResultReceiver.cpp",
+        "JavaBBinderBase.cpp",
         "Parcel.cpp",
         "ParcelFileDescriptor.cpp",
         "RecordedTransaction.cpp",
@@ -274,6 +295,7 @@ cc_defaults {
 
     header_libs: [
         "libbinder_headers_base",
+        "libbinder_internal_headers",
     ],
     export_header_lib_headers: [
         "libbinder_headers_base",
@@ -299,6 +321,10 @@ cc_defaults {
         true: ["-DLIBBINDER_BINDER_OBSERVER"],
         false: ["-DNO_LIBBINDER_BINDER_OBSERVER"],
         default: ["-DNO_LIBBINDER_BINDER_OBSERVER"],
+    }) + select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER_V2"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER_V2"],
+        false: [],
+        default: [],
     }),
 }
 
@@ -314,6 +340,8 @@ cc_defaults {
     srcs: [
         "OS_android.cpp",
         "OS_unix_base.cpp",
+        "PersistableBundle.cpp",
+        ":pcc_sandbox_manager_native_aidl",
     ],
 
     target: {
@@ -331,6 +359,9 @@ cc_defaults {
 
     aidl: {
         export_aidl_headers: true,
+        include_dirs: [
+            "frameworks/native/aidl/binder", // For PersistableBundle.aidl
+        ],
     },
 
     product_variables: {
@@ -375,7 +406,31 @@ cc_defaults {
         "--header-filter=^.*frameworks/native/libs/binder/.*.h$",
     ],
     tidy_checks: [
+        "-bugprone-branch-clone", // b/155034972
+        "-bugprone-forwarding-reference-overload",
+        "-bugprone-nondeterministic-pointer-iteration-order",
+        "-bugprone-sizeof-expression",
+        "-bugprone-switch-missing-default-case",
+        "-bugprone-unused-local-non-trivial-variable",
+        "-cert-arr39-c",
+        "-cert-dcl16-c",
+        "-cert-dcl59-cpp",
+        "-clang-analyzer-cplusplus.NewDeleteLeaks",
+        "-clang-analyzer-deadcode.DeadStores",
+        "-clang-analyzer-nullability.NullablePassedToNonnull",
+        "-clang-analyzer-security.cert.env.InvalidPtr",
+        "-clang-analyzer-unix.BlockInCriticalSection",
+        "-clang-analyzer-unix.StdCLibraryFunctions",
+        "-google-build-namespaces",
+        "-misc-header-include-cycle",
+        "-misc-include-cleaner",
+        "-misc-unused-using-decls",
+        "-misc-use-internal-linkage",
+        "-performance-enum-size",
         "-performance-no-int-to-ptr",
+        "-performance-unnecessary-copy-initialization",
+        "-performance-unnecessary-value-param",
+        "-portability-template-virtual-member-function",
     ],
     tidy_checks_as_errors: [
         // Explicitly list the checks that should not occur in this module.
@@ -456,6 +511,7 @@ cc_defaults {
         "-D__ANDROID_VNDK__",
         "-U__ANDROID__",
         "-D__TRUSTY__",
+        "-D__BINDER_VENDOR_STABILITY__",
         "-DTRUSTY_USERSPACE",
         // Flags from the Trusty build system
         "-Werror",
@@ -490,72 +546,6 @@ cc_library_shared {
     ],
 }
 
-soong_config_module_type {
-    name: "libbinder_remove_cache_static_list_config",
-    module_type: "cc_defaults",
-    config_namespace: "libbinder",
-    bool_variables: ["release_libbinder_remove_cache_static_list"],
-    properties: [
-        "cflags",
-    ],
-}
-
-libbinder_remove_cache_static_list_config {
-    name: "libbinder_remove_cache_static_list_flag",
-    soong_config_variables: {
-        release_libbinder_remove_cache_static_list: {
-            cflags: ["-DLIBBINDER_REMOVE_CACHE_STATIC_LIST"],
-            conditions_default: {
-                cflags: ["-DNO_LIBBINDER_REMOVE_CACHE_STATIC_LIST"],
-            },
-        },
-    },
-}
-
-soong_config_module_type {
-    name: "libbinder_client_cache_config",
-    module_type: "cc_defaults",
-    config_namespace: "libbinder",
-    bool_variables: ["release_libbinder_client_cache"],
-    properties: [
-        "cflags",
-    ],
-}
-
-libbinder_client_cache_config {
-    name: "libbinder_client_cache_flag",
-    soong_config_variables: {
-        release_libbinder_client_cache: {
-            cflags: ["-DLIBBINDER_CLIENT_CACHE"],
-            conditions_default: {
-                cflags: ["-DNO_LIBBINDER_CLIENT_CACHE"],
-            },
-        },
-    },
-}
-
-soong_config_module_type {
-    name: "libbinder_addservice_cache_config",
-    module_type: "cc_defaults",
-    config_namespace: "libbinder",
-    bool_variables: ["release_libbinder_addservice_cache"],
-    properties: [
-        "cflags",
-    ],
-}
-
-libbinder_addservice_cache_config {
-    name: "libbinder_addservice_cache_flag",
-    soong_config_variables: {
-        release_libbinder_addservice_cache: {
-            cflags: ["-DLIBBINDER_ADDSERVICE_CACHE"],
-            conditions_default: {
-                cflags: ["-DNO_LIBBINDER_ADDSERVICE_CACHE"],
-            },
-        },
-    },
-}
-
 cc_defaults {
     name: "libbinder_bpbinder_decstrong_last_flag_default",
     cflags: select(release_flag("RELEASE_LIBBINDER_BPBINDER_DECSTRONG_LAST"), {
@@ -573,22 +563,6 @@ cc_defaults {
 }
 
 cc_defaults {
-    name: "libbinder_fix_double_derefs_flag_default",
-    cflags: select(release_flag("RELEASE_LIBBINDER_FIX_RECURSIVE_DOUBLE_DEREFS"), {
-        true: ["-DLIBBINDER_FIX_RECURSIVE_DOUBLE_DEREFS"],
-        default: [],
-    }),
-}
-
-cc_defaults {
-    name: "libbinder_freeze_use_flush_if_needed_flag_default",
-    cflags: select(release_flag("RELEASE_LIBBINDER_FREEZE_USE_FLUSH_IF_NEEDED"), {
-        true: ["-DLIBBINDER_FREEZE_USE_FLUSH_IF_NEEDED"],
-        default: [],
-    }),
-}
-
-cc_defaults {
     name: "libbinder_freeze_use_flush_eagerly_flag_default",
     cflags: select(release_flag("RELEASE_LIBBINDER_FREEZE_USE_FLUSH_EAGERLY"), {
         true: ["-DLIBBINDER_FREEZE_USE_FLUSH_EAGERLY"],
@@ -599,12 +573,7 @@ cc_defaults {
 cc_defaults {
     name: "libbinder_kernel_defaults",
     defaults: [
-        "libbinder_client_cache_flag",
         "libbinder_defer_bc_request_freeze_notification_flag_default",
-        "libbinder_addservice_cache_flag",
-        "libbinder_remove_cache_static_list_flag",
-        "libbinder_fix_double_derefs_flag_default",
-        "libbinder_freeze_use_flush_if_needed_flag_default",
         "libbinder_freeze_use_flush_eagerly_flag_default",
     ],
     srcs: [
@@ -618,8 +587,11 @@ cc_defaults {
         ":libbinder_aidl",
         ":libbinder_accessor_aidl",
         ":libbinder_device_interface_sources",
-        ":android-os-statsbootstrap-aidl",
         ":libbinder_observer_sources",
+        ":android-os-binderstatsconsumer-aidl",
+    ],
+    static_libs: [
+        "android.os.binder.flags-aconfig-cc",
     ],
     target: {
         vendor: {
@@ -657,6 +629,10 @@ cc_defaults {
         true: ["-DLIBBINDER_BINDER_OBSERVER"],
         false: ["-DNO_LIBBINDER_BINDER_OBSERVER"],
         default: ["-DNO_LIBBINDER_BINDER_OBSERVER"],
+    }) + select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER_V2"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER_V2"],
+        false: [],
+        default: [],
     }),
 }
 
@@ -666,6 +642,10 @@ cc_library {
         "libbinder_common_defaults",
         "libbinder_android_defaults",
         "libbinder_kernel_defaults",
+    ],
+
+    header_libs: [
+        "libbinder_internal_headers",
     ],
 
     version_script: "libbinder.map",
@@ -846,6 +826,21 @@ cc_library_static {
     ],
 }
 
+cc_library_static {
+    name: "libbinder_flake_prone",
+    defaults: [
+        "libbinder_common_defaults",
+        "libbinder_android_defaults",
+        "libbinder_kernel_defaults",
+    ],
+    cflags: [
+        "-DRPC_FLAKE_PRONE=1",
+    ],
+    visibility: [
+        ":__subpackages__",
+    ],
+}
+
 cc_defaults {
     name: "libbinder_tls_shared_deps",
     shared_libs: [
@@ -917,6 +912,25 @@ cc_library {
     ],
 }
 
+cc_library {
+    name: "libbindernetlink",
+    vendor_available: false,
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "libnl",
+    ],
+    srcs: [
+        "BinderNetlink.cpp",
+    ],
+    export_include_dirs: [
+        "include",
+    ],
+    export_shared_lib_headers: [
+        "libnl",
+    ],
+}
+
 // For testing
 cc_library_static {
     name: "libbinder_tls_static",
@@ -957,35 +971,6 @@ filegroup {
     ],
     path: "aidl",
     visibility: [":__subpackages__"],
-}
-
-aidl_interface {
-    name: "packagemanager_aidl",
-    unstable: true,
-    local_include_dir: "aidl",
-    host_supported: true,
-    srcs: [
-        "aidl/android/content/pm/ApexStagedEvent.aidl",
-        "aidl/android/content/pm/IPackageManagerNative.aidl",
-        "aidl/android/content/pm/IStagedApexObserver.aidl",
-        "aidl/android/content/pm/PackageInfoNative.aidl",
-        "aidl/android/content/pm/SignatureNative.aidl",
-        "aidl/android/content/pm/SigningInfoNative.aidl",
-        "aidl/android/content/pm/StagedApexInfo.aidl",
-    ],
-    backend: {
-        rust: {
-            apex_available: [
-                "//apex_available:platform",
-                "com.android.virt",
-            ],
-            enabled: true,
-            gen_mockall: true,
-            additional_rustlibs: [
-                "libmockall",
-            ],
-        },
-    },
 }
 
 aidl_interface {
@@ -1037,6 +1022,7 @@ aidl_interface {
         "//frameworks/native/cmds/servicemanager/rpc_servicemanager",
         "//packages/modules/Virtualization:__subpackages__",
     ],
+    host_supported: true,
 }
 
 // TODO(b/184872979): remove once the Rust API is created.
@@ -1069,6 +1055,7 @@ cc_library {
         "//device/google/cuttlefish/shared/minidroid:__subpackages__",
         "//visibility:any_system_partition",
     ],
+    host_supported: true,
 }
 
 // libbinder historically contained additional interfaces that provided specific
@@ -1141,4 +1128,25 @@ cc_binary {
         "libutils",
         "android.debug_aidl-cpp",
     ],
+}
+
+/////////////////////////////////////////////////
+// flags
+/////////////////////////////////////////////////
+aconfig_declarations {
+    name: "android.os.binder.flags-aconfig",
+    package: "android.os.binder.flags",
+    container: "system",
+    srcs: ["flags.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "android.os.binder.flags-aconfig-cc",
+    aconfig_declarations: "android.os.binder.flags-aconfig",
+    mode: "force-read-only",
+    vendor_available: true,
+    recovery_available: true,
+    host_supported: true,
+    native_bridge_supported: true,
+    cmake_snapshot_supported: true,
 }

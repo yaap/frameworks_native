@@ -19,10 +19,15 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <cutils/compiler.h>
+#include <ftl/small_map.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueDefs.h>
 #include <sys/cdefs.h>
 #include <system/graphics.h>
+#include <ui/BufferQueueDefs.h>
+#include <ui/GraphicBuffer.h>
+
+#include <vector>
 
 namespace android {
 
@@ -48,24 +53,28 @@ public:
                                     SurfaceTexture_fenceWait fenceWait,
                                     void* fencePassThroughHandle);
 
-    /**
-     * onReleaseBufferLocked amends the ConsumerBase method to update the
-     * mImageSlots array in addition to the ConsumerBase.
-     */
-    void onReleaseBufferLocked(int slot);
+    void onAbandonLocked();
+    void onReleaseBufferLocked(const sp<GraphicBuffer>& buffer);
+    void onFreeBufferLocked(const SurfaceTexture& st, const sp<GraphicBuffer>& buffer);
 
 private:
     /**
-     * ImageSlot contains the information and object references that
+     * ImageData contains the information and object references that
      * ImageConsumer maintains about a BufferQueue buffer slot.
      */
-    class ImageSlot {
+    class ImageData {
     public:
-        ImageSlot() : mEglFence(EGL_NO_SYNC_KHR) {}
+        ImageData(int slot) : mSlot(slot), mEglFence(EGL_NO_SYNC_KHR) {}
 
+        inline int slot() const { return mSlot; }
         inline EGLSyncKHR& eglFence() { return mEglFence; }
 
     private:
+        /**
+         * mSlot is returned by dequeueBuffer as a way of tracking buffers.
+         */
+        int mSlot;
+
         /**
          * mEglFence is the EGL sync object that must signal before the buffer
          * associated with this buffer slot may be dequeued.
@@ -73,16 +82,17 @@ private:
         EGLSyncKHR mEglFence;
     };
 
+    int getDequeueBufferSlot(const sp<GraphicBuffer>& buffer) const;
+
     /**
      * ImageConsumer stores the SkImages that have been allocated by the BufferQueue
-     * for each buffer slot.  It is initialized to null pointers, and gets
-     * filled in with the result of BufferQueue::acquire when the
-     * client dequeues a buffer from a
-     * slot that has not yet been used. The buffer allocated to a slot will also
-     * be replaced if the requested buffer usage or geometry differs from that
-     * of the buffer allocated to a slot.
+     * for each buffer. It is filled in with the result of BufferQueue::acquire when the
+     * client dequeues a new buffer.
      */
-    ImageSlot mImageSlots[BufferQueueDefs::NUM_BUFFER_SLOTS];
+    ftl::SmallMap<sp<GraphicBuffer>, ImageData, BufferQueueDefs::NUM_BUFFER_SLOTS> mImageData;
+
+    int mNextSlot = 0;
+    std::vector<int> mRecycledSlots;
 };
 
 } /* namespace android */

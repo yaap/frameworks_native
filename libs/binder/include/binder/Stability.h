@@ -118,6 +118,12 @@ public:
     // else false if the binder is local to the current partition.
     LIBBINDER_EXPORTED static bool requiresVintfDeclaration(const sp<IBinder>& binder);
 
+    // Returns true if the binder is vendor stable else false.
+    LIBBINDER_EXPORTED static bool isVendorStable(const sp<IBinder>& binder);
+
+    // Returns true if the binder is system stable else false.
+    LIBBINDER_EXPORTED static bool isSystemStable(const sp<IBinder>& binder);
+
 private:
     // Parcel needs to read/write stability level in an unstable format.
     friend ::android::Parcel;
@@ -128,6 +134,8 @@ private:
     // so that it can mark the context object (only the root object doesn't go
     // through Parcel)
     friend ::android::ProcessState;
+
+    friend ::android::BBinder;
 
     friend ::BinderStabilityIntegrationTest_ExpectedStabilityForItsPartition_Test;
 

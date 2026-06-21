@@ -24,6 +24,8 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include "test_framework/core/ScenarioEventRecorder.h"
+#include "test_framework/core/ScenarioEventValidation.h"
 #include "test_framework/core/TestService.h"
 #include "test_framework/hwc3/Hwc3Controller.h"
 #include "test_framework/hwc3/ObservingComposer.h"
@@ -133,6 +135,8 @@ TEST_F(Placeholder, Bringup) {
                 LOG(INFO) << fmt::format("onTransactionCompleted {}", event);
             })();
 
+    service->scenarioEventRecorder().reset();
+
     // Trigger the first commit to get things started.
     auto firstFrameNumber = surface->commitNextBuffer();
     LOG(INFO) << "firstFrameNumber " << firstFrameNumber;
@@ -142,6 +146,12 @@ TEST_F(Placeholder, Bringup) {
     LOG(INFO) << "Waiting for " << kSleepTime << "....";
     std::this_thread::sleep_for(kSleepTime);
     LOG(INFO) << "Done waiting for " << kSleepTime << "....";
+
+    const auto recordedEvents = service->scenarioEventRecorder().events();
+    if (auto validationResult = test_framework::core::BasicValidationCheck(recordedEvents);
+        !validationResult) {
+        FAIL() << "Validation failed: " << validationResult.error();
+    }
 
     EXPECT_GT(vsyncCount, 0) << "Expected at least one vsync timing callback. Zero observed.";
     EXPECT_GT(bufferReleaseCount, 0)

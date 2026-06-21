@@ -22,12 +22,12 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#include <thread>
 #include <vector>
 
 #include <binder/Functional.h>
 #include <binder/Parcel.h>
 #include <binder/RpcServer.h>
+#include <binder/RpcThreads.h>
 #include <binder/RpcTransportRaw.h>
 #include <log/log.h>
 
@@ -439,6 +439,15 @@ void RpcServer::establishConnection(
     status_t status = OK;
 
     int clientFdForLog = clientFd.fd.get();
+
+    std::optional<uid_t> uid = std::nullopt;
+    status = RpcSocketAddress::getPeerUid(clientFd.fd,
+                                          reinterpret_cast<const sockaddr*>(addr.data()), addrLen,
+                                          &uid);
+    if (status != OK) {
+        ALOGE("Failed to get peer credentials: %s", statusToString(status).c_str());
+    }
+
     auto client = server->mCtx->newTransport(std::move(clientFd), server->mShutdownTrigger.get());
     if (client == nullptr) {
         ALOGE("Dropping accept4()-ed socket because sslAccept fails");
@@ -553,7 +562,8 @@ void RpcServer::establishConnection(
                 }
             } while (server->mSessions.end() != server->mSessions.find(sessionId));
 
-            session = sp<RpcSession>::make(nullptr);
+            session = sp<RpcSession>::make(nullptr, uid);
+
             if (!session->setProtocolVersion(protocolVersion)) return;
 
             if (header.fileDescriptorTransportMode <

@@ -16,6 +16,14 @@
 
 #pragma once
 
+#include <input/EvdevAbsCode.h>
+#include <input/EvdevKeyCode.h>
+#include <input/KeyCode.h>
+#include <input/MotionEventAxis.h>
+
+#include <map>
+#include <unordered_map>
+
 #include "InputMapper.h"
 
 namespace android {
@@ -80,12 +88,14 @@ private:
         float newValue;         // most recent value
         float highCurrentValue; // current value of high split
         float highNewValue;     // most recent value of high split
+        nsecs_t lastUpdateTime; // Time of the last EV_ABS event for this axis.
 
         void resetValue() {
             this->currentValue = 0;
             this->newValue = 0;
             this->highCurrentValue = 0;
             this->highNewValue = 0;
+            this->lastUpdateTime = 0;
         }
     };
 
@@ -95,11 +105,33 @@ private:
     static Axis createAxis(const AxisInfo& AxisInfo, const RawAbsoluteAxisInfo& rawAxisInfo,
                            bool explicitlyMapped);
 
-    // Axes indexed by raw ABS_* axis index.
-    std::unordered_map<int32_t, Axis> mAxes;
+    /**
+     * Axes indexed by raw ABS_*.
+     *
+     * Might also contain keys greater than ABS_MAX for axes mapped from keys, in case those axes
+     * are not mapped from any valid ABS_*.
+     */
+    std::unordered_map</* ABS_* */ int32_t, Axis> mAxes;
+    std::unordered_map</* fromAndroidAxisId */ int32_t, /* toAndroidAxisId */ int32_t>
+            mAxisRemapping;
+    /**
+     * The original mapping passed to reconfigure(). This is only used to determine if the mapping
+     * has changed since last configuration.
+     */
+    std::map<KeyCode, MotionEventAxis> mKeyToAxisRemapping;
+    /**
+     * A map from a evdev key code to the evdev axis abs code value the key is mapped to.
+     *
+     * This is used to determine which axis to update when a key event is received.
+     *
+     * Key codes which are not mapped to any axis are not included.
+     */
+    std::map<EvdevKeyCode, std::pair<EvdevAbsCode, /* isHighAxis */ bool>> mEvdevKeyToEvdevAbs;
 
     [[nodiscard]] std::list<NotifyArgs> sync(nsecs_t when, nsecs_t readTime, bool force);
 
+    void addAxesMappedFromKeys();
+    std::map<EvdevKeyCode, KeyCode> getOriginalKeyMapping() const;
     bool haveAxis(int32_t axisId);
     void pruneAxes(bool ignoreExplicitlyMappedAxes);
     bool filterAxes(bool force);
@@ -110,6 +142,7 @@ private:
                                                          float currentValue, float thresholdValue);
 
     static bool isCenteredAxis(int32_t axis);
+    static bool isAnalogTrigger(int32_t axis);
     static int32_t getCompatAxis(int32_t axis);
 
     static void addMotionRange(int32_t axisId, const Axis& axis, InputDeviceInfo& info);

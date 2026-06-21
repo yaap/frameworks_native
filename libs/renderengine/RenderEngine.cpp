@@ -17,6 +17,7 @@
 #include <renderengine/RenderEngine.h>
 
 #include "renderengine/ExternalTexture.h"
+#include "skia/Cache.h"
 #include "skia/GaneshVkRenderEngine.h"
 #include "skia/GraphiteVkRenderEngine.h"
 #include "skia/SkiaGLRenderEngine.h"
@@ -41,15 +42,21 @@ std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArg
 
     if (args.skiaBackend == SkiaBackend::Graphite) {
         createInstanceFactory = [args]() {
+            skia::Cache::initializeGraphiteDiskCache();
+
             return android::renderengine::skia::GraphiteVkRenderEngine::create(args);
         };
     } else { // GANESH
         if (args.graphicsApi == GraphicsApi::Vk) {
             createInstanceFactory = [args]() {
+                skia::Cache::initializeGaneshDiskCache();
+
                 return android::renderengine::skia::GaneshVkRenderEngine::create(args);
             };
         } else { // GL
             createInstanceFactory = [args]() {
+                skia::Cache::initializeGaneshDiskCache();
+
                 return android::renderengine::skia::SkiaGLRenderEngine::create(args);
             };
         }

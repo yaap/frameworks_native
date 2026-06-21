@@ -16,6 +16,7 @@
 #pragma once
 
 #include <android/binder_auto_utils.h>
+#include <utility>
 #include <vector>
 
 #include <android/binder_libbinder.h>
@@ -25,6 +26,7 @@
 class NdkParcelAdapter {
 public:
     NdkParcelAdapter() : mParcel(AParcel_create()) {}
+    ~NdkParcelAdapter();
 
     const AParcel* aParcel() const { return mParcel.get(); }
     AParcel* aParcel() { return mParcel.get(); }
@@ -44,6 +46,8 @@ public:
     android::status_t appendFrom(const NdkParcelAdapter* parcel, int32_t start, int32_t len) {
         return AParcel_appendFrom(parcel->aParcel(), aParcel(), start, len);
     }
+
+    mutable std::vector<std::pair<ndk::SpAIBinder, AIBinder_FrozenStateChangeCallback*>> mFrozenChangeCallbacks;
 
 private:
     ndk::ScopedAParcel mParcel;

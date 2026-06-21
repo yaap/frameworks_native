@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "../AnrTracker.h"
+#include "dispatcher/AnrTracker.h"
 
 #include <binder/Binder.h>
 #include <gtest/gtest.h>

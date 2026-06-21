@@ -317,7 +317,7 @@ bool KeyCharacterMap::getEvents(int32_t deviceId, const char16_t* chars, size_t 
     return true;
 }
 
-void KeyCharacterMap::setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping) {
+void KeyCharacterMap::setKeyRemapping(const std::unordered_map<int32_t, int32_t>& keyRemapping) {
     mKeyRemapping = keyRemapping;
 }
 

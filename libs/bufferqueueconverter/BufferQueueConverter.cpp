@@ -15,14 +15,12 @@
  */
 
 #include <gui/Surface.h>
-#include <gui/bufferqueue/2.0/H2BGraphicBufferProducer.h>
 
 #include "include/bufferqueueconverter/BufferQueueConverter.h"
 
 
 using ::android::Surface;
 using ::android::IGraphicBufferProducer;
-using ::android::hardware::graphics::bufferqueue::V2_0::utils::H2BGraphicBufferProducer;
 
 
 namespace android {
@@ -39,28 +37,23 @@ void destroySurfaceHolder(SurfaceHolder* surfaceHolder) {
     delete surfaceHolder;
 }
 
-
-SurfaceHolderUniquePtr getSurfaceFromHGBP(const sp<HGraphicBufferProducer>& token) {
+sp<ANativeWindow> getNativeWindowFromHGBP(const sp<HGraphicBufferProducer>& token) {
     if (token == nullptr) {
         ALOGE("Passed IGraphicBufferProducer handle is invalid.");
-        return SurfaceHolderUniquePtr(nullptr, nullptr);
+        return nullptr;
     }
-
-    sp<IGraphicBufferProducer> bufferProducer = new H2BGraphicBufferProducer(token);
-    if (bufferProducer == nullptr) {
-        ALOGE("Failed to get IGraphicBufferProducer.");
-        return SurfaceHolderUniquePtr(nullptr, nullptr);
-    }
-
-    sp<Surface> newSurface(new Surface(bufferProducer, true));
-    if (newSurface == nullptr) {
-        ALOGE("Failed to create Surface from HGBP.");
-        return SurfaceHolderUniquePtr(nullptr, nullptr);
-    }
-
-    return SurfaceHolderUniquePtr(new SurfaceHolder(newSurface), destroySurfaceHolder);
+    return Surface::fromHidl(token);
 }
 
+SurfaceHolderUniquePtr getSurfaceFromHGBP(const sp<HGraphicBufferProducer>& token) {
+    sp<ANativeWindow> surface = getNativeWindowFromHGBP(token);
+    if (surface == nullptr) {
+        return SurfaceHolderUniquePtr(nullptr, nullptr);
+    }
+
+    sp<Surface> s = sp<Surface>::fromExisting(static_cast<Surface*>(surface.get()));
+    return SurfaceHolderUniquePtr(new SurfaceHolder(s), destroySurfaceHolder);
+}
 
 ANativeWindow* getNativeWindow(SurfaceHolder* handle) {
     if (handle == nullptr) {

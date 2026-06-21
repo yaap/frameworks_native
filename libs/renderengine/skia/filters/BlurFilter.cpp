@@ -25,6 +25,7 @@
 #include <SkString.h>
 #include <SkSurface.h>
 #include <SkTileMode.h>
+#include <common/ThreadStateCrashLogger.h>
 #include <common/trace.h>
 #include <log/log.h>
 
@@ -93,7 +94,7 @@ void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
                                                      linearSampling, &blurMatrix);
 
     if (blurRadius < mMaxCrossFadeRadius) {
-        LOG_ALWAYS_FATAL_IF(!input);
+        LOG_THREAD_STATE_AND_CRASH_IF(!input);
 
         // For sampling Skia's API expects the inverse of what logically seems appropriate. In this
         // case you might expect the matrix to simply be the canvas matrix.

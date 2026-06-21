@@ -26,8 +26,11 @@
 #include <android/binder_status.h>
 #include <fmt/format.h>
 #include <ftl/ignore.h>
+#include <ftl/non_null.h>
 
 #include "test_framework/core/DisplayConfiguration.h"
+#include "test_framework/core/ScenarioEventRecorder.h"
+#include "test_framework/core/TestService.h"
 #include "test_framework/hwc3/FakeComposer.h"
 #include "test_framework/hwc3/Hwc3Controller.h"
 #include "test_framework/hwc3/ObservingComposer.h"
@@ -43,11 +46,12 @@ namespace android::surfaceflinger::tests::end2end::test_framework::hwc3 {
 
 struct Hwc3Controller::Passkey final {};
 
-auto Hwc3Controller::make(std::span<const core::DisplayConfiguration> displays)
+auto Hwc3Controller::make(ftl::NonNull<std::weak_ptr<core::TestService>> service,
+                          std::span<const core::DisplayConfiguration> displays)
         -> base::expected<std::shared_ptr<hwc3::Hwc3Controller>, std::string> {
     using namespace std::string_literals;
 
-    auto controller = std::make_shared<Hwc3Controller>(Passkey{});
+    auto controller = std::make_shared<Hwc3Controller>(std::move(service), Passkey{});
     if (controller == nullptr) {
         return base::unexpected("Failed to construct the Hwc3Controller instance"s);
     }
@@ -60,7 +64,9 @@ auto Hwc3Controller::make(std::span<const core::DisplayConfiguration> displays)
     return controller;
 }
 
-Hwc3Controller::Hwc3Controller(Passkey passkey) {
+Hwc3Controller::Hwc3Controller(ftl::NonNull<std::weak_ptr<core::TestService>> service,
+                               Passkey passkey)
+    : mService(std::move(service)) {
     ftl::ignore(passkey);
 }
 
@@ -139,13 +145,25 @@ void Hwc3Controller::onVsyncEnabledChanged(const events::VSyncEnabled& event) co
 }
 
 void Hwc3Controller::onDisplayPresented(const events::DisplayPresented& event) const {
+    if (auto service = mService.get().lock()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
+
     mCallbacks.onDisplayPresented(event);
 }
 
 void Hwc3Controller::onBufferPendingDisplay(const events::BufferPendingDisplay& event) const {
+    if (auto service = mService.get().lock()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
+
     mCallbacks.onBufferPendingDisplay(event);
 }
 void Hwc3Controller::onBufferPendingRelease(const events::BufferPendingRelease& event) const {
+    if (auto service = mService.get().lock()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
+
     mCallbacks.onBufferPendingRelease(event);
 }
 

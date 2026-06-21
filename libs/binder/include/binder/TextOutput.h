@@ -51,11 +51,6 @@ public:
 
 // DO NOT USE: prefer libutils/libbase logs, which don't require static data to
 // be allocated.
-// Text output stream for printing to the log (via utils/Log.h).
-extern LIBBINDER_EXPORTED TextOutput& alog;
-
-// DO NOT USE: prefer libutils/libbase logs, which don't require static data to
-// be allocated.
 // Text output stream for printing to stdout.
 extern LIBBINDER_EXPORTED TextOutput& aout;
 

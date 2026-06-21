@@ -4,36 +4,10 @@ package: "com.android.graphics.surfaceflinger.flags"
 container: "system"
 
 flag {
-  name: "connected_display"
-  namespace: "core_graphics"
-  description: "Controls SurfaceFlinger support for Connected Displays in 24Q1"
-  bug: "278199093"
-  is_fixed_read_only: true
-}
-
-# This file is locked and should not be changed. Use surfaceflinger_flags_new.aconfig
-
-flag {
-  name: "enable_layer_command_batching"
-  namespace: "core_graphics"
-  description: "This flag controls batching on createLayer/destroyLayer command with executeCommand."
-  bug: "290685621"
-  is_fixed_read_only: true
-}
-
-flag {
   name: "multithreaded_present"
   namespace: "core_graphics"
   description: "Controls whether to offload present calls to another thread"
   bug: "259132483"
-  is_fixed_read_only: true
-}
-
-flag {
-  name: "enable_small_area_detection"
-  namespace: "core_graphics"
-  description: "Feature flag for SmallAreaDetection"
-  bug: "283055450"
   is_fixed_read_only: true
 }
 
@@ -47,14 +21,6 @@ flag {
   is_fixed_read_only: true
 }
 
-flag {
-  name: "hdcp_level_hal"
-  namespace: "core_graphics"
-  description: "Feature flag for adding a HAL API to commuicate hdcp levels"
-  bug: "285359126"
-  is_fixed_read_only: true
-}
-
 # This file is locked and should not be changed. Use surfaceflinger_flags_new.aconfig
 
 flag {
@@ -62,14 +28,6 @@ flag {
   namespace: "core_graphics"
   description: "enable refresh rate indicator on the external display"
   bug: "301647974"
-}
-
-flag {
-  name: "use_known_refresh_rate_for_fps_consistency"
-  namespace: "core_graphics"
-  description: "Whether to use the closest known refresh rate to determine the fps consistency."
-  bug: "299201319"
-  is_fixed_read_only: true
 }
 
 # This flag is broken.
@@ -92,23 +50,7 @@ flag {
   is_fixed_read_only: true
 }
 
-flag {
-  name: "fp16_client_target"
-  namespace: "core_graphics"
-  description: "Controls whether we render to fp16 client targets"
-  bug: "236745178"
-  is_fixed_read_only: true
-}
-
 # This file is locked and should not be changed. Use surfaceflinger_flags_new.aconfig
-
-flag {
-  name: "game_default_frame_rate"
-  namespace: "game"
-  description: "This flag guards the new behavior with the addition of Game Default Frame Rate feature."
-  bug: "286084594"
-  is_fixed_read_only: true
-}
 
 flag {
   name: "vulkan_renderengine"

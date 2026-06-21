@@ -16,8 +16,10 @@
 
 #pragma once
 
-#include <input/Input.h>
 #include <android/keycodes.h>
+#include <input/Input.h>
+#include <optional>
+#include <string_view>
 #include <unordered_map>
 
 namespace android {
@@ -53,19 +55,22 @@ public:
     static std::optional<int> lookupValueByLabel(const std::unordered_map<std::string, int>& map,
                                                  const char* literal);
 
-    static const char* lookupLabelByValue(const std::vector<InputEventLabel>& vec, int value);
+    static std::optional<std::string_view> lookupLabelByValue(
+            const std::vector<InputEventLabel>& vec, int value);
 
     static std::optional<int> getKeyCodeByLabel(const char* label);
 
-    static const char* getLabelByKeyCode(int32_t keyCode);
+    static std::optional<std::string_view> getLabelByKeyCode(int32_t keyCode);
 
     static std::optional<int> getKeyFlagByLabel(const char* label);
 
     static std::optional<int> getAxisByLabel(const char* label);
 
-    static const char* getAxisLabel(int32_t axisId);
+    static std::optional<std::string_view> getAxisLabel(int32_t axisId);
 
     static std::optional<int> getLedByLabel(const char* label);
+
+    static std::string getLinuxEvdevCodeLabel(int32_t type, int32_t code);
 
     static EvdevEventLabel getLinuxEvdevLabel(int32_t type, int32_t code, int32_t value);
 

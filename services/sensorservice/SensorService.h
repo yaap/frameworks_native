@@ -18,6 +18,7 @@
 #define ANDROID_SENSOR_SERVICE_H
 
 #include <android-base/macros.h>
+#include <android/hardware/sensor/ISensorClientListener.h>
 #include <binder/AppOpsManager.h>
 #include <binder/BinderService.h>
 #include <binder/IUidObserver.h>
@@ -32,6 +33,7 @@
 #include <utils/AndroidThreads.h>
 #include <utils/KeyedVector.h>
 #include <utils/Looper.h>
+#include <utils/Mutex.h>
 #include <utils/SortedVector.h>
 #include <utils/String8.h>
 #include <utils/Vector.h>
@@ -74,6 +76,14 @@
 #define SENSOR_SERVICE_CAPPED_SAMPLING_RATE_LEVEL SENSOR_DIRECT_RATE_NORMAL
 
 namespace android {
+
+// Custom hasher for sp<ISensorClientListener>
+struct SensorClientListenerHasher {
+    size_t operator()(const sp<hardware::sensor::ISensorClientListener>& listener) const {
+        return std::hash<hardware::sensor::ISensorClientListener*>()(listener.get());
+    }
+};
+
 // ---------------------------------------------------------------------------
 class SensorInterface;
 
@@ -335,6 +345,75 @@ private:
 
     bool isUidActive(uid_t uid);
 
+    class ClientStateRecipient : public IBinder::DeathRecipient,
+                                 public IBinder::FrozenStateChangeCallback {
+    public:
+        ClientStateRecipient(const sp<SensorService>& service,
+                             const sp<hardware::sensor::ISensorClientListener>& listener, pid_t pid,
+                             uid_t uid)
+              : mService(service), mListener(listener), mPid(pid), mUid(uid), mIsFrozen(false) {}
+
+        void binderDied(const wp<IBinder>& who) override;
+        void onStateChanged(const wp<IBinder>& who, State state) override;
+        pid_t getPid() const { return mPid; }
+        uid_t getUid() const { return mUid; }
+        bool isFrozen() const {
+            Mutex::Autolock lock(mFrozenStateLock);
+            return mIsFrozen;
+        }
+
+    private:
+        class FrozenStateChangeHandler : public MessageHandler {
+        public:
+            FrozenStateChangeHandler(wp<SensorService> service, uid_t pid, bool isFrozen)
+                  : mService(service), mPid(pid), mIsFrozen(isFrozen) {}
+
+            void handleMessage(const Message& /*message*/) override {
+                sp<SensorService> service = mService.promote();
+                if (service != nullptr) {
+                    service->onClientFrozenStateChange(mPid, mIsFrozen);
+                }
+            }
+
+        private:
+            wp<SensorService> mService;
+            const pid_t mPid;
+            bool mIsFrozen;
+        };
+
+        wp<SensorService> mService;
+        sp<hardware::sensor::ISensorClientListener> mListener;
+        const pid_t mPid;
+        const uid_t mUid;
+
+        // The primary purpose of mFrozenStateLock is to prevent a race condition between two
+        // concurrent binder threads. Without this lock, two threads could simultaneously pass the
+        // 'if (mIsFrozen == isFrozen)' check while the state is unchanged.
+        //
+        // This would cause duplicate state-change messages (e.g., "FROZEN") to be
+        // sent to the looper. This lock ensures the check, state update, and
+        // sendMessage are executed as a single atomic operation.
+        mutable Mutex mFrozenStateLock;
+        bool mIsFrozen GUARDED_BY(mFrozenStateLock);
+    };
+
+    /**
+     * Called by ClientStateRecipient::binderDied when the ISensorClientListener dies.
+     *
+     * This only cleans up the frozen-state tracking recipient from
+     * mBinderStateRecipients.
+     *
+     * IMPORTANT: This is *NOT* the main cleanup path for sensor subscriptions.
+     * Full sensor deactivation on client crash is handled in
+     * SensorService::cleanupConnection(SensorEventConnection* c).
+     */
+    void onClientDied(const sp<hardware::sensor::ISensorClientListener>& listener);
+    void onClientFrozenStateChange(pid_t pid, bool isFrozen);
+    status_t unregisterClientListener(
+            const sp<android::hardware::sensor::ISensorClientListener>& listener);
+
+    bool isPidFrozen(pid_t pid);
+
     // Sensor privacy allows a user to disable access to all sensors on the device. When
     // enabled sensor privacy will prevent all apps, including active apps, from accessing
     // sensors, they will not receive trigger nor on-change events, flush event behavior
@@ -420,6 +499,8 @@ private:
     virtual sp<ISensorEventConnection> createSensorDirectConnection(const String16& opPackageName,
             int deviceId, uint32_t size, int32_t type, int32_t format,
             const native_handle *resource);
+    virtual status_t registerClientListener(
+            const sp<android::hardware::sensor::ISensorClientListener>& listener);
     virtual int setOperationParameter(
             int32_t handle, int32_t type, const Vector<float> &floats, const Vector<int32_t> &ints);
     virtual status_t dump(int fd, const Vector<String16>& args);
@@ -580,6 +661,13 @@ private:
     SensorConnectionHolder mConnectionHolder;
     bool mWakeLockAcquired;
     sensors_event_t *mSensorEventBuffer, *mSensorEventScratch, *mRuntimeSensorEventBuffer;
+
+    // List of death receipients to clean up dead client listeners
+    mutable Mutex mBinderStateRecipientsLock;
+    std::unordered_map<sp<hardware::sensor::ISensorClientListener>, sp<ClientStateRecipient>,
+                       SensorClientListenerHasher>
+            mBinderStateRecipients GUARDED_BY(mBinderStateRecipientsLock);
+
     // WARNING: these SensorEventConnection instances must not be promoted to sp, except via
     // modification to add support for them in ConnectionSafeAutolock
     wp<const SensorEventConnection> * mMapFlushEventsToConnections;

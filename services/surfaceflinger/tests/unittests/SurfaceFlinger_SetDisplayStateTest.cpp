@@ -17,6 +17,7 @@
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
+#include "DisplayDevice.h"
 #include "DisplayTransactionTestHelpers.h"
 
 #include <gmock/gmock.h>
@@ -95,16 +96,19 @@ TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedDoesNothingIfSurfaceDidNo
     display.inject();
 
     // There is a surface that can be set.
-    sp<mock::GraphicBufferProducer> surface = sp<mock::GraphicBufferProducer>::make();
+    sp<mock::GraphicBufferProducer> mockIGBP = sp<mock::GraphicBufferProducer>::make();
+    sp<Surface> surface = sp<Surface>::make(mockIGBP);
+    view::Surface viewSurface = view::Surface::fromSurface(surface);
 
     // The current display state has the surface set
-    display.mutableCurrentDisplayState().surface = surface;
+    display.mutableCurrentDisplayState().physicalOrVirtual =
+            DisplayDeviceState::Virtual{.surface = surface};
 
     // The incoming request sets the same surface
     DisplayState state;
     state.what = DisplayState::eSurfaceChanged;
     state.token = display.token();
-    state.surface = surface;
+    state.surface = viewSurface;
 
     // --------------------------------------------------------------------
     // Invocation
@@ -118,7 +122,7 @@ TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedDoesNothingIfSurfaceDidNo
     EXPECT_EQ(0u, flags);
 
     // The current display state is unchanged.
-    EXPECT_EQ(surface.get(), display.getCurrentDisplayState().surface.get());
+    EXPECT_EQ(surface, display.getCurrentDisplayState().getVirtual().surface);
 }
 
 TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedRequestsUpdateIfSurfaceChanged) {
@@ -132,10 +136,13 @@ TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedRequestsUpdateIfSurfaceCh
     display.inject();
 
     // There is a surface that can be set.
-    sp<mock::GraphicBufferProducer> surface = sp<mock::GraphicBufferProducer>::make();
+    sp<mock::GraphicBufferProducer> mockIGBP = sp<mock::GraphicBufferProducer>::make();
+    view::Surface surface;
+    surface.graphicBufferProducer = mockIGBP;
 
     // The current display state does not have a surface
-    display.mutableCurrentDisplayState().surface = nullptr;
+    display.mutableCurrentDisplayState().physicalOrVirtual =
+            DisplayDeviceState::Virtual{.surface = nullptr};
 
     // The incoming request sets a surface
     DisplayState state;
@@ -155,7 +162,7 @@ TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedRequestsUpdateIfSurfaceCh
     EXPECT_EQ(eDisplayTransactionNeeded, flags);
 
     // The current display layer stack state is set to the new value
-    EXPECT_EQ(surface.get(), display.getCurrentDisplayState().surface.get());
+    EXPECT_EQ(surface, display.getCurrentDisplayState().getVirtual().surface);
 }
 
 TEST_F(SetDisplayStateLockedTest, setDisplayStateLockedDoesNothingIfLayerStackDidNotChange) {

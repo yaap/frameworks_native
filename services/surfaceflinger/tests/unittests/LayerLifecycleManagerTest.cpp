@@ -17,13 +17,28 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <android-base/logging.h>
+#include <ftl/initializer_list.h>
 #include <renderengine/mock/FakeExternalTexture.h>
+#include <ui/LayerStack.h>
 
 #include "FrontEnd/LayerLifecycleManager.h"
+#include "FrontEnd/RequestedLayerState.h"
 #include "LayerHierarchyTest.h"
 #include "QueuedTransactionState.h"
 
 using namespace android::surfaceflinger;
+
+namespace {
+
+using ::testing::AllOf;
+using ::testing::Contains;
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+using ::testing::Not;
+using ::testing::NotNull;
+
+} // namespace
 
 namespace android::surfaceflinger::frontend {
 
@@ -65,7 +80,509 @@ protected:
                                                 uint32_t layerId) {
         return lifecycleManager.getLayerFromId(layerId);
     }
+
+    std::vector<uint32_t>* getLinkedLayers(LayerLifecycleManager& lifecycleManager,
+                                           uint32_t layerId) {
+        return lifecycleManager.getLinkedLayersFromId(layerId);
+    }
 };
+
+TEST_F(LayerLifecycleManagerTest, MirrorDisplayId) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kInnerPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kOuterPhysicalDisplayId{4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kInnerPhysicalDisplayId, kUniqueLayerStack));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo innerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kInnerPhysicalDisplayId)};
+    const frontend::DisplayInfo outerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kOuterPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::UNASSIGNED_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* references = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Contains(/*layerId*/ 6));
+}
+
+TEST_F(LayerLifecycleManagerTest,
+       UpdateLayerStackForSingleDisplayIdToMirrorFromAssignedToUnassigned) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kInnerPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kOuterPhysicalDisplayId{4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kInnerPhysicalDisplayId, kUniqueLayerStack));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo innerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kInnerPhysicalDisplayId)};
+    const frontend::DisplayInfo outerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kOuterPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::UNASSIGNED_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* references = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Contains(/*layerId*/ 6));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(ui::UNASSIGNED_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::DEFAULT_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(changedDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, IsEmpty());
+
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Not(Contains(/*layerId*/ 6)));
+}
+
+TEST_F(LayerLifecycleManagerTest,
+       UpdateLayerStackForSingleDisplayIdToMirrorFromUnassignedToAssigned) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kInnerPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kOuterPhysicalDisplayId{4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kInnerPhysicalDisplayId, kUniqueLayerStack));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo innerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kInnerPhysicalDisplayId)};
+    const frontend::DisplayInfo outerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kOuterPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::UNASSIGNED_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::DEFAULT_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layer->mirrorIds, IsEmpty());
+
+    const std::vector<uint32_t /*layerId*/>* references = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Not(Contains(/*layerId*/ 6)));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::UNASSIGNED_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(changedDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Contains(/*layerId*/ 6));
+}
+
+TEST_F(LayerLifecycleManagerTest,
+       UpdateLayerStackForSingleDisplayIdToMirrorToAnotherAssignedLayerStack) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kInnerPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kOuterPhysicalDisplayId{4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kInnerPhysicalDisplayId, kUniqueLayerStack));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    constexpr ui::LayerStack kAssignedLayerStack = ui::LayerStack::fromValue(2);
+    const frontend::DisplayInfo innerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kInnerPhysicalDisplayId)};
+    const frontend::DisplayInfo outerPhysicalDisplay{
+            .displayId = DisplayId::fromValue(kOuterPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK, innerPhysicalDisplay)(kAssignedLayerStack,
+                                                                          outerPhysicalDisplay);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* references = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Contains(/*layerId*/ 6));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(kAssignedLayerStack, innerPhysicalDisplay)(ui::DEFAULT_LAYER_STACK,
+                                                                      outerPhysicalDisplay);
+    manager.updateDisplayMirrors(changedDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, IsEmpty());
+
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Not(Contains(/*layerId*/ 6)));
+}
+
+TEST_F(LayerLifecycleManagerTest, UpdateLayerStackForDisplayIdToMirrorWithMultipleHierarchies) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kPhysicalDisplayId{4619827677550801152};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kPhysicalDisplayId, kUniqueLayerStack));
+
+    constexpr ui::LayerStack kAssignedLayerStack = ui::LayerStack::fromValue(2);
+    layers.push_back(rootLayer(/*layerId=*/7, kAssignedLayerStack));
+    layers.push_back(childLayer(/*layerId=*/8, /*parentId=*/7));
+    layers.push_back(childLayer(/*layerId=*/9, /*parentId=*/7));
+    layers.push_back(childLayer(/*layerId=*/10, /*parentId=*/8));
+    layers.push_back(childLayer(/*layerId=*/11, /*parentId=*/8));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo display0{.displayId = DisplayId::fromValue(kPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK, display0);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* rootReferences0 =
+            getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(rootReferences0, NotNull());
+    EXPECT_THAT(*rootReferences0, Contains(/*layerId*/ 6));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(kAssignedLayerStack, display0);
+    manager.updateDisplayMirrors(changedDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 7));
+
+    const std::vector<uint32_t /*layerId*/>* rootReferences1 = getLinkedLayers(manager, 7);
+    ASSERT_THAT(rootReferences1, NotNull());
+    EXPECT_THAT(*rootReferences1, Contains(/*layerId*/ 6));
+    // Ensuring that there are no references in the previous hierarchy.
+    ASSERT_THAT(rootReferences0, NotNull());
+    ASSERT_THAT(*rootReferences0, Not(Contains(/*layerId*/ 6)));
+}
+
+TEST_F(LayerLifecycleManagerTest, UpdateLayerStackForMultipleDisplayIdsToMirror) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr std::array<uint64_t, 2> kDisplayIds = {4619827677550801152, 4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack0 = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*layerId=*/6, kDisplayIds[0], kUniqueLayerStack0));
+
+    constexpr ui::LayerStack kAssignedLayerStack = ui::LayerStack::fromValue(2);
+    layers.push_back(rootLayer(/*layerId=*/7, kAssignedLayerStack));
+    layers.push_back(childLayer(/*layerId=*/8, /*parentId=*/7));
+    layers.push_back(childLayer(/*layerId=*/9, /*parentId=*/7));
+    layers.push_back(childLayer(/*layerId=*/10, /*parentId=*/8));
+    layers.push_back(childLayer(/*layerId=*/11, /*parentId=*/8));
+
+    constexpr ui::LayerStack kUniqueLayerStack1 = ui::LayerStack::fromValue(3);
+    layers.push_back(mirrorDisplayLayer(/*layerId=*/12, kDisplayIds[1], kUniqueLayerStack1));
+
+    manager.addLayers(std::move(layers));
+    // Reassigning `layers` to guarantee a valid state after moving from it.
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo display0{.displayId = DisplayId::fromValue(kDisplayIds[0])};
+    const frontend::DisplayInfo display1{.displayId = DisplayId::fromValue(kDisplayIds[1])};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK, display0)(kAssignedLayerStack, display1);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layerMirroring0 = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layerMirroring0, NotNull());
+    // We expect `mirrorIds` to only contain the layer id of the hierarchy's root.
+    EXPECT_THAT(layerMirroring0->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* references0 = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references0, NotNull());
+    EXPECT_THAT(*references0, AllOf(Contains(/*layerId*/ 6), Not(Contains(/*layerId*/ 12))));
+
+    const RequestedLayerState* layerMirroring1 = constManager.getLayerFromId(/*layerId=*/12);
+    ASSERT_THAT(layerMirroring1, NotNull());
+    EXPECT_THAT(layerMirroring1->mirrorIds, ElementsAre(/*layerId*/ 7));
+
+    const std::vector<uint32_t /*layerId*/>* references1 = getLinkedLayers(manager, /*layerId=*/7);
+    ASSERT_THAT(references1, NotNull());
+    EXPECT_THAT(*references1, AllOf(Not(Contains(/*layerId*/ 6)), Contains(/*layerId*/ 12)));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(kAssignedLayerStack, display0)(ui::DEFAULT_LAYER_STACK, display1);
+    manager.updateDisplayMirrors(changedDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layerMirroring0, NotNull());
+    EXPECT_THAT(layerMirroring0->mirrorIds, ElementsAre(/*layerId*/ 7));
+
+    ASSERT_THAT(references0, NotNull());
+    EXPECT_THAT(*references0, AllOf(Not(Contains(/*layerId*/ 6)), Contains(/*layerId*/ 12)));
+
+    ASSERT_THAT(layerMirroring1, NotNull());
+    EXPECT_THAT(layerMirroring1->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    ASSERT_THAT(references1, NotNull());
+    EXPECT_THAT(*references1, AllOf(Contains(/*layerId*/ 6), Not(Contains(/*layerId*/ 12))));
+}
+
+TEST_F(LayerLifecycleManagerTest, UpdateLayerStackForDisplayIdToMirrorWhenDisplayIsDestroyed) {
+    LayerLifecycleManager manager;
+
+    std::shared_ptr<ExpectLayerLifecycleListener> listener =
+            std::make_shared<ExpectLayerLifecycleListener>();
+    manager.addLifecycleListener(listener);
+
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kExternalPhysicalDisplayId{4619827677550801153};
+
+    constexpr ui::LayerStack kUniqueLayerStack = ui::LayerStack::fromValue(1);
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kExternalPhysicalDisplayId, kUniqueLayerStack));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    constexpr ui::LayerStack kAssignedLayerStack = ui::LayerStack::fromValue(2);
+    const frontend::DisplayInfo physicalDisplay = {
+            .displayId = DisplayId::fromValue(kPhysicalDisplayId)};
+    const frontend::DisplayInfo externalPhysicalDisplay = {
+            .displayId = DisplayId::fromValue(kExternalPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> displaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK, externalPhysicalDisplay)(kAssignedLayerStack,
+                                                                             physicalDisplay);
+    manager.updateDisplayMirrors(displaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    listener->expectLayersAdded({/*layerId*/ 1, 2, 3, 4, 5, 6});
+
+    const LayerLifecycleManager& constManager = manager;
+    const RequestedLayerState* layer = constManager.getLayerFromId(/*layerId=*/6);
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, ElementsAre(/*layerId*/ 1));
+
+    const std::vector<uint32_t /*layerId*/>* references = getLinkedLayers(manager, /*layerId=*/1);
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Contains(/*layerId*/ 6));
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedDisplaysInfo =
+            ftl::init::map(kAssignedLayerStack, physicalDisplay);
+    manager.updateDisplayMirrors(changedDisplaysInfo, /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    ASSERT_THAT(layer, NotNull());
+    EXPECT_THAT(layer->mirrorIds, IsEmpty());
+
+    ASSERT_THAT(references, NotNull());
+    EXPECT_THAT(*references, Not(Contains(/*layerId*/ 6)));
+}
 
 TEST_F(LayerLifecycleManagerTest, addLayers) {
     LayerLifecycleManager lifecycleManager;

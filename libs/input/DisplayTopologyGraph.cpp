@@ -18,7 +18,6 @@
 
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <com_android_input_flags.h>
 #include <ftl/enum.h>
 #include <input/DisplayTopologyGraph.h>
 #include <input/PrintTools.h>
@@ -28,8 +27,6 @@
 #include <algorithm>
 
 #define INDENT "  "
-
-namespace input_flags = com::android::input::flags;
 
 namespace android {
 
@@ -161,9 +158,6 @@ bool areTopologyGraphComponentsValid(
         ui::LogicalDisplayId primaryDisplayId,
         const std::unordered_map<ui::LogicalDisplayId, DisplayTopologyGraph::Properties>&
                 topologyGraph) {
-    if (!input_flags::enable_display_topology_validation()) {
-        return true;
-    }
     return validatePrimaryDisplay(primaryDisplayId, topologyGraph) &&
             validateTopologyGraph(topologyGraph);
 }

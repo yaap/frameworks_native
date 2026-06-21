@@ -36,9 +36,11 @@ rust_bindgen {
         "AParcel",
         "--raw-line",
         "use binder::unstable_api::AParcel;",
+        "--raw-line=use zerocopy::{Immutable, IntoBytes, FromBytes, KnownLayout};",
 
         "--with-derive-eq",
         "--with-derive-partialeq",
+        "--with-derive-custom=AHardwareBuffer_Desc=Immutable,IntoBytes,FromBytes,KnownLayout",
     ],
     shared_libs: [
         "libbinder_ndk",
@@ -47,6 +49,7 @@ rust_bindgen {
     ],
     rustlibs: [
         "libbinder_rs",
+        "libzerocopy",
     ],
 
     // Currently necessary for host builds
@@ -75,6 +78,7 @@ rust_library {
     ],
     rustlibs: [
         "libbinder_rs",
+        "libzerocopy",
     ],
     lints: "none",
     clippy_lints: "none",
@@ -99,6 +103,7 @@ rust_test {
     crate_name: "nativewindow_bindgen_test",
     rustlibs: [
         "libbinder_rs",
+        "libzerocopy",
     ],
     test_suites: ["general-tests"],
     auto_gen_config: true,
@@ -114,6 +119,7 @@ rust_defaults {
         "libbinder_rs",
         "libbitflags",
         "libnativewindow_bindgen",
+        "libzerocopy",
     ],
 }
 

@@ -31,7 +31,7 @@
 
 __BEGIN_DECLS
 
-enum AServiceManager_AddServiceFlag : uint32_t {
+typedef enum : uint32_t {
     /**
      * This allows processes with AID_ISOLATED to get the binder of the service added.
      *
@@ -48,13 +48,13 @@ enum AServiceManager_AddServiceFlag : uint32_t {
     ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT = 1 << 4,
     ADD_SERVICE_DUMP_FLAG_PROTO = 1 << 5,
     // All other bits are reserved for internal usage
-};
+} AServiceManager_AddServiceFlag;
 
 /**
  * These are the different SELinux permissions that processes need to have for
  * different operations with servicemanager.
  */
-enum AServiceManager_PermissionType : uint32_t {
+typedef enum : uint32_t {
     /**
      * Permission for a process to "find" this service through ServiceManager
      * APIs like AServiceManager_getService or AServiceManager_waitForService
@@ -70,7 +70,7 @@ enum AServiceManager_PermissionType : uint32_t {
      * servicemanager through AServiceManager_addService
      */
     CHECK_ACCESS_PERMISSION_ADD,
-};
+} AServiceManager_PermissionType;
 
 /**
  * This registers the service with the default service manager under this instance name. This does
@@ -154,9 +154,28 @@ __attribute__((warn_unused_result)) AIBinder* AServiceManager_getService(const c
  * \param instance identifier of the service. This will be used to lookup the service.
  *
  * \return STATUS_OK on success.
+ *         STATUS_UNEXPECTED_NULL if null arguments
+ *         UNKNOWN_ERROR if registration failed (look for "libbinder" logs)
  */
 binder_status_t AServiceManager_registerLazyService(AIBinder* binder, const char* instance)
         __INTRODUCED_IN(31);
+
+/**
+ * Same as above AServiceManager_registerLazyService with the additional
+ * parameter for flags.
+ *
+ * \param binder object to register globally with the service manager.
+ * \param instance identifier of the service. This will be used to lookup the service.
+ * \param flags an AServiceManager_AddServiceFlag enum to denote how the service should be
+ *        registered.
+ *
+ * \return STATUS_OK on success.
+ *         STATUS_UNEXPECTED_NULL if null arguments
+ *         UNKNOWN_ERROR if registration failed (look for "libbinder" logs)
+ */
+binder_status_t AServiceManager_registerLazyServiceWithFlags(
+        AIBinder* binder, const char* instance, const AServiceManager_AddServiceFlag flags)
+        __INTRODUCED_IN(37);
 
 /**
  * Gets a binder object with this specific instance name. Efficiently waits for the service.

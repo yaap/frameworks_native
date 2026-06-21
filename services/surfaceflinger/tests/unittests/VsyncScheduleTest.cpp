@@ -36,6 +36,7 @@ using testing::_;
 namespace android {
 
 constexpr PhysicalDisplayId kDisplayId = PhysicalDisplayId::fromPort(42u);
+using VsyncTimeSource = scheduler::VSyncTracker::VsyncTimeSource;
 
 class VsyncScheduleTest : public testing::Test {
 protected:
@@ -195,9 +196,9 @@ TEST_F(VsyncScheduleTest, AddResyncSampleDisallowed) {
     const auto timestamp = TimePoint::now();
 
     EXPECT_CALL(mRequestHardwareVsync, Call(_, _)).Times(0);
-    EXPECT_CALL(getController(), addHwVsyncTimestamp(_, _, _)).Times(0);
+    EXPECT_CALL(getController(), addHwVsyncTimestamp(_, _, _, _)).Times(0);
 
-    mVsyncSchedule->addResyncSample(timestamp, period);
+    mVsyncSchedule->addResyncSample(timestamp, period, VsyncTimeSource::HwVsyncCallback);
 }
 
 TEST_F(VsyncScheduleTest, AddResyncSampleDisabled) {
@@ -206,9 +207,9 @@ TEST_F(VsyncScheduleTest, AddResyncSampleDisabled) {
     const auto timestamp = TimePoint::now();
 
     EXPECT_CALL(mRequestHardwareVsync, Call(_, _)).Times(0);
-    EXPECT_CALL(getController(), addHwVsyncTimestamp(_, _, _)).Times(0);
+    EXPECT_CALL(getController(), addHwVsyncTimestamp(_, _, _, _)).Times(0);
 
-    mVsyncSchedule->addResyncSample(timestamp, period);
+    mVsyncSchedule->addResyncSample(timestamp, period, VsyncTimeSource::HwVsyncCallback);
 }
 
 TEST_F(VsyncScheduleTest, AddResyncSampleReturnsTrue) {
@@ -220,10 +221,10 @@ TEST_F(VsyncScheduleTest, AddResyncSampleReturnsTrue) {
 
     EXPECT_CALL(mRequestHardwareVsync, Call(_, _)).Times(0);
     EXPECT_CALL(getController(),
-                addHwVsyncTimestamp(timestamp.ns(), std::optional<nsecs_t>(period.ns()), _))
+                addHwVsyncTimestamp(timestamp.ns(), std::optional<nsecs_t>(period.ns()), _, _))
             .WillOnce(Return(true));
 
-    mVsyncSchedule->addResyncSample(timestamp, period);
+    mVsyncSchedule->addResyncSample(timestamp, period, VsyncTimeSource::HwVsyncCallback);
 }
 
 TEST_F(VsyncScheduleTest, AddResyncSampleReturnsFalse) {
@@ -235,10 +236,10 @@ TEST_F(VsyncScheduleTest, AddResyncSampleReturnsFalse) {
 
     EXPECT_CALL(mRequestHardwareVsync, Call(kDisplayId, false));
     EXPECT_CALL(getController(),
-                addHwVsyncTimestamp(timestamp.ns(), std::optional<nsecs_t>(period.ns()), _))
+                addHwVsyncTimestamp(timestamp.ns(), std::optional<nsecs_t>(period.ns()), _, _))
             .WillOnce(Return(false));
 
-    mVsyncSchedule->addResyncSample(timestamp, period);
+    mVsyncSchedule->addResyncSample(timestamp, period, VsyncTimeSource::HwVsyncCallback);
 }
 
 TEST_F(VsyncScheduleTest, PendingState) FTL_FAKE_GUARD(kMainThreadContext) {

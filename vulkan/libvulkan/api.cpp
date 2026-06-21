@@ -74,34 +74,57 @@ class OverrideLayerNames {
         allocator_.pfnFree(allocator_.pUserData, implicit_layers_.name_pool);
     }
 
+    /* Build an array of layer names that should be enabled, compiled from:
+     *
+     * - Settings-enabled implicit layers
+     * - Appplication-requested explicit layers
+     * - Platform layers
+     * - OEM layers
+     *
+     * TODO (b/455899446): Potentially restrict AddImplicitLayers() from
+     * including EXPLICIT layers (i.e. disallow layers from the application's
+     * own APK from being enabled via the IMPLICIT layer mechanism, via debug
+     * settings).
+     */
     VkResult Parse(const char* const* names, uint32_t count) {
+        // Determine which implicit layers are enabled by settings
         AddImplicitLayers();
 
         const auto& arr = implicit_layers_;
         if (arr.result != VK_SUCCESS)
             return arr.result;
 
-        // no need to override when there is no implicit layer
-        if (!arr.count)
+        // No need to override when there are no implicit layers nor OPLs
+        uint32_t oemAndPlatformLayerCount = GetOemAndPlatformLayerCount();
+        uint32_t layersToAdd = arr.count + oemAndPlatformLayerCount;
+        if (!layersToAdd)
             return VK_SUCCESS;
 
-        names_ = AllocateNameArray(arr.count + count);
+        // Allocate memory for implicit layer names
+        names_ = AllocateNameArray(layersToAdd + count);
         if (!names_)
             return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-        // add implicit layer names
+        // Add implicit layer names
         for (uint32_t i = 0; i < arr.count; i++)
             names_[i] = GetImplicitLayerName(i);
 
+        // Update name_count_
         name_count_ = arr.count;
 
-        // add explicit layer names
+        // Add explicit layer names
         for (uint32_t i = 0; i < count; i++) {
             // ignore explicit layers that are also implicit
             if (IsImplicitLayer(names[i]))
                 continue;
 
             names_[name_count_++] = names[i];
+        }
+
+        // Add platform and OEM layer names
+        uint32_t oplStartIdx = GetEnumeratedLayerCount();
+        for (uint32_t i = oplStartIdx; i < oemAndPlatformLayerCount; i++) {
+            names_[name_count_++] = GetLayerProperties(GetLayer(i)).layerName;
         }
 
         return VK_SUCCESS;
@@ -547,6 +570,11 @@ LayerChain::~LayerChain() {
     DestroyLayers(layers_, layer_count_, allocator_);
 }
 
+/* Activate desired layers  early in
+ * vkCreateInstance, activate the desired layers.  Early in vkCreateInstance,
+ * activate the desired layers.  Early in vkCreateInstance, activate the desired
+ * layers.  Early in vkCreateInstance, activate the desired layers.
+ */
 VkResult LayerChain::ActivateLayers(const char* const* layer_names,
                                     uint32_t layer_count,
                                     const char* const* extension_names,
@@ -1104,6 +1132,12 @@ VkBool32 LayerChain::DebugReportCallback(VkDebugReportFlagsEXT flags,
     return false;
 }
 
+/* The loader's actual implementation of vkCreateInstance.  Since the loader is
+ * the instance (recognized during the specification of Vulkan 1.1), the primary
+ * activity is activating the desired layers, building the layer stack (a chain
+ * of all Vulkan API functions from the loader's trampoline function, through
+ * any layer functions, and down to the driver).
+ */
 VkResult LayerChain::CreateInstance(const VkInstanceCreateInfo* create_info,
                                     const VkAllocationCallbacks* allocator,
                                     VkInstance* instance_out) {
@@ -1193,6 +1227,14 @@ const LayerChain::ActiveLayer* LayerChain::GetActiveLayers(
 
 // ----------------------------------------------------------------------------
 
+/* This function is called by the following early Vulkan API functions, in order
+ * to make sure that the driver and any layers are discovered and loaded:
+ *
+ * - EnumerateInstanceVersion
+ * - EnumerateInstanceLayerProperties
+ * - EnumerateInstanceExtensionProperties
+ * - CreateInstance
+ */
 bool EnsureInitialized() {
     static bool initialized = false;
     static pid_t init_attempted_for_pid = 0;
@@ -1230,6 +1272,10 @@ void ForEachLayerFromSettings(Functor functor) {
 
 }  // anonymous namespace
 
+/* The loader's entry point for vkCreateInstance, which ensures that the loader
+ * is initialized and then uses LayerChain::CreateInstance to do the actual
+ * work.
+ */
 VkResult CreateInstance(const VkInstanceCreateInfo* pCreateInfo,
                         const VkAllocationCallbacks* pAllocator,
                         VkInstance* pInstance) {
@@ -1266,6 +1312,13 @@ void DestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator) {
         LayerChain::DestroyDevice(device, pAllocator);
 }
 
+/* The implementation of vkEnumerateInstanceLayerProperties.  As expected, all
+ * explicit layers are returned to the application.  For compatibility with the
+ * LunarG loader, all implicit layers are also returned to the application, even
+ * though implicit layers are enabled without application involvement.  No
+ * platform or OEM layers are returned, as those layers are enabled without
+ * application knowledge or involvement.
+ */
 VkResult EnumerateInstanceLayerProperties(uint32_t* pPropertyCount,
                                           VkLayerProperties* pProperties) {
     ATRACE_CALL();
@@ -1273,7 +1326,9 @@ VkResult EnumerateInstanceLayerProperties(uint32_t* pPropertyCount,
     if (!EnsureInitialized())
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-    uint32_t count = GetLayerCount();
+    // NOTE: GetEnumeratedLayerCount relies on all IMPLICIT and EXPLICIT Layer's
+    // being added to g_instance_layers before any PLATFORM or OEM Layer's.
+    uint32_t count = GetEnumeratedLayerCount();
 
     if (!pProperties) {
         *pPropertyCount = count;
@@ -1281,13 +1336,23 @@ VkResult EnumerateInstanceLayerProperties(uint32_t* pPropertyCount,
     }
 
     uint32_t copied = std::min(*pPropertyCount, count);
-    for (uint32_t i = 0; i < copied; i++)
+    for (uint32_t i = 0; i < copied; i++) {
         pProperties[i] = GetLayerProperties(GetLayer(i));
+    }
     *pPropertyCount = copied;
 
     return (copied == count) ? VK_SUCCESS : VK_INCOMPLETE;
 }
 
+/* The loader's "instance" implementation of
+ * vkEnumerateInstanceExtensionProperties (see "driver.cpp" for the loader's
+ * "device" implementation).  All instance extensions from all layers are
+ * returned to the application, in addition to the loader's instance extensions.
+ *
+ * TODO: is it true that all instance extensions from all layers are returned?
+ * It won't work if an application tries to enable an instance extension from a
+ * layer that isn't given to vkCreateInstance.
+ */
 VkResult EnumerateInstanceExtensionProperties(
     const char* pLayerName,
     uint32_t* pPropertyCount,
@@ -1335,8 +1400,6 @@ VkResult EnumerateInstanceExtensionProperties(
             }
         }
     });
-
-    // TODO(b/143293104): Parse debug.vulkan.layers properties
 
     // Expose extensions from driver implementation.
     {
@@ -1437,8 +1500,6 @@ VkResult EnumerateDeviceExtensionProperties(
         }
     });
 
-    // TODO(b/143293104): Parse debug.vulkan.layers properties
-
     // Expose extensions from driver implementation.
     {
         const InstanceData& data = GetData(physicalDevice);
@@ -1476,7 +1537,7 @@ VkResult EnumerateInstanceVersion(uint32_t* pApiVersion) {
     if (!EnsureInitialized())
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-    *pApiVersion = flags::vulkan_1_4_instance_api() ? VK_API_VERSION_1_4 : VK_API_VERSION_1_3;
+    *pApiVersion = VK_API_VERSION_1_4;
     return VK_SUCCESS;
 }
 

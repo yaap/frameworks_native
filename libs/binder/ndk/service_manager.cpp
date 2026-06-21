@@ -41,15 +41,7 @@ binder_exception_t AServiceManager_addService(AIBinder* binder, const char* inst
     return PruneException(exception);
 }
 
-binder_exception_t AServiceManager_addServiceWithFlags(AIBinder* binder, const char* instance,
-                                                       const AServiceManager_AddServiceFlag flags) {
-    if (binder == nullptr || instance == nullptr) {
-        return EX_ILLEGAL_ARGUMENT;
-    }
-
-    sp<IServiceManager> sm = defaultServiceManager();
-
-    bool allowIsolated = flags & AServiceManager_AddServiceFlag::ADD_SERVICE_ALLOW_ISOLATED;
+int readDumpFlags(const AServiceManager_AddServiceFlag flags) {
     int dumpFlags = 0;
     if (flags & AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_CRITICAL) {
         dumpFlags |= IServiceManager::DUMP_FLAG_PRIORITY_CRITICAL;
@@ -67,8 +59,26 @@ binder_exception_t AServiceManager_addServiceWithFlags(AIBinder* binder, const c
         dumpFlags |= IServiceManager::DUMP_FLAG_PROTO;
     }
     if (dumpFlags == 0) {
+        if (flags && flags != AServiceManager_AddServiceFlag::ADD_SERVICE_ALLOW_ISOLATED) {
+            ALOGE("Unknown bits set for AServiceManager_AddServiceFlag: 0x%x", flags);
+        }
         dumpFlags = IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT;
     }
+
+    return dumpFlags;
+}
+
+binder_exception_t AServiceManager_addServiceWithFlags(AIBinder* binder, const char* instance,
+                                                       const AServiceManager_AddServiceFlag flags) {
+    if (binder == nullptr || instance == nullptr) {
+        return EX_ILLEGAL_ARGUMENT;
+    }
+
+    const bool allowIsolated = flags & AServiceManager_AddServiceFlag::ADD_SERVICE_ALLOW_ISOLATED;
+    const int dumpFlags = readDumpFlags(flags);
+
+    sp<IServiceManager> sm = defaultServiceManager();
+
     status_t exception =
             sm->addService(String16(instance), binder->getBinder(), allowIsolated, dumpFlags);
 
@@ -101,16 +111,29 @@ AIBinder* AServiceManager_getService(const char* instance) {
     AIBinder_incStrong(ret.get());
     return ret.get();
 }
+
 binder_status_t AServiceManager_registerLazyService(AIBinder* binder, const char* instance) {
+    return AServiceManager_registerLazyServiceWithFlags(
+            binder, instance,
+            AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT);
+}
+
+binder_status_t AServiceManager_registerLazyServiceWithFlags(
+        AIBinder* binder, const char* instance, const AServiceManager_AddServiceFlag flags) {
     if (binder == nullptr || instance == nullptr) {
         return STATUS_UNEXPECTED_NULL;
     }
 
+    const bool allowIsolated = flags & AServiceManager_AddServiceFlag::ADD_SERVICE_ALLOW_ISOLATED;
+    const int dumpFlags = readDumpFlags(flags);
+
     auto serviceRegistrar = android::binder::LazyServiceRegistrar::getInstance();
-    status_t status = serviceRegistrar.registerService(binder->getBinder(), instance);
+    status_t status = serviceRegistrar.registerService(binder->getBinder(), instance, allowIsolated,
+                                                       dumpFlags);
 
     return PruneStatusT(status);
 }
+
 AIBinder* AServiceManager_waitForService(const char* instance) {
     if (instance == nullptr) {
         return nullptr;

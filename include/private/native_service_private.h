@@ -19,7 +19,7 @@
 
 #include <sys/cdefs.h>
 
-#include <native_service.h>
+#include <android/native_service.h>
 
 __BEGIN_DECLS
 

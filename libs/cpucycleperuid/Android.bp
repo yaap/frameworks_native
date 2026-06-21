@@ -1,0 +1,86 @@
+package {
+    default_applicable_licenses: ["frameworks_native_license"],
+}
+
+rust_bindgen {
+    name: "libcycleperuid_defs",
+    crate_name: "cycleperuid_defs",
+    wrapper_src: "wrapper.h",
+    source_stem: "bindings",
+    header_libs: ["bpf_prog_headers"],
+    enabled: false,
+    arch: {
+        x86_64: {
+            enabled: true,
+        },
+    },
+}
+
+rust_ffi_shared {
+    name: "libcycleperuid",
+    crate_name: "cycleperuid",
+    srcs: ["lib.rs"],
+    edition: "2021",
+    prefer_rlib: true,
+
+    rlibs: [
+        "libanyhow",
+        "libcycleperuid_defs",
+        "liblibbpf_rs",
+        "liblibbpf_sys",
+        "libbytemuck",
+        "liberrno",
+        "liblibc",
+        "liblog_rust",
+    ],
+
+    shared_libs: [
+        "libbase",
+        "libbpf_bcc",
+        "libbpf_minimal",
+        "liblog",
+    ],
+    export_include_dirs: ["."],
+    enabled: false,
+    arch: {
+        x86_64: {
+            enabled: true,
+        },
+    },
+    sanitize: {
+        // Temporary disable due to b/489459325
+        fuzzer: false,
+    },
+}
+
+rust_test {
+    name: "libcycleperuid_test",
+    team: "trendy_team_desktop_pnp",
+    srcs: ["lib.rs"],
+    edition: "2021",
+    rustlibs: [
+        "libanyhow",
+        "libcycleperuid_defs",
+        "liblibbpf_rs",
+        "liblibbpf_sys",
+        "libbytemuck",
+        "liberrno",
+        "liblibc",
+        "liblog_rust",
+        "libnamed_lock",
+    ],
+    shared_libs: [
+        "libbase",
+        "libbpf_bcc",
+        "libbpf_minimal",
+        "liblog",
+    ],
+    require_root: true,
+    test_suites: ["general-tests"],
+    enabled: false,
+    arch: {
+        x86_64: {
+            enabled: true,
+        },
+    },
+}

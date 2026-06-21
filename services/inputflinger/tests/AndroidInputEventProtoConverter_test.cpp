@@ -18,6 +18,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <linux/input-event-codes.h>
 
 #include "InputTracingBackendInterface.h"
 
@@ -101,8 +102,76 @@ public:
     MOCK_METHOD(MockProtoDispatchPointer*, add_dispatched_pointer, ());
 };
 
+class MockProtoEvdevDeviceIdentifier {
+public:
+    MOCK_METHOD(void, set_bustype, (uint32_t));
+    MOCK_METHOD(void, set_vendor, (uint32_t));
+    MOCK_METHOD(void, set_product, (uint32_t));
+    MOCK_METHOD(void, set_version, (uint32_t));
+};
+
+class MockProtoEvdevDeviceAbsInfo {
+public:
+    MOCK_METHOD(void, set_minimum, (int32_t));
+    MOCK_METHOD(void, set_maximum, (int32_t));
+    MOCK_METHOD(void, set_fuzz, (int32_t));
+    MOCK_METHOD(void, set_flat, (int32_t));
+    MOCK_METHOD(void, set_resolution, (int32_t));
+};
+
+class MockProtoEvdevDeviceEventTypeBitmaskEntry {
+public:
+    MOCK_METHOD(void, set_key, (uint32_t));
+    MOCK_METHOD(void, set_value, (const uint8_t*, size_t));
+};
+
+class MockProtoIntMapEntry {
+public:
+    MOCK_METHOD(void, set_key, (uint32_t));
+    MOCK_METHOD(void, set_value, (int32_t));
+};
+
+class MockProtoEvdevDeviceAxisMap {
+public:
+    MOCK_METHOD(MockProtoIntMapEntry*, add_axis_states, ());
+};
+
+class MockProtoEvdevDeviceSlotValuesMap {
+public:
+    MOCK_METHOD(MockProtoIntMapEntry*, add_slot_values, ());
+};
+
+template <typename T>
+class MockProtoMapEntry {
+public:
+    MOCK_METHOD(void, set_key, (uint32_t));
+    MOCK_METHOD(T*, set_value, ());
+};
+
+class MockProtoEvdevDevice {
+public:
+    MOCK_METHOD(void, set_device_num, (uint32_t));
+    MOCK_METHOD(void, set_name, (const std::string&));
+    MOCK_METHOD(void, set_phys, (const std::string&));
+    MOCK_METHOD(void, set_uniq, (const std::string&));
+    MOCK_METHOD(MockProtoEvdevDeviceIdentifier*, set_id, ());
+    MOCK_METHOD(void, set_ev_bitmask, (const uint8_t*, size_t));
+    MOCK_METHOD(void, set_prop_bitmask, (const uint8_t*, size_t));
+    MOCK_METHOD(MockProtoEvdevDeviceEventTypeBitmaskEntry*, add_event_type_bitmasks, ());
+    MOCK_METHOD(MockProtoMapEntry<MockProtoEvdevDeviceAbsInfo>*, add_absolute_axis_infos, ());
+    MOCK_METHOD(MockProtoMapEntry<MockProtoEvdevDeviceAxisMap>*, add_axis_states, ());
+    MOCK_METHOD(MockProtoMapEntry<MockProtoEvdevDeviceSlotValuesMap>*, add_abs_mt_states, ());
+};
+
+class MockProtoEvdevAddition {
+public:
+    MOCK_METHOD(MockProtoEvdevDevice*, set_device, ());
+};
+
 class MockProtoEvdev {
-    // Currently empty as it's not used in tests.
+public:
+    MOCK_METHOD(void, set_device_id, (uint32_t));
+    MOCK_METHOD(MockProtoEvdevAddition*, set_add_event, ());
 };
 
 using TestProtoConverter =
@@ -594,6 +663,117 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Key) {
                 set_resolved_flags(ftl::Flags<MotionFlag>(MotionFlag::WINDOW_IS_OBSCURED).get()));
 
     TestProtoConverter::toProtoWindowDispatchEvent(args, proto, /*isRedacted=*/true);
+}
+
+namespace {
+
+void checkBitmask(const uint8_t* data, size_t size, const std::vector<uint32_t>& expected) {
+    ASSERT_EQ(size, expected.size() * sizeof(uint32_t));
+    const uint8_t* expectedData = reinterpret_cast<const uint8_t*>(expected.data());
+    for (size_t i = 0; i < size; i++) {
+        ASSERT_EQ(data[i], expectedData[i]) << "at index " << i;
+    }
+}
+
+} // namespace
+
+TEST(AndroidInputEventProtoConverterTest, ToProtoEvdevDeviceAdditionEvent) {
+    input_trace::TracedEvdevDevice device{};
+    device.eventHubId = 1;
+    device.evdevNodeNumber = 2;
+    device.identifier.name = "test name";
+    device.identifier.location = "test location";
+    device.identifier.uniqueId = "test unique id";
+    device.identifier.bus = 3;
+    device.identifier.vendor = 4;
+    device.identifier.product = 5;
+    device.identifier.version = 6;
+    device.evBitmask = {(1 << EV_SYN) | (1 << EV_KEY) | (1 << EV_ABS)};
+    device.propBitmask = {1 << INPUT_PROP_POINTING_STICK};
+    device.eventTypeBitmasks[EV_KEY] = {0, 1 << (KEY_X - 32)};
+    device.absInfos[ABS_MT_POSITION_X] = {
+            .minValue = 10,
+            .maxValue = 11,
+            .flat = 12,
+            .fuzz = 13,
+            .resolution = 14,
+    };
+    device.axisStates[EV_KEY][KEY_X] = 1;
+    device.axisStates[EV_KEY][KEY_Y] = 0;
+    device.absMtStates[ABS_MT_POSITION_X] = {15, 0, 0, 0};
+
+    testing::StrictMock<MockProtoEvdev> proto;
+    testing::StrictMock<MockProtoEvdevAddition> addEvent;
+    testing::StrictMock<MockProtoEvdevDevice> evdevDevice;
+    testing::StrictMock<MockProtoEvdevDeviceIdentifier> identifier;
+    testing::StrictMock<MockProtoEvdevDeviceEventTypeBitmaskEntry> eventTypeBitmaskEntry;
+    testing::StrictMock<MockProtoMapEntry<MockProtoEvdevDeviceAbsInfo>> absInfoEntry;
+    testing::StrictMock<MockProtoEvdevDeviceAbsInfo> absInfo;
+    testing::StrictMock<MockProtoMapEntry<MockProtoEvdevDeviceAxisMap>> axisStatesEntry;
+    testing::StrictMock<MockProtoEvdevDeviceAxisMap> axisMap;
+    testing::StrictMock<MockProtoIntMapEntry> axisMapEntry;
+    testing::StrictMock<MockProtoMapEntry<MockProtoEvdevDeviceSlotValuesMap>> absMtStatesEntry;
+    testing::StrictMock<MockProtoEvdevDeviceSlotValuesMap> slotValuesMap;
+    testing::StrictMock<MockProtoIntMapEntry> slotValuesEntry;
+
+    EXPECT_CALL(proto, set_device_id(1));
+    EXPECT_CALL(proto, set_add_event()).WillOnce(Return(&addEvent));
+    EXPECT_CALL(addEvent, set_device()).WillOnce(Return(&evdevDevice));
+
+    EXPECT_CALL(evdevDevice, set_device_num(2));
+    EXPECT_CALL(evdevDevice, set_name("test name"));
+    EXPECT_CALL(evdevDevice, set_phys("test location"));
+    EXPECT_CALL(evdevDevice, set_uniq("test unique id"));
+    EXPECT_CALL(evdevDevice, set_id()).WillOnce(Return(&identifier));
+    EXPECT_CALL(identifier, set_bustype(3));
+    EXPECT_CALL(identifier, set_vendor(4));
+    EXPECT_CALL(identifier, set_product(5));
+    EXPECT_CALL(identifier, set_version(6));
+
+    EXPECT_CALL(evdevDevice,
+                set_ev_bitmask(testing::NotNull(), device.evBitmask.size() * sizeof(uint32_t)))
+            .WillOnce([&](const uint8_t* data, size_t size) {
+                checkBitmask(data, size, device.evBitmask);
+            });
+    EXPECT_CALL(evdevDevice,
+                set_prop_bitmask(testing::NotNull(), device.propBitmask.size() * sizeof(uint32_t)))
+            .WillOnce([&](const uint8_t* data, size_t size) {
+                checkBitmask(data, size, device.propBitmask);
+            });
+
+    EXPECT_CALL(evdevDevice, add_event_type_bitmasks()).WillOnce(Return(&eventTypeBitmaskEntry));
+    EXPECT_CALL(eventTypeBitmaskEntry, set_key(EV_KEY));
+    EXPECT_CALL(eventTypeBitmaskEntry,
+                set_value(testing::NotNull(),
+                          device.eventTypeBitmasks[EV_KEY].size() * sizeof(uint32_t)))
+            .WillOnce([&](const uint8_t* data, size_t size) {
+                checkBitmask(data, size, device.eventTypeBitmasks[EV_KEY]);
+            });
+
+    EXPECT_CALL(evdevDevice, add_absolute_axis_infos()).WillOnce(Return(&absInfoEntry));
+    EXPECT_CALL(absInfoEntry, set_key(ABS_MT_POSITION_X));
+    EXPECT_CALL(absInfoEntry, set_value()).WillOnce(Return(&absInfo));
+    EXPECT_CALL(absInfo, set_minimum(10));
+    EXPECT_CALL(absInfo, set_maximum(11));
+    EXPECT_CALL(absInfo, set_flat(12));
+    EXPECT_CALL(absInfo, set_fuzz(13));
+    EXPECT_CALL(absInfo, set_resolution(14));
+
+    EXPECT_CALL(evdevDevice, add_axis_states()).WillOnce(Return(&axisStatesEntry));
+    EXPECT_CALL(axisStatesEntry, set_key(EV_KEY));
+    EXPECT_CALL(axisStatesEntry, set_value()).WillOnce(Return(&axisMap));
+    EXPECT_CALL(axisMap, add_axis_states()).WillOnce(Return(&axisMapEntry));
+    EXPECT_CALL(axisMapEntry, set_key(KEY_X));
+    EXPECT_CALL(axisMapEntry, set_value(1));
+
+    EXPECT_CALL(evdevDevice, add_abs_mt_states()).WillOnce(Return(&absMtStatesEntry));
+    EXPECT_CALL(absMtStatesEntry, set_key(ABS_MT_POSITION_X));
+    EXPECT_CALL(absMtStatesEntry, set_value()).WillOnce(Return(&slotValuesMap));
+    EXPECT_CALL(slotValuesMap, add_slot_values()).WillOnce(Return(&slotValuesEntry));
+    EXPECT_CALL(slotValuesEntry, set_key(0));
+    EXPECT_CALL(slotValuesEntry, set_value(15));
+
+    TestProtoConverter::toProtoEvdevDeviceAdditionEvent(device, proto);
 }
 
 } // namespace

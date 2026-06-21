@@ -133,7 +133,7 @@ fn print_device_description(
                 writeln!(output)?;
             }
         }
-        if data.len() % 8 != 0 {
+        if !data.len().is_multiple_of(8) {
             for _ in (data.len() % 8)..8 {
                 write!(output, " 00")?;
             }

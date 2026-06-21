@@ -71,6 +71,22 @@ public:
             return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE, data, &reply);
         }
     }
+
+    status_t registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo& info) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        SAFE_PARCEL(info.writeToParcel, &data);
+        return remote()->transact(BnSurfaceComposer::REGISTER_GRAPHIC_BUFFERS, data, &reply,
+                                  IBinder::FLAG_ONEWAY);
+    }
+
+    status_t unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo& info) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        SAFE_PARCEL(info.writeToParcel, &data);
+        return remote()->transact(BnSurfaceComposer::UNREGISTER_GRAPHIC_BUFFERS, data, &reply,
+                                  IBinder::FLAG_ONEWAY);
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -105,6 +121,18 @@ status_t BnSurfaceComposer::onTransact(uint32_t code, const Parcel& data, Parcel
             SAFE_PARCEL(reply->writeInt32, policy.policy);
             SAFE_PARCEL(reply->writeInt32, policy.priority);
             return NO_ERROR;
+        }
+        case REGISTER_GRAPHIC_BUFFERS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            gui::GraphicBuffersRegisterInfo info;
+            SAFE_PARCEL(info.readFromParcel, &data);
+            return registerGraphicBuffers(info);
+        }
+        case UNREGISTER_GRAPHIC_BUFFERS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            gui::GraphicBuffersUnregisterInfo info;
+            SAFE_PARCEL(info.readFromParcel, &data);
+            return unregisterGraphicBuffers(info);
         }
 
         default: {

@@ -57,8 +57,8 @@ class ReleaseCallbackId : public Parcelable {
 public:
     static const ReleaseCallbackId INVALID_ID;
 
-    uint64_t bufferId;
-    uint64_t framenumber;
+    uint64_t bufferId = 0;
+    uint64_t framenumber = 0;
     ReleaseCallbackId() {}
     ReleaseCallbackId(uint64_t bufferId, uint64_t framenumber)
           : bufferId(bufferId), framenumber(framenumber) {}
@@ -78,8 +78,10 @@ public:
 };
 
 struct ReleaseBufferCallbackIdHash {
-    std::size_t operator()(const ReleaseCallbackId& key) const {
-        return std::hash<uint64_t>()(key.bufferId);
+    std::size_t operator()(const ReleaseCallbackId& callbackId) const {
+        size_t h1 = std::hash<uint64_t>{}(callbackId.bufferId);
+        size_t h2 = std::hash<uint64_t>{}(callbackId.framenumber);
+        return h1 ^ (h2 << 1);
     }
 };
 
@@ -116,8 +118,8 @@ public:
     SurfaceStats(const sp<IBinder>& sc, std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence,
                  const sp<Fence>& prevReleaseFence, std::optional<uint32_t> hint,
                  uint32_t currentMaxAcquiredBuffersCount,
-                 std::optional<gui::CornerRadii> cornerRadii,
-                 FrameEventHistoryStats frameEventStats,
+                 const std::optional<gui::CornerRadii>& cornerRadii,
+                 const FrameEventHistoryStats& frameEventStats,
                  ReleaseCallbackId previousReleaseCallbackId)
           : surfaceControl(sc),
             acquireTimeOrFence(std::move(acquireTimeOrFence)),
@@ -126,7 +128,7 @@ public:
             currentMaxAcquiredBufferCount(currentMaxAcquiredBuffersCount),
             cornerRadii(cornerRadii),
             eventStats(frameEventStats),
-            previousReleaseCallbackId(previousReleaseCallbackId) {}
+            previousReleaseCallbackId(std::move(previousReleaseCallbackId)) {}
 
     sp<IBinder> surfaceControl;
     std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence = -1;
@@ -148,8 +150,9 @@ public:
     TransactionStats(const std::unordered_set<CallbackId, CallbackIdHash>& ids)
           : callbackIds(ids.begin(), ids.end()) {}
     TransactionStats(const std::vector<CallbackId>& ids, nsecs_t latch, const sp<Fence>& present,
-                     const std::vector<SurfaceStats>& surfaces)
-          : callbackIds(ids), latchTime(latch), presentFence(present), surfaceStats(surfaces) {}
+                     std::vector<SurfaceStats> surfaces)
+          : callbackIds(ids), latchTime(latch), presentFence(present),
+            surfaceStats(std::move(surfaces)) {}
 
     std::vector<CallbackId> callbackIds;
     nsecs_t latchTime = -1;

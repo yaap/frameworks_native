@@ -32,12 +32,9 @@
 #include <string>
 #include <unistd.h>
 
-#include <com_android_rss_hwm_reset.h>
 #include <android-base/file.h>
 #include <android-base/stringprintf.h>
 #include <log/log.h>
-
-using ::com::android::rss_hwm_reset::enable_reset_dmabuf_rss_hwm;
 
 namespace {
 enum DmabufRssHwmState {
@@ -49,8 +46,6 @@ enum DmabufRssHwmState {
 // Resets dmabuf RSS HWM counter for the selected process by writing 0 to
 // /proc/PID/dmabuf_rss_hwm.
 void reset_dmabuf_rss_hwm(const char* pid) {
-    if (!enable_reset_dmabuf_rss_hwm()) return;
-
     // If kernel does not support dmabuf_rss_hwm return immediately
     static DmabufRssHwmState dmabuf_rss_hwm_state = UNKNOWN;
 

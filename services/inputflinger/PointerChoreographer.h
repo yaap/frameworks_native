@@ -52,11 +52,6 @@ struct ConstructorDelegate {
  */
 class PointerChoreographerInterface : public InputListenerInterface {
 public:
-    /**
-     * Set the display that pointers, like the mouse cursor and drawing tablets,
-     * should be drawn on.
-     */
-    virtual void setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) = 0;
     virtual void setDisplayViewports(const std::vector<DisplayViewport>& viewports) = 0;
     virtual std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId = ui::LogicalDisplayId::INVALID) = 0;
@@ -81,7 +76,17 @@ public:
      */
     virtual std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
             ui::LogicalDisplayId displayId) = 0;
+    /**
+     * Sets whether to show the positions of the touches on all displays (false by default).
+     */
     virtual void setShowTouchesEnabled(bool enabled) = 0;
+    /**
+     * Sets whether to show the positions of the touches on the given display, even if we currently
+     * don't show touches on all displays (i.e., if setShowTouchesEnabled(true) was not called).
+     *
+     * No-op if no display with the given id exists.
+     */
+    virtual void setForceShowTouchesOnDisplay(ui::LogicalDisplayId displayId, bool enabled) = 0;
     virtual void setStylusPointerIconEnabled(bool enabled) = 0;
     /**
      * Set the icon that is shown for the given pointer. The request may fail in some cases, such
@@ -123,7 +128,6 @@ public:
                                   PointerChoreographerPolicyInterface&);
     ~PointerChoreographer() override;
 
-    void setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) override;
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports) override;
     std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId) override;
@@ -131,6 +135,7 @@ public:
     std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
             ui::LogicalDisplayId displayId) override;
     void setShowTouchesEnabled(bool enabled) override;
+    void setForceShowTouchesOnDisplay(ui::LogicalDisplayId displayId, bool enabled) override;
     void setStylusPointerIconEnabled(bool enabled) override;
     bool setPointerIcon(std::variant<std::unique_ptr<SpriteIcon>, PointerIconStyle> icon,
                         ui::LogicalDisplayId displayId, DeviceId deviceId) override;
@@ -172,6 +177,7 @@ private:
     ensureMouseControllerLocked(ui::LogicalDisplayId associatedDisplayId) REQUIRES(getLock());
     InputDeviceInfo* findInputDeviceLocked(DeviceId deviceId) REQUIRES(getLock());
     bool canUnfadeOnDisplay(ui::LogicalDisplayId displayId) REQUIRES(getLock());
+    bool shouldShowTouchesOnDisplay(ui::LogicalDisplayId displayId) REQUIRES(getLock());
 
     void fadeMouseCursorOnKeyPress(const NotifyKeyArgs& args);
     NotifyMotionArgs processMotion(const NotifyMotionArgs& args);
@@ -263,6 +269,7 @@ private:
     std::set<DeviceId> mMouseDevices GUARDED_BY(getLock());
     std::vector<DisplayViewport> mViewports GUARDED_BY(getLock());
     bool mShowTouchesEnabled GUARDED_BY(getLock());
+    std::set<ui::LogicalDisplayId> mDisplaysWithShowTouchesForceEnabled GUARDED_BY(getLock());
     bool mStylusPointerIconEnabled GUARDED_BY(getLock());
     bool mPointerMotionFilterEnabled GUARDED_BY(getLock());
     std::set<ui::LogicalDisplayId /*displayId*/> mDisplaysWithPointersHidden;

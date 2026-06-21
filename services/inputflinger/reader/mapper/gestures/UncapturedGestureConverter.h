@@ -101,7 +101,6 @@ private:
                                     uint32_t pointerCount, const PointerCoords* pointerCoords);
 
     void enableTapToClick(nsecs_t when);
-    bool mIsHoverCancelled{false};
     nsecs_t mWhenToEnableTapToClick{0};
 
     const DeviceId mDeviceId;

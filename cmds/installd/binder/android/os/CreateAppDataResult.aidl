@@ -20,6 +20,8 @@ package android.os;
 parcelable CreateAppDataResult {
     long ceDataInode;
     long deDataInode;
+    long pccCeDataInode;
+    long pccDeDataInode;
     int exceptionCode;
     @utf8InCpp String exceptionMessage;
 }

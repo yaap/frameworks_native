@@ -105,9 +105,8 @@ RpcServerTrusty::RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::stri
 
 void RpcServerTrusty::setPerSessionRootObject(
         std::function<sp<IBinder>(wp<RpcSession> session, const void* peer, size_t peer_len)>&&
-                create_session) {
-    auto wrap_create_session = [create_session =
-                                        std::move(create_session)](wp<RpcSession> session,
+                create_root) {
+    auto wrap_create_root = [create_root = std::move(create_root)](wp<RpcSession> session,
                                                                    const trusty_peer_id& peer,
                                                                    size_t peer_len) -> sp<IBinder> {
         if (peer.kind != TRUSTY_PEER_ID_KIND_UUID) {
@@ -124,18 +123,18 @@ void RpcServerTrusty::setPerSessionRootObject(
         }
 
         const auto& peer_uuid = reinterpret_cast<const trusty_peer_id_uuid&>(peer);
-        return create_session(std::move(session), &peer_uuid.id, sizeof(peer_uuid.id));
+        return create_root(std::move(session), &peer_uuid.id, sizeof(peer_uuid.id));
     };
-    setPerSessionRootObjectInternal(mRpcServer.get(), std::move(wrap_create_session));
+    setPerSessionRootObjectInternal(mRpcServer.get(), std::move(wrap_create_root));
 }
 
 void RpcServerTrusty::setPerSessionRootObjectInternal(
         RpcServer* server,
         std::function<sp<IBinder>(wp<RpcSession> session, const trusty_peer_id& peer,
-                                  size_t peer_len)>&& create_session) {
-    auto wrap_create_session =
-            [create_session = std::move(create_session)](wp<RpcSession> session, const void* peer,
-                                                         size_t peer_len) -> sp<IBinder> {
+                                  size_t peer_len)>&& create_root) {
+    auto wrap_create_root = [create_root = std::move(create_root)](wp<RpcSession> session,
+                                                                   const void* peer,
+                                                                   size_t peer_len) -> sp<IBinder> {
         if (peer_len > sizeof(trusty_peer_id_storage)) {
             ALOGE("Creating binder root object, but peer ID (%zu bytes) too "
                   "big to fit in trusty_peer_id_storage (%zu bytes)",
@@ -147,10 +146,10 @@ void RpcServerTrusty::setPerSessionRootObjectInternal(
         trusty_peer_id_storage peer_obj = TRUSTY_PEER_ID_STORAGE_INITIAL_VALUE();
         std::memcpy(&peer_obj, peer, peer_len);
 
-        return create_session(std::move(session), reinterpret_cast<const trusty_peer_id&>(peer_obj),
-                              peer_len);
+        return create_root(std::move(session), reinterpret_cast<const trusty_peer_id&>(peer_obj),
+                           peer_len);
     };
-    server->setPerSessionRootObject(std::move(wrap_create_session));
+    server->setPerSessionRootObject(std::move(wrap_create_root));
 }
 
 status_t RpcServerTrusty::queueConnect(unique_fd chan, const trusty_peer_id& peer,
@@ -268,7 +267,7 @@ int RpcServerTrusty::handleMessageInternal(void* ctx) {
     auto& session = channelContext->session;
     auto& connection = channelContext->connection;
     status_t status =
-            session->state()->drainCommands(connection, session, RpcState::CommandType::ANY);
+            session->state()->drainCommands(*connection, *session, RpcState::CommandType::ANY);
     if (status != OK) {
         LOG_RPC_DETAIL("Binder connection thread closing w/ status %s",
                        statusToString(status).c_str());

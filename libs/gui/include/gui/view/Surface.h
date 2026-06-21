@@ -60,11 +60,11 @@ class Surface : public Parcelable {
         return graphicBufferProducer == other.graphicBufferProducer;
     }
     bool operator!=(const Surface& other) const { return !(*this == other); }
-    bool operator==(const sp<android::Surface> other) const {
+    bool operator==(const sp<android::Surface>& other) const {
         if (other == nullptr) return graphicBufferProducer == nullptr;
         return graphicBufferProducer == other->getIGraphicBufferProducer();
     }
-    bool operator!=(const sp<android::Surface> other) const { return !(*this == other); }
+    bool operator!=(const sp<android::Surface>& other) const { return !(*this == other); }
     bool operator<(const Surface& other) const {
         return graphicBufferProducer < other.graphicBufferProducer;
     }

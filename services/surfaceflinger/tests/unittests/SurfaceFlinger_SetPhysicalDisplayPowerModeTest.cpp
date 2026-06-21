@@ -75,14 +75,9 @@ struct DispSyncIsSupportedVariant {
                     onDisplayModeChanged(DisplayModeFps(Fps::fromPeriodNsecs(DEFAULT_VSYNC_PERIOD)),
                                          false))
                 .Times(1);
-        if (FlagManager::getInstance().reset_model_flushes_fence()) {
-            EXPECT_CALL(static_cast<mock::VsyncController&>(vsyncSchedule->getController()),
-                        resetModel())
-                    .Times(1);
-        } else {
-            EXPECT_CALL(static_cast<mock::VSyncTracker&>(vsyncSchedule->getTracker()), resetModel())
-                    .Times(1);
-        }
+        EXPECT_CALL(static_cast<mock::VsyncController&>(vsyncSchedule->getController()),
+                    resetModel())
+                .Times(1);
     }
 };
 
@@ -330,11 +325,6 @@ template <typename Case>
 void SetPhysicalDisplayPowerModeTest::transitionDisplayCommon() {
     // --------------------------------------------------------------------
     // Preconditions
-
-    SET_FLAG_FOR_TEST(android::companion::virtualdevice::flags::correct_virtual_display_power_state,
-                      true);
-    SET_FLAG_FOR_TEST(flags::disable_synthetic_vsync_for_performance, true);
-    SET_FLAG_FOR_TEST(flags::pacesetter_selection, true);
 
     const auto displayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
     ASSERT_TRUE(displayIdOpt);

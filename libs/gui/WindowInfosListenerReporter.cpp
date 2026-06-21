@@ -97,7 +97,7 @@ binder::Status WindowInfosListenerReporter::onWindowInfosChanged(
     if (!publisher) {
         return binder::Status::ok();
     }
-    for (auto listener : listeners) {
+    for (const auto& listener : listeners) {
         listener->onWindowInfosChanged(update);
     }
     publisher->ackWindowInfosReceived(update.vsyncId, id);

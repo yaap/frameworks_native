@@ -386,7 +386,6 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
             currentLayerIter->updateAge(now);
             merged.emplace_back(*currentLayerIter);
             ++incomingLayerIter;
-          priorBlurLayer = currentLayerIter->getBlurLayer();
         }
         ++currentLayerIter;
     }
@@ -441,8 +440,7 @@ std::vector<Flattener::Run> Flattener::findCandidateRuns(time_point now) const {
             // that there is exactly one layer. Blur radius currently is part of layer stack
             // geometry, so we're also guaranteed that the background blur radius hasn't changed for
             // at least as long as this new inactive cached set.
-            if (runHasFirstLayer && layerHasBlur &&
-                currentSet->getFirstLayer().getBackgroundBlurRadius() > 0) {
+            if (runHasFirstLayer && layerHasBlur && currentSet->hasBlurBehind()) {
                 builder.setBlurringLayer(&(*currentSet));
             }
             if (auto run = builder.validateAndBuild(); run) {

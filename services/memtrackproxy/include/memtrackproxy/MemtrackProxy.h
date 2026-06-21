@@ -21,20 +21,15 @@
 #include <aidl/android/hardware/memtrack/IMemtrack.h>
 #include <aidl/android/hardware/memtrack/MemtrackRecord.h>
 #include <aidl/android/hardware/memtrack/MemtrackType.h>
-#include <android/hardware/memtrack/1.0/IMemtrack.h>
 
 using ::android::sp;
 
-namespace V1_0_hidl = ::android::hardware::memtrack::V1_0;
 namespace V1_aidl = ::aidl::android::hardware::memtrack;
 
 namespace aidl {
 namespace android {
 namespace hardware {
 namespace memtrack {
-
-__attribute__((warn_unused_result)) bool translate(const V1_0_hidl::MemtrackRecord& in,
-                                                   V1_aidl::MemtrackRecord* out);
 
 class MemtrackProxy : public BnMemtrack {
 public:
@@ -44,12 +39,10 @@ public:
     ndk::ScopedAStatus getGpuDeviceInfo(std::vector<DeviceInfo>* _aidl_return) override;
 
 private:
-    static sp<V1_0_hidl::IMemtrack> MemtrackHidlInstance();
     static std::shared_ptr<V1_aidl::IMemtrack> MemtrackAidlInstance();
     static bool CheckUid(uid_t calling_uid);
     static bool CheckPid(pid_t calling_pid, pid_t request_pid);
 
-    sp<V1_0_hidl::IMemtrack> memtrack_hidl_instance_;
     std::shared_ptr<V1_aidl::IMemtrack> memtrack_aidl_instance_;
     bool is_get_memory_supported_;
 };

@@ -544,14 +544,14 @@ using ExternalDisplayWithIdentificationVariant = PhysicalDisplayVariant<
         1920, 1280>;
 using ExternalDisplayVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
-                                                HasIdentificationData::FALSE, Secure::TRUE>,
+                                                HasIdentificationData::FALSE, Secure::FALSE>,
                                1920, 1280>;
 using ExternalDisplayNonSecureVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
                                                 HasIdentificationData::FALSE, Secure::FALSE>,
                                1920, 1280>;
 
-using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay<Secure::TRUE>, 1600, 1200>;
+using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay<Secure::FALSE>, 1600, 1200>;
 using TertiaryDisplayNonSecureVariant =
         PhysicalDisplayVariant<TertiaryDisplay<Secure::FALSE>, 1600, 1200>;
 
@@ -746,7 +746,7 @@ using SimpleExternalDisplayCase =
              HdrNotSupportedVariant<ExternalDisplayVariant>,
              NoPerFrameMetadataSupportVariant<ExternalDisplayVariant>>;
 using SimpleExternalDisplayNonSecureCase =
-        Case<ExternalDisplayVariant, WideColorNotSupportedVariant<ExternalDisplayNonSecureVariant>,
+        Case<ExternalDisplayNonSecureVariant, WideColorNotSupportedVariant<ExternalDisplayNonSecureVariant>,
              HdrNotSupportedVariant<ExternalDisplayNonSecureVariant>,
              NoPerFrameMetadataSupportVariant<ExternalDisplayNonSecureVariant>>;
 using SimpleTertiaryDisplayCase =

@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-#include "aidl/android/hardware/graphics/common/Dataspace.h"
+#include <aidl/android/hardware/graphics/common/PixelFormat.h>
 #include <ui/PublicFormat.h>
-
+#include "aidl/android/hardware/graphics/common/Dataspace.h"
 
 // ----------------------------------------------------------------------------
 namespace android {
 // ----------------------------------------------------------------------------
 
 using ::aidl::android::hardware::graphics::common::Dataspace;
-
+using ::aidl::android::hardware::graphics::common::PixelFormat;
 int mapPublicFormatToHalFormat(PublicFormat f) {
     switch (f) {
         case PublicFormat::JPEG:
@@ -107,6 +107,7 @@ PublicFormat mapHalFormatDataspaceToPublicFormat(int format, android_dataspace d
         case HAL_PIXEL_FORMAT_RGB_565:
         case HAL_PIXEL_FORMAT_Y8:
         case HAL_PIXEL_FORMAT_RAW12:
+        case static_cast<int>(PixelFormat::RAW14):
         case HAL_PIXEL_FORMAT_YCbCr_420_888:
         case HAL_PIXEL_FORMAT_YV12:
         case HAL_PIXEL_FORMAT_YCBCR_P010:

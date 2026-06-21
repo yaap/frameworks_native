@@ -45,7 +45,7 @@ APersistableBundle* _Nullable APersistableBundle_dup(const APersistableBundle* p
 }
 
 void APersistableBundle_delete(APersistableBundle* pBundle) {
-    free(pBundle);
+    delete pBundle;
 }
 
 bool APersistableBundle_isEqual(const APersistableBundle* lhs, const APersistableBundle* rhs) {
@@ -110,6 +110,12 @@ void APersistableBundle_putBooleanVector(APersistableBundle* pBundle, const char
         newVec[i] = vec[i];
     }
     pBundle->mPBundle.putBooleanVector(android::String16(key), newVec);
+}
+void APersistableBundle_putByteVector(APersistableBundle* pBundle, const char* key,
+                                        const uint8_t* vec, int32_t num) {
+    LOG_ALWAYS_FATAL_IF(num < 0, "Negative number of elements is invalid.");
+    std::vector<uint8_t> newVec(vec, vec + num);
+    pBundle->mPBundle.putByteVector(android::String16(key), newVec);
 }
 void APersistableBundle_putIntVector(APersistableBundle* pBundle, const char* key,
                                      const int32_t* vec, int32_t num) {
@@ -184,6 +190,13 @@ int32_t APersistableBundle_getBooleanVector(const APersistableBundle* pBundle, c
     bool ret = pBundle->mPBundle.getBooleanVector(android::String16(key), &newVec);
     if (!ret) return APERSISTABLEBUNDLE_KEY_NOT_FOUND;
     return getVecInternal<bool>(newVec, buffer, bufferSizeBytes);
+}
+int32_t APersistableBundle_getByteVector(const APersistableBundle* pBundle, const char* key,
+                                           uint8_t* buffer, int32_t bufferSizeBytes) {
+    std::vector<uint8_t> newVec;
+    bool ret = pBundle->mPBundle.getByteVector(android::String16(key), &newVec);
+    if (!ret) return APERSISTABLEBUNDLE_KEY_NOT_FOUND;
+    return getVecInternal<uint8_t>(newVec, buffer, bufferSizeBytes);
 }
 int32_t APersistableBundle_getIntVector(const APersistableBundle* pBundle, const char* key,
                                         int32_t* buffer, int32_t bufferSizeBytes) {
@@ -271,6 +284,14 @@ int32_t APersistableBundle_getBooleanVectorKeys(const APersistableBundle* pBundl
                                                 APersistableBundle_stringAllocator stringAllocator,
                                                 void* context) {
     std::set<android::String16> ret = pBundle->mPBundle.getBooleanVectorKeys();
+    return getStringsInternal<std::set<android::String16>>(ret, outKeys, bufferSizeBytes,
+                                                           stringAllocator, context);
+}
+int32_t APersistableBundle_getByteVectorKeys(const APersistableBundle* pBundle, char** outKeys,
+                                               int32_t bufferSizeBytes,
+                                               APersistableBundle_stringAllocator stringAllocator,
+                                               void* context) {
+    std::set<android::String16> ret = pBundle->mPBundle.getByteVectorKeys();
     return getStringsInternal<std::set<android::String16>>(ret, outKeys, bufferSizeBytes,
                                                            stringAllocator, context);
 }

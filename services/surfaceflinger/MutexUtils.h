@@ -21,6 +21,7 @@
 
 namespace android {
 
+template <typename Mutex>
 struct SCOPED_CAPABILITY ConditionalLock {
     ConditionalLock(Mutex& mutex, bool lock) ACQUIRE(mutex) : mutex(mutex), lock(lock) {
         if (lock) mutex.lock();

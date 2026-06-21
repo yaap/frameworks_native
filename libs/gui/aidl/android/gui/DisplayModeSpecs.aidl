@@ -53,6 +53,30 @@ parcelable DisplayModeSpecs {
     }
 
     /**
+     * The display to which the specs should apply.
+     */
+    IBinder displayToken;
+
+    /**
+     * Defines the work duration that should be used by SurfaceFlinger's scheduler.
+     */
+    parcelable WorkDuration {
+        /**
+         * The minimum duration that SurfaceFlinger is scheduled ahead to work on a frame.
+         */
+        long minSfDurationNanos;
+        /**
+         * The maximum duration that SurfaceFlinger is scheduled ahead to work on a frame.
+         * Also known as early SF duration.
+         */
+        long maxSfDurationNanos;
+        /**
+         * The fixed amount of time that client is scheduled ahead to work on a frame.
+         */
+        long appDurationNanos;
+    }
+
+    /**
      * Base mode ID. This is what system defaults to for all other settings, or
      * if the refresh rate range is not available.
      */
@@ -62,7 +86,6 @@ parcelable DisplayModeSpecs {
      * If true this will allow switching between modes in different display configuration
      * groups. This way the user may see visual interruptions when the display mode changes.
      */
-
     boolean allowGroupSwitching;
 
     /**
@@ -92,4 +115,9 @@ parcelable DisplayModeSpecs {
      * -1 refers to the current conditions requires no timeout
      */
     @nullable IdleScreenRefreshRateConfig idleScreenRefreshRateConfig;
+
+    /**
+    * The work duration configuration suggested by the Display Manager.
+    */
+    @nullable WorkDuration workDuration;
 }

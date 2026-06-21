@@ -105,6 +105,7 @@ public:
             const std::vector<int32_t>& dynamicSensorHandlesRemoved) override;
 
     void setUidStateForConnection(void* ident, SensorService::UidState state);
+    void setFrozenStateForConnection(void* ident, bool frozen);
 
     bool isReconnecting() const { return mHalWrapper->mReconnecting; }
 
@@ -200,9 +201,11 @@ private:
     enum DisabledReason : uint8_t {
         // UID becomes idle (e.g. app goes to background).
         DISABLED_REASON_UID_IDLE = 0,
-
         // Sensors are restricted for all clients.
-        DISABLED_REASON_SERVICE_RESTRICTED,
+        DISABLED_REASON_SERVICE_RESTRICTED = 1,
+        // System moved the pid that makes this request to frozen.
+        DISABLED_REASON_PID_FROZEN = 2,
+
         DISABLED_REASON_MAX,
     };
 
@@ -213,6 +216,7 @@ private:
 
     void addDisabledReasonForIdentLocked(void* ident, DisabledReason reason);
     void removeDisabledReasonForIdentLocked(void* ident, DisabledReason reason);
+    void setConnectionDisabledStatusLocked(void* ident, DisabledReason reason, bool disabled);
 
     SensorDevice();
     bool connectHalService();
@@ -233,7 +237,7 @@ private:
     bool isClientDisabledLocked(void* ident) const;
     std::vector<void*> getDisabledClientsLocked() const;
 
-    bool clientHasNoAccessLocked(void* ident) const;
+    void updateSensorActivationsForIdentLocked(void* ident);
 
     float getResolutionForSensor(int sensorHandle);
 

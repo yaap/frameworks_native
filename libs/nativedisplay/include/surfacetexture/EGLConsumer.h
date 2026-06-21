@@ -18,6 +18,8 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <ftl/small_map.h>
+#include <gui/BufferItem.h>
 #include <gui/BufferQueueDefs.h>
 #include <ui/FenceTime.h>
 #include <ui/GraphicBuffer.h>
@@ -88,23 +90,16 @@ public:
     status_t attachToContext(uint32_t tex, SurfaceTexture& st);
 
     /**
-     * onAcquireBufferLocked amends the ConsumerBase method to update the
-     * mEglSlots array in addition to the ConsumerBase behavior.
+     * onAcquireBufferLocked updates the mEglSlots map with the buffer item.
      */
-    void onAcquireBufferLocked(BufferItem* item, SurfaceTexture& st);
-
-    /**
-     * onReleaseBufferLocked amends the ConsumerBase method to update the
-     * mEglSlots array in addition to the ConsumerBase.
-     */
-    void onReleaseBufferLocked(int slot);
+    void onAcquireBufferLocked(BufferItem* item);
 
     /**
      * onFreeBufferLocked frees up the given buffer slot. If the slot has been
      * initialized this will release the reference to the GraphicBuffer in that
      * slot and destroy the EGLImage in that slot.  Otherwise it has no effect.
      */
-    void onFreeBufferLocked(int slotIndex);
+    void onFreeBufferLocked(const SurfaceTexture& st, const sp<GraphicBuffer>& buffer);
 
     /**
      * onAbandonLocked amends the ConsumerBase method to clear
@@ -114,10 +109,9 @@ public:
 
 protected:
     struct PendingRelease {
-        PendingRelease() : isPending(false), currentTexture(-1), graphicBuffer() {}
+        PendingRelease() : isPending(false), graphicBuffer() {}
 
         bool isPending;
-        int currentTexture;
         sp<GraphicBuffer> graphicBuffer;
     };
 
@@ -240,33 +234,19 @@ protected:
     sp<EglImage> mCurrentTextureImage;
 
     /**
-     * EGLSlot contains the information and object references that
+     * EglData contains the information and object references that
      * EGLConsumer maintains about a BufferQueue buffer slot.
      */
-    struct EglSlot {
-#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-
-        EglSlot() : mEglFence(EGL_NO_SYNC_KHR) {}
-#endif
+    struct EglData {
         /**
          * mEglImage is the EGLImage created from mGraphicBuffer.
          */
         sp<EglImage> mEglImage;
-
-#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-        /**
-         * mFence is the EGL sync object that must signal before the buffer
-         * associated with this buffer slot may be dequeued. It is initialized
-         * to EGL_NO_SYNC_KHR when the buffer is created and (optionally, based
-         * on a compile-time option) set to a new sync object in updateTexImage.
-         */
-        EGLSyncKHR mEglFence;
-#endif
     };
 
     /**
      * mEglDisplay is the EGLDisplay with which this EGLConsumer is currently
-     * associated.  It is intialized to EGL_NO_DISPLAY and gets set to the
+     * associated.  It is initialized to EGL_NO_DISPLAY and gets set to the
      * current display when updateTexImage is called for the first time and when
      * attachToContext is called.
      */
@@ -289,7 +269,7 @@ protected:
      * be replaced if the requested buffer usage or geometry differs from that
      * of the buffer allocated to a slot.
      */
-    EglSlot mEglSlots[BufferQueueDefs::NUM_BUFFER_SLOTS];
+    ftl::SmallMap<sp<GraphicBuffer>, EglData, BufferQueueDefs::NUM_BUFFER_SLOTS> mEglData;
 
     /**
      * protects static initialization

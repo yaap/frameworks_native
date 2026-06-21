@@ -27,14 +27,17 @@ use crate::parcel::{
 };
 use crate::sys;
 
-use std::cmp::Ordering;
-use std::convert::TryInto;
-use std::ffi::{c_void, CString};
-use std::fmt;
-use std::mem;
+use alloc::sync::Arc;
+use core::cmp::Ordering;
+use core::ffi::c_void;
+use core::fmt;
+use core::mem;
+use core::ptr;
+
+#[cfg(feature = "std")]
+use std::ffi::CString;
+#[cfg(feature = "std")]
 use std::os::fd::AsRawFd;
-use std::ptr;
-use std::sync::Arc;
 
 /// A strong reference to a Binder remote object.
 ///
@@ -125,6 +128,51 @@ impl SpIBinder {
     /// Creates a new weak reference to this binder object.
     pub fn downgrade(&mut self) -> WpIBinder {
         WpIBinder::new(self)
+    }
+
+    /// Returns true if this binder object requires a VINTF declaration.
+    #[cfg(not(android_ndk))]
+    pub fn requires_vintf_declaration(&self) -> bool {
+        #[cfg(feature = "android_ndk_compat_symbols")]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            binder_rs_ndk_compat::requires_vintf_declaration(self.as_raw())
+        }
+        #[cfg(not(feature = "android_ndk_compat_symbols"))]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            sys::AIBinder_requiresVintfDeclaration(self.as_raw())
+        }
+    }
+
+    /// Returns true if this binder object is vendor stable.
+    #[cfg(not(android_ndk))]
+    pub fn is_vendor_stable(&self) -> bool {
+        #[cfg(feature = "android_ndk_compat_symbols")]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            binder_rs_ndk_compat::is_vendor_stable(self.as_raw())
+        }
+        #[cfg(not(feature = "android_ndk_compat_symbols"))]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            sys::AIBinder_isVendorStable(self.as_raw())
+        }
+    }
+
+    /// Returns true if this binder object is system stable.
+    #[cfg(not(android_ndk))]
+    pub fn is_system_stable(&self) -> bool {
+        #[cfg(feature = "android_ndk_compat_symbols")]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            binder_rs_ndk_compat::is_system_stable(self.as_raw())
+        }
+        #[cfg(not(feature = "android_ndk_compat_symbols"))]
+        // Safety: `self.as_raw()` returns a valid `AIBinder` pointer.
+        unsafe {
+            sys::AIBinder_isSystemStable(self.as_raw())
+        }
     }
 }
 
@@ -307,6 +355,15 @@ impl<T: AsNative<sys::AIBinder>> IBinderInternal for T {
         unsafe { sys::AIBinder_setRequestingSid(self.as_native_mut(), enable) };
     }
 
+    fn set_inherit_rt(&mut self, enable: bool) {
+        // Safety: `SpIBinder` guarantees that `self` always contains a valid
+        // pointer to an `AIBinder`.
+        //
+        // This call does not affect ownership of its pointer parameter.
+        unsafe { sys::AIBinder_setInheritRt(self.as_native_mut(), enable) };
+    }
+
+    #[cfg(feature = "std")]
     fn dump<F: AsRawFd>(&mut self, fp: &F, args: &[&str]) -> Result<()> {
         let args: Vec<_> = args.iter().map(|a| CString::new(*a).unwrap()).collect();
         let mut arg_ptrs: Vec<_> = args.iter().map(|a| a.as_ptr()).collect();

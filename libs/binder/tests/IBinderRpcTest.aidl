@@ -18,6 +18,9 @@ interface IBinderRpcTest {
     oneway void sendString(@utf8InCpp String str);
     @utf8InCpp String doubleString(@utf8InCpp String str);
 
+    // get the UID of the client. -1 if the transport doesn't provide client UID
+    int getClientUid();
+
     // get the port that a client used to connect to this object
     int getClientPort();
 

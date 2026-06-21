@@ -368,6 +368,62 @@ TEST_F(ScreenCaptureTest, CaptureLayerExclude) {
     mCapture->checkPixel(0, 0, 200, 200, 200);
 }
 
+TEST_F(ScreenCaptureTest, CaptureLayerExcludeWithExclusionMask) {
+    auto fgHandle = mFGSurfaceControl->getHandle();
+
+    sp<SurfaceControl> child1 = createSurface(mClient, "Child surface", 10, 10,
+                                              PIXEL_FORMAT_RGBA_8888, 0, mFGSurfaceControl.get());
+    TransactionUtils::fillSurfaceRGBA8(child1, 200, 200, 200);
+    sp<SurfaceControl> child2 = createSurface(mClient, "Child surface", 10, 10,
+                                              PIXEL_FORMAT_RGBA_8888, 0, mFGSurfaceControl.get());
+    TransactionUtils::fillSurfaceRGBA8(child2, 200, 0, 200);
+
+    SurfaceComposerClient::Transaction()
+            .show(child1)
+            .show(child2)
+            .setLayer(child1, 1)
+            .setLayer(child2, 2)
+            .setCompositionFilterFlag(child2, 1u << 2)
+            .apply(true);
+
+    // Child2 would be excluded in the screenshot due to the mask, so we should see child1 color
+    // instead.
+    LayerCaptureArgs captureArgs;
+    captureArgs.layerHandle = fgHandle;
+    captureArgs.childrenOnly = true;
+    captureArgs.captureArgs.exclusionMask = 1u << 2;
+    ScreenCapture::captureLayers(&mCapture, captureArgs);
+    mCapture->checkPixel(10, 10, 0, 0, 0);
+    mCapture->checkPixel(0, 0, 200, 200, 200);
+}
+
+TEST_F(ScreenCaptureTest, CaptureLayerExcludeWithExclusionMaskInheritance) {
+    auto fgHandle = mFGSurfaceControl->getHandle();
+
+    sp<SurfaceControl> child1 = createSurface(mClient, "Child surface", 10, 10,
+                                              PIXEL_FORMAT_RGBA_8888, 0, mFGSurfaceControl.get());
+    TransactionUtils::fillSurfaceRGBA8(child1, 200, 200, 200);
+    sp<SurfaceControl> child2 = createSurface(mClient, "ChildChild surface", 10, 10,
+                                              PIXEL_FORMAT_RGBA_8888, 0, child1.get());
+    TransactionUtils::fillSurfaceRGBA8(child2, 200, 0, 200);
+
+    SurfaceComposerClient::Transaction()
+            .show(child1)
+            .show(child2)
+            .setLayer(child1, 1)
+            .setLayer(child2, 1)
+            .setCompositionFilterFlag(child1, 1u << 2)
+            .apply(true);
+
+    // Child1 is excluded, so Child2 should also be excluded due to inheritance.
+    LayerCaptureArgs captureArgs;
+    captureArgs.layerHandle = fgHandle;
+    captureArgs.childrenOnly = true;
+    captureArgs.captureArgs.exclusionMask = 1u << 2;
+    ScreenCapture::captureLayers(&mCapture, captureArgs);
+    mCapture->expectColor(Rect(0, 0, 10, 10), {0, 0, 0, 0});
+}
+
 TEST_F(ScreenCaptureTest, CaptureLayerExcludeThroughDisplayArgs) {
     mCaptureArgs.captureArgs.excludeHandles = {mFGSurfaceControl->getHandle()};
     ScreenCapture::captureLayers(&mCapture, mCaptureArgs);
@@ -1184,6 +1240,63 @@ TEST_F(ScreenCaptureChildOnlyTest, CaptureLayerIgnoresTransform) {
 
     // Before and after reparenting, verify child is properly scaled.
     verify([&] { screenshot()->expectChildColor(80, 80); });
+}
+
+TEST_F(ScreenCaptureTest, CaptureLayersDoesNotBreakSecureGlobalState) {
+    // Create Red (insecure) layer
+    sp<SurfaceControl> redLayer = createLayer("Red surface", 60, 60,
+                                              ISurfaceComposerClient::eFXSurfaceBufferState);
+    ASSERT_NO_FATAL_FAILURE(fillBufferLayerColor(redLayer, Color::RED, 60, 60));
+    Transaction().show(redLayer).setLayer(redLayer, INT32_MAX - 1).apply(true);
+
+    // Create Blue (secure) layer at 60,0
+    sp<SurfaceControl> blueLayer = createLayer("Blue surface", 60, 60,
+                                               ISurfaceComposerClient::eFXSurfaceBufferState |
+                                               ISurfaceComposerClient::eSecure);
+    ASSERT_NO_FATAL_FAILURE(fillBufferLayerColor(blueLayer, Color::BLUE, 60, 60));
+    Transaction()
+            .show(blueLayer)
+            .setLayer(blueLayer, INT32_MAX)
+            .setPosition(blueLayer, 60, 0)
+            .apply(true);
+
+    // Verify captureDisplay as SHELL shows Red (and Black for Blue)
+    {
+        UIDFaker f(AID_SHELL);
+        DisplayCaptureArgs args;
+        args.displayToken = mDisplay;
+        args.captureArgs = mCaptureArgs.captureArgs;
+        ScreenCapture::captureDisplay(args, mCaptureResults);
+        ScreenCapture sc(mCaptureResults.buffer, mCaptureResults.capturedHdrLayers);
+        sc.expectColor(Rect(0, 0, 60, 60), Color::RED);
+        sc.expectColor(Rect(60, 0, 120, 60), Color::BLACK);
+    }
+
+    // Capture Secure Layer as SYSTEM/ROOT
+    {
+        LayerCaptureArgs args;
+        args.layerHandle = blueLayer->getHandle();
+        args.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
+
+        ScreenCaptureResults results;
+        ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(args, results));
+        ScreenCapture sc(results.buffer, results.capturedHdrLayers);
+        sc.expectColor(Rect(0, 0, 60, 60), Color::BLUE);
+    }
+
+    // Verify captureDisplay as SHELL again. Red should still be Red.
+    // This verifies that the global state was not changed to allow the secure
+    // layer to be captured. Otherwise, red layer would be black. b/464401083
+    {
+        UIDFaker f(AID_SHELL);
+        DisplayCaptureArgs args;
+        args.displayToken = mDisplay;
+        args.captureArgs = mCaptureArgs.captureArgs;
+        ScreenCapture::captureDisplay(args, mCaptureResults);
+        ScreenCapture sc(mCaptureResults.buffer, mCaptureResults.capturedHdrLayers);
+        sc.expectColor(Rect(0, 0, 60, 60), Color::RED);
+        sc.expectColor(Rect(60, 0, 120, 60), Color::BLACK);
+    }
 }
 
 } // namespace android

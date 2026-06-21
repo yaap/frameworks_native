@@ -85,8 +85,6 @@ protected:
     uint32_t mWriteFlagBitmask = 2;
     uint32_t mReadFlagBitmask = 1;
     int64_t mSessionId = 123;
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel, true);
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, false);
 };
 
 bool PowerAdvisorTest::sessionExists() {
@@ -106,6 +104,11 @@ void PowerAdvisorTest::SetUp() {
     ON_CALL(*mMockPowerHalController, getHintSessionPreferredRate)
             .WillByDefault(Return(
                     ByMove(HalResult<int64_t>::fromStatus(ndk::ScopedAStatus::ok(), 16000))));
+    ON_CALL(*mMockPowerHalController, getSessionChannel)
+            .WillByDefault(Return(ByMove(
+                    HalResult<ChannelConfig>::fromStatus(ndk::ScopedAStatus::fromExceptionCode(
+                                                                 EX_UNSUPPORTED_OPERATION),
+                                                         {}))));
 }
 
 void PowerAdvisorTest::SetUpFmq(bool usesSharedEventFlag, bool isQueueFull) {
@@ -185,7 +188,6 @@ void PowerAdvisorTest::allowReportActualToAcquireMutex() {
 void PowerAdvisorTest::testGpuScenario(GpuTestConfig& config, WorkDuration& ret) {
     SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_gpu_sf,
                       config.adpfGpuFlagOn);
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, config.usesFmq);
     mPowerAdvisor->onBootFinished();
     bool expectsFmqSuccess = config.usesSharedFmqFlag && !config.fmqFull;
     if (config.usesFmq) {
@@ -451,9 +453,22 @@ TEST_F(PowerAdvisorTest, hintSessionUsingSecondaryVirtualDisplays) {
 }
 
 TEST_F(PowerAdvisorTest, hintSessionValidWhenNullFromPowerHAL) {
+    mMockPowerHintSession = std::make_shared<NiceMock<MockPowerHintSessionWrapper>>();
     mPowerAdvisor->onBootFinished();
+    EXPECT_CALL(*mMockPowerHalController, createHintSessionWithConfig)
+            .Times(AtLeast(1))
+            .WillRepeatedly([] {
+                return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::
+                        fromStatus(ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION),
+                                   nullptr);
+            });
+    EXPECT_CALL(*mMockPowerHalController, createHintSession).Times(AtLeast(1)).WillRepeatedly([] {
+        return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::
+                fromStatus(ndk::ScopedAStatus::fromExceptionCode(EX_NULL_POINTER), nullptr);
+    });
 
-    startPowerHintSession(false);
+    mPowerAdvisor->enablePowerHintSession(true);
+    ASSERT_FALSE(mPowerAdvisor->startPowerHintSession({1, 2, 3}));
 
     std::vector<DisplayId> displayIds{PhysicalDisplayId::fromPort(42u)};
 
@@ -474,11 +489,7 @@ TEST_F(PowerAdvisorTest, hintSessionValidWhenNullFromPowerHAL) {
     // increment the frame
     startTime += vsyncPeriod;
 
-    const Duration expectedDuration = getErrorMargin() + presentDuration + postCompDuration;
-    EXPECT_CALL(*mMockPowerHintSession,
-                reportActualWorkDuration(ElementsAre(
-                        Field(&WorkDuration::durationNanos, Eq(expectedDuration.ns())))))
-            .Times(0);
+    EXPECT_CALL(*mMockPowerHintSession, reportActualWorkDuration(_)).Times(0);
     fakeBasicFrameTiming(startTime, vsyncPeriod);
     setExpectedTiming(vsyncPeriod, startTime + vsyncPeriod);
     mPowerAdvisor->setDisplays(displayIds);
@@ -798,7 +809,6 @@ TEST_F(PowerAdvisorTest, fmq_sendTargetAndActualDuration_queueFull) {
 }
 
 TEST_F(PowerAdvisorTest, fmq_sendHint) {
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, false);
     auto startTime = uptimeNanos();
@@ -816,7 +826,6 @@ TEST_F(PowerAdvisorTest, fmq_sendHint) {
 }
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(false, false);
     SessionHint hint;
@@ -830,7 +839,6 @@ TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
 }
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_queueFull) {
-    SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, true);
     ASSERT_EQ(mBackendFmq->availableToRead(), 2uL);
@@ -873,6 +881,27 @@ TEST_F(PowerAdvisorTest, trackCommittedWorkloads) {
     // next frame accurately
     mPowerAdvisor->setCompositedWorkload(Workload::VISIBLE_REGION | Workload::DISPLAY_CHANGES);
     ASSERT_EQ(getCommittedWorkload(), Workload::VISIBLE_REGION | Workload::DISPLAY_CHANGES);
+}
+
+TEST_F(PowerAdvisorTest, enablePowerHintSession_DisablesSession) {
+    mPowerAdvisor->onBootFinished();
+    mPowerAdvisor->enablePowerHintSession(false);
+
+    std::vector<int32_t> threadIds = {1, 2, 3};
+    EXPECT_FALSE(mPowerAdvisor->startPowerHintSession(std::move(threadIds)));
+}
+
+TEST_F(PowerAdvisorTest, reportActualWorkDuration_SkippedWhenDisabled) {
+    mPowerAdvisor->onBootFinished();
+    startPowerHintSession(); // sets up session and starts it
+
+    // session is running now
+    EXPECT_CALL(*mMockPowerHintSession, reportActualWorkDuration(_)).Times(0);
+
+    mPowerAdvisor->enablePowerHintSession(false);
+
+    // Trigger report
+    mPowerAdvisor->reportActualWorkDuration();
 }
 
 } // namespace

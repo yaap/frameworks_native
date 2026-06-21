@@ -59,7 +59,7 @@ class FakeEventHub : public EventHubInterface {
         KeyedVector<int32_t, int32_t> absoluteAxisValue;
         KeyedVector<int32_t, KeyInfo> keysByScanCode;
         KeyedVector<int32_t, KeyInfo> keysByUsageCode;
-        std::map<int32_t, int32_t> keyRemapping;
+        std::unordered_map<int32_t, int32_t> keyRemapping;
         KeyedVector<int32_t, bool> leds;
         // fake mapping which would normally come from keyCharacterMap
         std::unordered_map<int32_t, int32_t> keyCodeMapping;
@@ -137,7 +137,7 @@ public:
                 uint32_t flags);
     void addKeyCodeMapping(RawDeviceId deviceId, int32_t fromKeyCode, int32_t toKeyCode);
     void setKeyRemapping(RawDeviceId deviceId,
-                         const std::map<int32_t, int32_t>& keyRemapping) const;
+                         const std::unordered_map<int32_t, int32_t>& keyRemapping);
     void addVirtualKeyDefinition(RawDeviceId deviceId, const VirtualKeyDefinition& definition);
 
     void addSensorAxis(RawDeviceId deviceId, int32_t absCode, InputDeviceSensorType sensorType,
@@ -180,8 +180,8 @@ private:
     bool hasRelativeAxis(RawDeviceId deviceId, int axis) const override;
     bool hasInputProperty(RawDeviceId, int) const override;
     bool hasMscEvent(RawDeviceId deviceId, int mscEvent) const override final;
-    status_t mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode, int32_t metaState,
-                    int32_t* outKeycode, int32_t* outMetaState, uint32_t* outFlags) const override;
+    std::optional<MappedKey> mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
+                                    int32_t metaState) const override;
     const KeyInfo* getKey(Device* device, int32_t scanCode, int32_t usageCode) const;
 
     status_t mapAxis(RawDeviceId, int32_t, AxisInfo*) const override;
@@ -230,6 +230,8 @@ private:
             RawDeviceId deviceId, int32_t lightId) const override;
     std::filesystem::path getSysfsRootPath(RawDeviceId deviceId) const override;
     void sysfsNodeChanged(const std::string& sysfsNodePath) override;
+    void setAxisRemapping(RawDeviceId deviceId,
+                          const std::unordered_map<int32_t, int32_t>& axisRemapping) override {}
     void dump(std::string&) const override {}
     void monitor() const override {}
     void requestReopenDevices() override {}

@@ -67,11 +67,15 @@ bool equalGpuIdUid(const android::gpuwork::GpuIdUid& l, const android::gpuwork::
 template <class Key, class Value>
 bool getBpfMap(const char* mapPath, bpf::BpfMap<Key, Value>* out) {
     errno = 0;
-    auto result = out->init(mapPath);
-    if (!result.ok()) {
+
+    // Note: BpfMap ctor calls abort() on failure, so use init() instead.
+
+    bpf::BpfMap<Key, Value> map;
+    if (!map.init(mapPath).ok()) {
         ALOGW("Failed to create bpf map from %s [%d(%s)]", mapPath, errno, strerror(errno));
         return false;
     }
+    *out = std::move(map);
     return true;
 }
 

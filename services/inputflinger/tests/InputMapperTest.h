@@ -21,18 +21,22 @@
 
 #include <InputDevice.h>
 #include <InputMapper.h>
-#include <NotifyArgs.h>
+#include <android-base/result.h>
 #include <ftl/flags.h>
 #include <gmock/gmock.h>
 #include <utils/StrongPointer.h>
 
 #include "FakeEventHub.h"
 #include "FakeInputReaderPolicy.h"
+#include "InputReaderBase.h"
 #include "InstrumentedInputReader.h"
 #include "InterfaceMocks.h"
+#include "NotifyArgs.h"
 #include "TestConstants.h"
 #include "TestInputListener.h"
+#include "TestInputQueue.h"
 #include "input/Input.h"
+#include "input/InputVerifier.h"
 #include "input/PropertyMap.h"
 
 namespace android {
@@ -55,22 +59,52 @@ protected:
 
     void setSwitchState(int32_t state, std::set<int32_t> switchCodes);
 
-    std::list<NotifyArgs> process(int32_t type, int32_t code, int32_t value);
-    std::list<NotifyArgs> process(nsecs_t when, int32_t type, int32_t code, int32_t value);
-    std::list<NotifyArgs> process(nsecs_t when, nsecs_t readTime, int32_t type, int32_t code,
-                                  int32_t value);
+    void process(int32_t type, int32_t code, int32_t value);
+    void process(nsecs_t when, int32_t type, int32_t code, int32_t value);
+    virtual void process(nsecs_t when, nsecs_t readTime, int32_t type, int32_t code, int32_t value);
+
+    virtual void processArgs(const std::list<NotifyArgs>& args);
 
     InputDeviceIdentifier mIdentifier;
     MockEventHubInterface mMockEventHub;
     sp<FakeInputReaderPolicy> mFakePolicy;
     MockInputReaderContext mMockInputReaderContext;
     std::unique_ptr<MockInputDevice> mDevice;
+    TestInputQueue mFakeListener;
 
     std::unique_ptr<InputDeviceContext> mDeviceContext;
     InputReaderConfiguration mReaderConfiguration;
     // The mapper should be created by the subclasses.
     std::unique_ptr<InputMapper> mMapper;
     PropertyMap mPropertyMap;
+};
+
+/**
+ * A variant of InputMapperUnitTest that also runs NotifyMotionArgs produced by the mapper through
+ * an InputVerifier.
+ *
+ * When using this class, all args produced by the mapper need to be run through the verifier, so
+ * that it gets a full view of the input stream. This means that wrapper functions such as
+ * reconfigureMapper must be used instead of calling functions on the mapper directly.
+ */
+class VerifyingInputMapperUnitTest : public InputMapperUnitTest {
+protected:
+    VerifyingInputMapperUnitTest();
+
+    using InputMapperUnitTest::process;
+    virtual void process(nsecs_t when, nsecs_t readTime, int32_t type, int32_t code,
+                         int32_t value) override;
+    virtual void processArgs(const std::list<NotifyArgs>& args) override;
+
+    void reconfigureMapper(nsecs_t when, const InputReaderConfiguration& config,
+                           ConfigurationChanges changes);
+
+    void resetMapper(nsecs_t when);
+
+private:
+    void processMotionArgs(const std::list<NotifyArgs>& args);
+
+    InputVerifier mVerifier;
 };
 
 /**
@@ -101,20 +135,6 @@ protected:
     std::shared_ptr<InputDevice> newDevice(int32_t deviceId, const std::string& name,
                                            const std::string& location, int32_t eventHubId,
                                            ftl::Flags<InputDeviceClass> classes, int bus = 0);
-    template <class T, typename... Args>
-    T& addMapperAndConfigure(Args... args) {
-        T& mapper =
-                mDevice->addMapper<T>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(), args...);
-        configureDevice(/*changes=*/{});
-        std::list<NotifyArgs> resetArgList = mDevice->reset(ARBITRARY_TIME);
-        resetArgList += mapper.reset(ARBITRARY_TIME);
-        // Loop the reader to flush the input listener queue.
-        for (const NotifyArgs& loopArgs : resetArgList) {
-            mFakeListener->notify(loopArgs);
-        }
-        mReader->loopOnce();
-        return mapper;
-    }
 
     template <class T, typename... Args>
     T& constructAndAddMapper(Args... args) {

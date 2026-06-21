@@ -18,7 +18,6 @@
 #define SURFACEFLINGERPROPERTIES_H_
 
 #include <SurfaceFlingerProperties.sysprop.h>
-#include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
 #include <android/hardware/graphics/common/1.2/types.h>
 #include <ui/ConfigStoreTypes.h>
 
@@ -97,11 +96,17 @@ bool enable_layer_caching(bool defaultValue);
 
 bool enable_sdr_dimming(bool defaultValue);
 
+bool force_hole_punch(bool defaultValue);
+
 bool ignore_hdr_camera_layers(bool defaultValue);
 
 bool clear_slots_with_set_layer_buffer(bool defaultValue);
 
 int32_t game_default_frame_rate_override(int32_t defaultValue);
+
+int32_t resync_on_tx_timeout(int64_t defaultValue);
+
+int32_t resync_on_choreographer_timeout(int64_t defaultValue);
 
 } // namespace sysprop
 } // namespace android

@@ -54,9 +54,8 @@ TEST_F(FrontInternalDisplayRotationFlagsTest, defaultRotation) {
 
 TEST_F(FrontInternalDisplayRotationFlagsTest, rotateFrontDisplay90) {
     auto displayToken = mInnerDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_90;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_90;
 
     mFlinger.commitTransactionsLocked(eDisplayTransactionNeeded);
     ASSERT_EQ(ui::Transform::ROT_90, SurfaceFlinger::getFrontInternalDisplayRotationFlags());
@@ -64,9 +63,8 @@ TEST_F(FrontInternalDisplayRotationFlagsTest, rotateFrontDisplay90) {
 
 TEST_F(FrontInternalDisplayRotationFlagsTest, rotateRearDisplay90) {
     auto displayToken = mOuterDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_90;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_90;
 
     mFlinger.commitTransactionsLocked(eDisplayTransactionNeeded);
     ASSERT_EQ(ui::Transform::ROT_0, SurfaceFlinger::getFrontInternalDisplayRotationFlags());
@@ -74,14 +72,12 @@ TEST_F(FrontInternalDisplayRotationFlagsTest, rotateRearDisplay90) {
 
 TEST_F(FrontInternalDisplayRotationFlagsTest, rotateBothWhenInnerIsFront) {
     auto displayToken = mInnerDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_180;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_180;
 
     displayToken = mOuterDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_270;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_270;
 
     mFlinger.commitTransactionsLocked(eDisplayTransactionNeeded);
     ASSERT_EQ(ui::Transform::ROT_180, SurfaceFlinger::getFrontInternalDisplayRotationFlags());
@@ -90,14 +86,12 @@ TEST_F(FrontInternalDisplayRotationFlagsTest, rotateBothWhenInnerIsFront) {
 TEST_F(FrontInternalDisplayRotationFlagsTest, rotateBothWhenOuterIsFront) {
     mFlinger.mutableFrontInternalDisplayId() = getOuterDisplayId();
     auto displayToken = mInnerDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_180;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_180;
 
     displayToken = mOuterDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_270;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_270;
 
     mFlinger.commitTransactionsLocked(eDisplayTransactionNeeded);
     ASSERT_EQ(ui::Transform::ROT_270, SurfaceFlinger::getFrontInternalDisplayRotationFlags());
@@ -105,14 +99,12 @@ TEST_F(FrontInternalDisplayRotationFlagsTest, rotateBothWhenOuterIsFront) {
 
 TEST_F(FrontInternalDisplayRotationFlagsTest, onNewFrontInternalDisplay) {
     auto displayToken = mInnerDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_180;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_180;
 
     displayToken = mOuterDisplay->getDisplayToken().promote();
-    mFlinger.mutableDrawingState().displays.editValueFor(displayToken).orientation = ui::ROTATION_0;
-    mFlinger.mutableCurrentState().displays.editValueFor(displayToken).orientation =
-            ui::ROTATION_270;
+    mFlinger.mutableDrawingState().displays.get(displayToken)->get().orientation = ui::ROTATION_0;
+    mFlinger.mutableCurrentState().displays.get(displayToken)->get().orientation = ui::ROTATION_270;
 
     mFlinger.commitTransactionsLocked(eDisplayTransactionNeeded);
     ASSERT_EQ(ui::Transform::ROT_180, SurfaceFlinger::getFrontInternalDisplayRotationFlags());

@@ -1,3 +1,2 @@
 # Bug component: 32456
-
-smoreland@google.com
+include platform/frameworks/native:/libs/binder/OWNERS

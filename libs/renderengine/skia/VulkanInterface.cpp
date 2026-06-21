@@ -16,10 +16,13 @@
 
 #include "VulkanInterface.h"
 
+#include <include/android/vk/AndroidVulkanMemoryAllocator.h>
 #include <include/gpu/GpuTypes.h>
 #include <include/gpu/vk/VulkanBackendContext.h>
+#include <include/gpu/vk/VulkanMemoryAllocator.h>
 
 #include <android-base/stringprintf.h>
+#include <common/ThreadStateCrashLogger.h>
 #include <log/log_main.h>
 #include <utils/Timers.h>
 
@@ -33,7 +36,8 @@ namespace skia {
 
 using base::StringAppendF;
 
-VulkanBackendContext VulkanInterface::createSkiaVulkanBackendContext() {
+VulkanBackendContext
+VulkanInterface::createSkiaVulkanBackendContext(bool threadSafeVMA) {
     VulkanBackendContext backendContext;
     backendContext.fInstance = mInstance;
     backendContext.fPhysicalDevice = mPhysicalDevice;
@@ -47,6 +51,8 @@ VulkanBackendContext VulkanInterface::createSkiaVulkanBackendContext() {
     backendContext.fProtectedContext = mIsProtected ? Protected::kYes : Protected::kNo;
     backendContext.fDeviceLostContext = this; // VulkanInterface is long-lived
     backendContext.fDeviceLostProc = onVkDeviceFault;
+    SkiaVMA::Options opts{.fThreadSafe = threadSafeVMA};
+    backendContext.fMemoryAllocator = SkiaVMA::Make(backendContext, opts);
     return backendContext;
 };
 
@@ -178,7 +184,7 @@ void VulkanInterface::onVkDeviceFault(void* callbackContext, const std::string& 
     }
 
     crashMsg << "): " << description;
-    LOG_ALWAYS_FATAL("%s", crashMsg.str().c_str());
+    LOG_THREAD_STATE_AND_CRASH("%s", crashMsg.str().c_str());
 };
 
 static skgpu::VulkanGetProc sGetProc = [](const char* proc_name,
@@ -239,29 +245,23 @@ void VulkanInterface::init(bool protectedContent) {
             VK_STRUCTURE_TYPE_APPLICATION_INFO, nullptr, "surfaceflinger", 0, "android platform", 0,
             VK_API_VERSION_1_1,
     };
-
-    VK_GET_PROC(EnumerateInstanceExtensionProperties);
-
-    uint32_t extensionCount = 0;
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr));
-    std::vector<VkExtensionProperties> instanceExtensions(extensionCount);
-    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount,
-                                                    instanceExtensions.data()));
-    std::vector<const char*> enabledInstanceExtensionNames;
-    enabledInstanceExtensionNames.reserve(instanceExtensions.size());
-    for (const auto& instExt : instanceExtensions) {
-        enabledInstanceExtensionNames.push_back(instExt.extensionName);
-    }
-
-    // Let Skia enable instance extensions.
+    // Initialize Skia's VulkanPreferredFeatures.
     mVulkanFeatures.init(appInfo.apiVersion);
-    mVulkanFeatures.addToInstanceExtensions(instanceExtensions.data(), instanceExtensions.size(),
-                                            enabledInstanceExtensionNames);
 
-    mInstanceExtensionNames.reserve(enabledInstanceExtensionNames.size());
-    for (const char* instExt : enabledInstanceExtensionNames) {
-        mInstanceExtensionNames.push_back(instExt);
-    }
+    // Query available instance extensions
+    VK_GET_PROC(EnumerateInstanceExtensionProperties);
+    uint32_t extCount = 0;
+    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr));
+    std::vector<VkExtensionProperties> availInstanceExts(extCount);
+    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, availInstanceExts.data()));
+
+    // Let Skia add to the list of enabled instance extensions. RenderEngine does not use any, so
+    // just pass in the empty enabledInstanceExtensionNames (but with ample space reserved for any
+    // extensions Skia might add).
+    std::vector<const char*> enabledInstanceExtensionNames;
+    enabledInstanceExtensionNames.reserve(availInstanceExts.size());
+    mVulkanFeatures.addToInstanceExtensions(availInstanceExts.data(), availInstanceExts.size(),
+                                            enabledInstanceExtensionNames);
 
     const VkInstanceCreateInfo instanceCreateInfo = {
             VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -408,19 +408,6 @@ void VulkanInterface::init(bool protectedContent) {
         BAIL("Could not find a graphics queue family");
     }
 
-    uint32_t deviceExtensionCount;
-    VK_CHECK(vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount,
-                                                  nullptr));
-    std::vector<VkExtensionProperties> deviceExtensions(deviceExtensionCount);
-    VK_CHECK(vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtensionCount,
-                                                  deviceExtensions.data()));
-
-    std::vector<const char*> enabledDeviceExtensionNames;
-    enabledDeviceExtensionNames.reserve(deviceExtensions.size());
-    for (const auto& devExt : deviceExtensions) {
-        enabledDeviceExtensionNames.push_back(devExt.extensionName);
-    }
-
     mPhysicalDeviceFeatures2 = {};
     mPhysicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     void** tailPnext = &mPhysicalDeviceFeatures2.pNext;
@@ -433,19 +420,49 @@ void VulkanInterface::init(bool protectedContent) {
         tailPnext = &mProtectedMemoryFeatures.pNext;
     }
 
-    for (const VkExtensionProperties& ext : deviceExtensions) {
-        if (strcmp(ext.extensionName, VK_EXT_DEVICE_FAULT_EXTENSION_NAME) == 0) {
-            mDeviceFaultFeatures = {};
-            mDeviceFaultFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
-            *tailPnext = &mDeviceFaultFeatures;
-            tailPnext = &mDeviceFaultFeatures.pNext;
+    // Query available device extensions
+    uint32_t deviceExtCount;
+    VK_CHECK(vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount,
+                                                  nullptr));
+    std::vector<VkExtensionProperties> availDeviceExts(deviceExtCount);
+    VK_CHECK(vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount,
+                                                  availDeviceExts.data()));
 
-            break;
+    // Helper to check whether an extension should be enabled
+    auto shouldEnableExtension = [&](const char* extensionName) {
+        // Device extensions that RenderEngine utilizes
+        static const char* renderEngineDevExtNames[] = {
+            VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME,
+            VK_EXT_DEVICE_FAULT_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME
+        };
+
+        for (const auto& renderEngineDevExtName : renderEngineDevExtNames) {
+            if (!strcmp(renderEngineDevExtName, extensionName)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    // Add any requested and available extensions to the list of enabled extensions
+    std::vector<const char*> enabledDeviceExtensionNames;
+    enabledDeviceExtensionNames.reserve(availDeviceExts.size());
+    for (const auto& devExt : availDeviceExts) {
+        if (shouldEnableExtension(devExt.extensionName)) {
+            enabledDeviceExtensionNames.push_back(devExt.extensionName);
+
+            // Initialize device fault extension attributes if VK_EXT_DEVICE_FAULT is found
+            if (!strcmp(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, devExt.extensionName)) {
+                mDeviceFaultFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+                *tailPnext = &mDeviceFaultFeatures;
+                tailPnext = &mDeviceFaultFeatures.pNext;
+            }
         }
     }
 
-    // Let Skia add features to be queried.
-    mVulkanFeatures.addFeaturesToQuery(deviceExtensions.data(), deviceExtensions.size(),
+    // After RenderEngine has added its own, allow Skia to add features + device extension
+    // availabilities to be queried.
+    mVulkanFeatures.addFeaturesToQuery(availDeviceExts.data(), availDeviceExts.size(),
                                        mPhysicalDeviceFeatures2);
 
     vkGetPhysicalDeviceFeatures2(physicalDevice, &mPhysicalDeviceFeatures2);
@@ -453,22 +470,27 @@ void VulkanInterface::init(bool protectedContent) {
     // RenderEngine.
     mPhysicalDeviceFeatures2.features.robustBufferAccess = VK_FALSE;
 
-    // Let Skia enable extensions and features.
+    // Let Skia enable extensions and features. Any enabled features will be appended on to
+    // enabledDeviceExtensionNames.
     mVulkanFeatures.addFeaturesToEnable(enabledDeviceExtensionNames, mPhysicalDeviceFeatures2);
-
-    mDeviceExtensionNames.reserve(enabledDeviceExtensionNames.size());
-    for (const char* devExt : enabledDeviceExtensionNames) {
-        mDeviceExtensionNames.push_back(devExt);
-    }
 
     mVulkanExtensions.init(sGetProc, instance, physicalDevice, enabledInstanceExtensionNames.size(),
                            enabledInstanceExtensionNames.data(), enabledDeviceExtensionNames.size(),
                            enabledDeviceExtensionNames.data());
 
+    // Copy extension names to locally-stored list whose lifetime matches that of this class
+    mEnabledDeviceExtNames.reserve(enabledDeviceExtensionNames.size());
+    for (const char* devExt : enabledDeviceExtensionNames) {
+        mEnabledDeviceExtNames.push_back(devExt);
+    }
+    mEnabledInstanceExtNames.reserve(enabledInstanceExtensionNames.size());
+    for (const char* instExt : enabledInstanceExtensionNames) {
+        mEnabledInstanceExtNames.push_back(instExt);
+    }
+
     if (!mVulkanExtensions.hasExtension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, 1)) {
         BAIL("Vulkan driver doesn't support external semaphore fd");
     }
-
     if (protectedContent && !mProtectedMemoryFeatures.protectedMemory) {
         BAIL("Protected memory not supported");
     }
@@ -596,8 +618,8 @@ void VulkanInterface::teardown() {
 
     mFuncs = VulkanFuncs();
 
-    mInstanceExtensionNames.clear();
-    mDeviceExtensionNames.clear();
+    mEnabledInstanceExtNames.clear();
+    mEnabledDeviceExtNames.clear();
 }
 
 void VulkanInterface::appendVulkanInfoToDump(std::string& result) const {
@@ -612,14 +634,14 @@ void VulkanInterface::appendVulkanInfoToDump(std::string& result) const {
                   VK_VERSION_PATCH(mPhysicalDeviceProperties.apiVersion));
     StringAppendF(&result, "]\n");
 
-    StringAppendF(&result, "Instance extensions: [\n");
-    for (const auto& name : mInstanceExtensionNames) {
+    StringAppendF(&result, "Enabled instance extensions: [\n");
+    for (const auto& name : mEnabledInstanceExtNames) {
         StringAppendF(&result, "  %s\n", name.c_str());
     }
     StringAppendF(&result, "]\n");
 
-    StringAppendF(&result, "Device extensions: [\n");
-    for (const auto& name : mDeviceExtensionNames) {
+    StringAppendF(&result, "Enabled device extensions: [\n");
+    for (const auto& name : mEnabledDeviceExtNames) {
         StringAppendF(&result, "  %s\n", name.c_str());
     }
     StringAppendF(&result, "]\n");

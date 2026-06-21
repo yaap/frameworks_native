@@ -25,6 +25,7 @@
 #include <android-base/logging.h>
 
 #include "test_framework/core/DisplayConfiguration.h"
+#include "test_framework/core/ScenarioEventRecorder.h"
 
 namespace android::surfaceflinger::tests::end2end::test_framework {
 
@@ -42,13 +43,13 @@ class Hwc3Controller;
 
 namespace core {
 
-class TestService final {
+class TestService final : public std::enable_shared_from_this<TestService> {
     struct Passkey;  // Uses the passkey idiom to restrict construction.
 
   public:
     // Constructs the test service, and starts it with the given displays as connected at boot.
     [[nodiscard]] static auto startWithDisplays(const std::vector<DisplayConfiguration>& displays)
-            -> base::expected<std::unique_ptr<TestService>, std::string>;
+            -> base::expected<std::shared_ptr<TestService>, std::string>;
 
     explicit TestService(Passkey passkey);
 
@@ -64,12 +65,18 @@ class TestService final {
         return *mFlinger;
     }
 
+    // Obtains the PresentationEventOrderChecker
+    [[nodiscard]] auto scenarioEventRecorder() -> ScenarioEventRecorder& {
+        return mScenarioEventRecorder;
+    }
+
   private:
     [[nodiscard]] auto init(std::span<const DisplayConfiguration> displays)
             -> base::expected<void, std::string>;
 
     std::shared_ptr<hwc3::Hwc3Controller> mHwc;
     std::shared_ptr<surfaceflinger::SFController> mFlinger;
+    ScenarioEventRecorder mScenarioEventRecorder;
 };
 
 }  // namespace core

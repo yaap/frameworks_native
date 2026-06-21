@@ -22,9 +22,11 @@
 
 namespace android::mock {
 
-inline gui::DisplayModeSpecs createDisplayModeSpecs(DisplayModeId defaultMode, Fps maxFps,
+inline gui::DisplayModeSpecs createDisplayModeSpecs(sp<IBinder> displayToken,
+                                                    DisplayModeId defaultMode, Fps maxFps,
                                                     bool allowGroupSwitching = false) {
     gui::DisplayModeSpecs specs;
+    specs.displayToken = std::move(displayToken);
     specs.defaultMode = ftl::to_underlying(defaultMode);
     specs.allowGroupSwitching = allowGroupSwitching;
     specs.primaryRanges.physical.min = 0.f;

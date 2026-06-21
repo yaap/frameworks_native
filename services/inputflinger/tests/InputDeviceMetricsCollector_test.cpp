@@ -162,6 +162,7 @@ TEST_F(InputDeviceMetricsCollectorTest, DontLogUsageForIgnoredDevices) {
     for (int32_t ignoredDeviceId : ignoredDevices) {
         mMetricsCollector.notifyInputDevicesChanged(
                 {/*id=*/0, {generateTestDeviceInfo(ignoredDeviceId)}});
+        mTestListener.assertNotifyInputDevicesChangedWasCalled();
 
         // Device was used.
         mMetricsCollector.notifyMotion(generateMotionArgs(ignoredDeviceId));
@@ -177,6 +178,7 @@ TEST_F(InputDeviceMetricsCollectorTest, DontLogUsageForIgnoredDevices) {
 
         // Remove the ignored device, and ensure we still don't log usage.
         mMetricsCollector.notifyInputDevicesChanged({/*id=*/0, {}});
+        mTestListener.assertNotifyInputDevicesChangedWasCalled();
         ASSERT_NO_FATAL_FAILURE(assertUsageNotLogged());
     }
 }

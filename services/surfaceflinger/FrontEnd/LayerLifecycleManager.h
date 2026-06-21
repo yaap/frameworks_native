@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <FrontEnd/DisplayInfo.h>
+#include <ui/DisplayMap.h>
+
 #include "QueuedTransactionState.h"
 #include "RequestedLayerState.h"
 
@@ -39,12 +42,20 @@ class LayerLifecycleManager {
 public:
     // External state changes should be updated in the following order:
     void addLayers(std::vector<std::unique_ptr<RequestedLayerState>>);
+
+    // Updates the layer stack of the mirror layers if the display information changes, or if layers
+    // are added.
+    void updateDisplayMirrors(
+            const ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo>& frontEndDisplaysInfo,
+            bool frontEndDisplaysInfoChanged);
+
     // Ignore unknown layers when interoping with legacy front end. In legacy we destroy
     // the layers it is unreachable. When using the LayerLifecycleManager for layer trace
     // generation we may encounter layers which are known because we don't have an explicit
     // lifecycle. Ignore these errors while we have to interop with legacy.
     void applyTransactions(const std::vector<QueuedTransactionState>&,
                            bool ignoreUnknownLayers = false);
+
     // Ignore unknown handles when iteroping with legacy front end. In the old world, we
     // would create child layers which are not necessary with the new front end. This means
     // we will get notified for handle changes that don't exist in the new front end.
@@ -66,10 +77,12 @@ public:
     class ILifecycleListener {
     public:
         virtual ~ILifecycleListener() = default;
+
         // Called on commitChanges when a layer is added. The callback includes
         // the layer state the client was created with as well as any state updates
         // until changes were committed.
         virtual void onLayerAdded(const RequestedLayerState&) = 0;
+
         // Called on commitChanges when a layer has been destroyed. The callback
         // includes the final state before the layer was destroyed.
         virtual void onLayerDestroyed(const RequestedLayerState&) = 0;
@@ -81,6 +94,7 @@ public:
     const std::vector<RequestedLayerState*>& getChangedLayers() const;
     const ftl::Flags<RequestedLayerState::Changes> getGlobalChanges() const;
     const RequestedLayerState* getLayerFromId(uint32_t) const;
+
     // Traverse through parent layers to identify if any are secure, as a layer's secure
     // flag is inherited from its parents. Return an unexpected status if a layer cycle
     // is identified.
@@ -98,19 +112,24 @@ private:
     uint32_t unlinkLayer(uint32_t layerId, uint32_t linkedLayer);
     std::vector<uint32_t> unlinkLayers(const std::vector<uint32_t>& layerIds, uint32_t linkedLayer);
 
+    void doMirror(RequestedLayerState& mirrorLayer);
+
+    void undoMirror(RequestedLayerState& mirrorLayer);
+
     void updateDisplayMirrorLayers(RequestedLayerState& rootLayer);
 
     struct References {
         // Lifetime tied to mLayers
         RequestedLayerState& owner;
-        std::vector<uint32_t> references;
+        std::vector<uint32_t /*layerId*/> references;
         std::string getDebugString() const;
     };
     std::unordered_map<uint32_t, References> mIdToLayer;
     // Listeners are invoked once changes are committed.
     std::vector<std::shared_ptr<ILifecycleListener>> mListeners;
-    // Layers that mirror a display stack (see updateDisplayMirrorLayers)
-    std::vector<uint32_t> mDisplayMirroringLayers;
+
+    // Layers that mirror a layer stack.
+    std::vector<uint32_t /*layerId*/> mLayersMirroringLayerStack;
 
     // Aggregation of changes since last commit.
     ftl::Flags<RequestedLayerState::Changes> mGlobalChanges;

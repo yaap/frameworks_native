@@ -40,10 +40,14 @@ public:
     explicit BlurFilter(RuntimeEffectManager& effectManager, float maxCrossFadeRadius = 10.0f);
     virtual ~BlurFilter(){}
 
-    // Execute blur, saving it to a texture
-    virtual sk_sp<SkImage> generate(SkiaGpuContext* context, const uint32_t radius,
-                                    const sk_sp<SkImage> blurInput,
-                                    const SkRect& blurRect) const = 0;
+    // Execute blur, saving it to a TEMPORARY texture. WARNING: the returned SkImage is only
+    // guaranteed to be valid until the next call to generateTemporaryImage on this BlurFilter. This
+    // limitation is to avoid unnecessary allocations.
+    virtual sk_sp<SkImage> generateTemporaryImage(SkiaGpuContext* context,
+                                                  const DisplaySettings& display,
+                                                  const uint32_t radius,
+                                                  const sk_sp<SkImage> blurInput,
+                                                  const SkRect& blurRect) const = 0;
 
     /**
      * Draw the blurred content (from the generate method) into the canvas.
@@ -61,6 +65,11 @@ public:
                                 sk_sp<SkImage> blurredImage, sk_sp<SkImage> input);
 
     float getMaxCrossFadeRadius() const;
+
+    virtual void preallocateBuffers(SkiaGpuContext* context, ui::Size size) {}
+    virtual bool areBuffersPreallocated(const SkiaGpuContext* context, ui::Size displaySize) const {
+        return true;
+    }
 
 private:
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited

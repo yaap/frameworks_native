@@ -43,6 +43,7 @@ struct egl_connection_t {
             libGles2(nullptr),
             systemDriverUnloaded(false),
             angleLoaded(false),
+            driverInUpdatableApkLoaded(false),
             angleGetDisplayPlatformFunc(nullptr),
             angleResetDisplayPlatformFunc(nullptr) {
         const char* const* entries = platform_names;
@@ -77,6 +78,8 @@ struct egl_connection_t {
 
     bool systemDriverUnloaded;
     bool angleLoaded; // Was ANGLE successfully loaded
+    bool driverInUpdatableApkLoaded; // Was the driver from updatable APK (including ANGLE APK)
+                                     // successfully loaded
 
     void* angleGetDisplayPlatformFunc;
     void* angleResetDisplayPlatformFunc;

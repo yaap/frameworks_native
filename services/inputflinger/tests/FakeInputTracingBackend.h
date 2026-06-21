@@ -22,7 +22,9 @@
 #include <android-base/thread_annotations.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
+
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -47,6 +49,13 @@ public:
     void expectMotionDispatchTraced(const MotionEvent& event, int32_t windowId);
 
     /**
+     * Add an expectation for one or more raw events with a given timestamp to be traced, with
+     * metadata that matches the given matcher.
+     */
+    void expectAllRawEventsAtTimestampToMatchMetadata(
+            nsecs_t when, ::testing::Matcher<TracedEventMetadata> metadataMatcher);
+
+    /**
      * Wait and verify that all expected events are traced.
      * This is a lenient verifier that does not expect the events to be traced in the order
      * that the events were expected, and does not fail if there are events that are traced that
@@ -61,9 +70,15 @@ private:
     std::mutex mLock;
     std::condition_variable mEventTracedCondition;
     std::unordered_map<uint32_t /*eventId*/, TracedEvent> mTracedEvents GUARDED_BY(mLock);
+    // RawEvents don't have IDs, so we need to store them separately from the others, keyed by event
+    // time instead.
+    std::multimap<nsecs_t /*when*/, std::pair<RawEvent, TracedEventMetadata>> mTracedRawEvents
+            GUARDED_BY(mLock);
     std::vector<WindowDispatchArgs> mTracedWindowDispatches GUARDED_BY(mLock);
     std::vector<std::pair<std::variant<KeyEvent, MotionEvent>, int32_t /*windowId*/>>
             mExpectedEvents GUARDED_BY(mLock);
+    std::vector<std::pair<nsecs_t /*when*/, ::testing::Matcher<TracedEventMetadata>>>
+            mExpectedRawEvents GUARDED_BY(mLock);
 
     friend class FakeInputTracingBackend;
 
@@ -71,6 +86,10 @@ private:
     // fails, the error message describes why.
     template <typename Event>
     base::Result<void> verifyEventTraced(const Event&, int32_t windowId) const REQUIRES(mLock);
+
+    base::Result<void> verifyRawEventTraced(
+            nsecs_t when, ::testing::Matcher<TracedEventMetadata> metadataMatcher) const
+            REQUIRES(mLock);
 };
 
 /**
@@ -87,7 +106,11 @@ private:
     void traceKeyEvent(const TracedKeyEvent& entry, const TracedEventMetadata&) override;
     void traceMotionEvent(const TracedMotionEvent& entry, const TracedEventMetadata&) override;
     void traceWindowDispatch(const WindowDispatchArgs& entry, const TracedEventMetadata&) override;
-    void traceRawEvent(const RawEvent& entry) override;
+    void traceRawEvent(const RawEvent& entry, const TracedEventMetadata& metadata) override;
+    void traceEvdevDeviceAddition(const TracedEvdevDevice& device,
+                                  const TracedEventMetadata& metadata) override {}
+    void traceEvdevDeviceRemoval(RawDeviceId deviceId,
+                                 const TracedEventMetadata& metadata) override {}
 };
 
 } // namespace android::input_trace

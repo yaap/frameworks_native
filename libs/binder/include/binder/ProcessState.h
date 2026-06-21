@@ -31,7 +31,8 @@
 // ---------------------------------------------------------------------------
 namespace android {
 
-#if defined(LIBBINDER_BINDER_OBSERVER) && defined(BINDER_WITH_KERNEL_IPC)
+#if defined(LIBBINDER_BINDER_OBSERVER) && defined(BINDER_WITH_KERNEL_IPC) && \
+        !defined(__ANDROID_VENDOR__)
 #define BINDER_WITH_OBSERVERS
 #endif
 
@@ -140,6 +141,16 @@ public:
      */
     LIBBINDER_EXPORTED bool isThreadPoolStarted() const;
 
+    /**
+     * Set whether the process logs binder transactions to the PCC audit log.
+     */
+    LIBBINDER_EXPORTED void setIsOutgoingTransactionsAuditable(bool enabled);
+
+    /**
+     * Check to see if the process logs binder transactions to the PCC audit log.
+     */
+    LIBBINDER_EXPORTED bool isOutgoingTransactionsAuditable() const;
+
     enum class DriverFeature {
         ONEWAY_SPAM_DETECTION,
         EXTENDED_ERROR,
@@ -203,6 +214,7 @@ private:
     bool mForked;
     std::atomic_bool mThreadPoolStarted;
     std::atomic_int32_t mThreadPoolSeq;
+    std::atomic_bool mIsOutgoingTransactionsAuditable;
 
     CallRestriction mCallRestriction;
 #ifdef BINDER_WITH_OBSERVERS

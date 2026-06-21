@@ -81,4 +81,8 @@ parcelable CaptureArgs {
     boolean useDisplayInstallationOrientation = false;
     // If true, the screenshot will include system overlay layers, such as the screen decor layers.
     boolean includeAllLayers = false;
+
+    // A bitmask for filtering specific type of layers. If a layer's compositionFilterFlag bitwise
+    // AND exclusionMask is non-zero, it should be excluded in the screenshot.
+    int exclusionMask = 0;
 }

@@ -17,7 +17,10 @@
 #pragma once
 
 #include <android-base/macros.h>
+#include <ui/DebugUtils.h>
 #include <ui/GraphicBuffer.h>
+
+#include <ostream>
 
 namespace android::renderengine {
 
@@ -53,5 +56,19 @@ public:
     }
     DISALLOW_COPY_AND_ASSIGN(ExternalTexture);
 };
+
+inline std::ostream& operator<<(std::ostream& os, const ExternalTexture& texture) {
+    os << texture.getId() << " (";
+    os << texture.getWidth() << "x" << texture.getHeight() << ", ";
+    os << decodePixelFormat(texture.getPixelFormat()).c_str();
+    os << ", usage[" << decodeGrallocUsage(texture.getUsage()) << "])";
+    return os;
+}
+
+inline std::string toString(const ExternalTexture& texture) {
+    std::stringstream stream;
+    stream << texture;
+    return stream.str();
+}
 
 } // namespace android::renderengine

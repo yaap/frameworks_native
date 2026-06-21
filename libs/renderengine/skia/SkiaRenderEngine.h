@@ -20,10 +20,15 @@
 #include <renderengine/RenderEngine.h>
 
 #include <android-base/thread_annotations.h>
+#include <android/ipcrenderbuffer/IPCRecordingCanvas.h>
+#include <android/ipcrenderbuffer/RenderBufferHelpers.h>
+#include <gui/RenderCommandBuffer.h>
+#include <gui/RenderCommandBufferConsumer.h>
 #include <include/core/SkImageInfo.h>
 #include <include/core/SkSurface.h>
 #include <include/gpu/ganesh/GrBackendSemaphore.h>
 #include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/private/SkHdrMetadata.h>
 #include <renderengine/ExternalTexture.h>
 #include <renderengine/RenderEngine.h>
 #include <sys/types.h>
@@ -51,6 +56,10 @@ class SkData;
 struct SkPoint3;
 
 namespace android {
+
+namespace uirenderer::skiapipeline {
+class ShaderCache;
+}
 
 namespace renderengine {
 
@@ -95,13 +104,14 @@ protected:
     virtual bool supportsForwardPixelKill() const { return false; }
     virtual bool supportsFastRotatedClipRRectAA() const { return true; }
     virtual bool useProtectedContextImpl(GrProtected isProtected) = 0;
-    virtual void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) = 0;
+    virtual void waitFenceImpl(SkiaGpuContext* context, base::borrowed_fd fenceFd) = 0;
     virtual base::unique_fd flushAndSubmit(SkiaGpuContext* context,
                                            sk_sp<SkSurface> dstSurface) = 0;
     virtual void appendBackendSpecificInfoToDump(std::string& result) = 0;
 
     size_t getMaxTextureSize() const override final;
     size_t getMaxViewportDims() const override final;
+    void logStateForCrash() override;
     // TODO: b/293371537 - Return reference instead of pointer? (Cleanup)
     SkiaGpuContext* getActiveContext();
 
@@ -143,9 +153,30 @@ protected:
 
     BoxShadowUtils mBoxShadowUtils;
 
-    GrContextOptions::PersistentCache& persistentCache(const void* identity, ssize_t size);
+    GrContextOptions::PersistentCache& ganeshPersistentCache(const void* identity, ssize_t size);
+
+    // Define the options each context type has for managing its resource cache. By default, this
+    // is assigned to be the original behavior (kUponContextSwitch).
+    //
+    // Originally, purging at that point helped keep cache size in check. However, since then,
+    // RenderEngine has updated to alternate between contexts much more frequently (e.g. between
+    // frames). This means resources are often purged prematurely when they are still likely to be
+    // reused and that these resources must be recreated, which can be quite costly to performance.
+    //
+    // TODO(b/471228757): Eventually, have all backends agree on the cache management policy for
+    // both the protected and unprotected context. Remove any relevant intermediary structures that
+    // were necessary to initially enable GraphiteVkRenderEngine to define its own policies.
+    enum CacheManagementPolicy : uint8_t {
+        kUponContextSwitch = 0,
+        kClearStaleResourcesPostRender,
+        kOnlyWhenOverBudget // No RenderEngine action needed; handled by Skia
+    };
+    CacheManagementPolicy mUnprotectedCachePolicy = CacheManagementPolicy::kUponContextSwitch;
+    CacheManagementPolicy mProtectedCachePolicy = CacheManagementPolicy::kUponContextSwitch;
 
 private:
+    virtual SkiaBackend backend() const = 0;
+
     void mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
                                   bool isRenderable) override final;
     void unmapExternalTextureBuffer(sp<GraphicBuffer>&& buffer) override final;
@@ -167,7 +198,11 @@ private:
             float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
             const std::shared_ptr<ExternalTexture>& gainmap) override final;
 
+    void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd);
+
     void dump(std::string& result) override final;
+
+    CacheManagementPolicy activeContextCachePolicy() const;
 
     // If requiresLinearEffect is true or the layer has a stretchEffect a new shader is returned.
     // Otherwise it returns the input shader.
@@ -181,6 +216,8 @@ private:
         const ui::Dataspace outputDataSpace;
         const ui::Dataspace fakeOutputDataspace;
         const SkRect& imageBounds;
+        std::optional<skhdr::AdaptiveGlobalToneMap> agtm;
+        ftl::Flags<ColorSpaceOptions> colorSpaceOptions;
     };
     sk_sp<SkShader> createRuntimeEffectShader(const RuntimeEffectShaderParameters&);
 
@@ -222,7 +259,7 @@ private:
     unique_ptr<SkiaGpuContext> mProtectedContext;
     bool mInProtectedContext = false;
 
-    bool mInitializedDiskCache = false;
+    bool mInitializedGaneshDiskCache = false;
     SkSLCacheMonitor mSkSLCacheMonitor;
 
     std::atomic<bool> mRenderDocCaptureNextFrame;

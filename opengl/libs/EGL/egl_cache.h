@@ -140,8 +140,11 @@ private:
     // Whether to use multiple files to store cache entries
     bool mMultifileMode;
 
-    // Cache limit
+    // Cache total limit
     size_t mCacheByteLimit;
+
+    // Cache entry limit
+    size_t mCacheEntryLimit;
 };
 
 }; // namespace android

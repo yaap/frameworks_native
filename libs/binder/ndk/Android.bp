@@ -144,6 +144,18 @@ cc_library {
         // Only check our headers
         "--header-filter=^.*frameworks/native/libs/binder/.*.h$",
     ],
+    tidy_checks: [
+        "-bugprone-branch-clone",
+        "-bugprone-forwarding-reference-overload",
+        "-clang-analyzer-optin.cplusplus.VirtualCall",
+        "-misc-header-include-cycle",
+        "-misc-include-cleaner",
+        "-misc-use-internal-linkage",
+        "-performance-enum-size",
+        "-performance-unnecessary-copy-initialization",
+        "-performance-unnecessary-value-param",
+        "-portability-template-virtual-member-function",
+    ],
     tidy_checks_as_errors: [
         // Explicitly list the checks that should not occur in this module.
         "abseil-*",
@@ -276,4 +288,19 @@ ndk_library {
         // used to be part of the NDK, platform things depend on it
         "libbinder_headers_platform_shared_ndk",
     ],
+}
+
+// For packaging part of sdk-repo-platforms*.zip.
+genrule {
+    name: "libbinder_ndk_include",
+    tools: ["soong_zip"],
+    srcs: [
+        "include_cpp/**/*",
+    ],
+    out: [
+        "libbinder_ndk_include.zip",
+    ],
+    cmd: "mkdir -p $(genDir)/out/optional/libbinder_ndk_cpp/ && " +
+        "cp -r frameworks/native/libs/binder/ndk/include_cpp/* $(genDir)/out/optional/libbinder_ndk_cpp/ && " +
+        "$(location soong_zip) -o $(out) -C $(genDir)/out -D $(genDir)/out",
 }

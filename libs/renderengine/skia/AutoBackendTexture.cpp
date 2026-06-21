@@ -60,10 +60,12 @@ void AutoBackendTexture::releaseImageProc(SkImages::ReleaseContext releaseContex
     textureRelease->unref(false);
 }
 
-sk_sp<SkImage> AutoBackendTexture::makeImage(ui::Dataspace dataspace, SkAlphaType alphaType) {
+sk_sp<SkImage> AutoBackendTexture::makeImage(ui::Dataspace dataspace, SkAlphaType alphaType,
+                                             ftl::Flags<ColorSpaceOptions> options) {
     SFTRACE_CALL();
 
-    sk_sp<SkImage> image = mBackendTexture->makeImage(alphaType, dataspace, releaseImageProc, this);
+    sk_sp<SkImage> image =
+            mBackendTexture->makeImage(alphaType, dataspace, releaseImageProc, this, options);
     // The following ref will be counteracted by releaseProc, when SkImage is discarded.
     ref();
 
@@ -72,13 +74,14 @@ sk_sp<SkImage> AutoBackendTexture::makeImage(ui::Dataspace dataspace, SkAlphaTyp
     return mImage;
 }
 
-sk_sp<SkSurface> AutoBackendTexture::getOrCreateSurface(ui::Dataspace dataspace) {
+sk_sp<SkSurface> AutoBackendTexture::getOrCreateSurface(ui::Dataspace dataspace,
+                                                        ftl::Flags<ColorSpaceOptions> options) {
     SFTRACE_CALL();
     LOG_ALWAYS_FATAL_IF(!mBackendTexture->isOutputBuffer(),
                         "You can't generate an SkSurface for a read-only texture");
     if (!mSurface.get() || mDataspace != dataspace) {
         sk_sp<SkSurface> surface =
-                mBackendTexture->makeSurface(dataspace, releaseSurfaceProc, this);
+                mBackendTexture->makeSurface(dataspace, releaseSurfaceProc, this, options);
         // The following ref will be counteracted by releaseProc, when SkSurface is discarded.
         ref();
 

@@ -95,15 +95,21 @@ renderengine::DisplaySettings ScreenCaptureOutput::generateClientCompositionDisp
     if (mEnableLocalTonemapping) {
         clientCompositionDisplay.tonemapStrategy =
                 renderengine::DisplaySettings::TonemapStrategy::Local;
+    }
+
         if (static_cast<ui::PixelFormat>(buffer->getPixelFormat()) == ui::PixelFormat::RGBA_FP16) {
             clientCompositionDisplay.targetHdrSdrRatio =
                     getState().displayBrightnessNits / getState().sdrWhitePointNits;
         } else {
             clientCompositionDisplay.targetHdrSdrRatio = 1.f;
         }
-    }
 
     return clientCompositionDisplay;
+}
+
+const aidl::android::hardware::graphics::composer3::OverlayProperties*
+ScreenCaptureOutput::getOverlaySupport() {
+    return &getCompositionEngine().getHwComposer().getOverlaySupport();
 }
 
 std::unordered_map<int32_t, aidl::android::hardware::graphics::composer3::Luts>
@@ -122,7 +128,10 @@ ScreenCaptureOutput::generateLuts() {
                     : std::nullopt;
             const auto hdrType = getHdrRenderType(layerState.dataspace, pixelFormat,
                                                   layerFEState->desiredHdrSdrRatio);
-            if (layerFEState->buffer && !layerFEState->luts &&
+            std::optional<std::vector<uint8_t>> smpte2094_50;
+            const bool hasAgtm = layerFEState->buffer &&
+                    layerFEState->buffer->getSmpte2094_50(&smpte2094_50) == OK && smpte2094_50;
+            if (layerFEState->buffer && !layerFEState->luts && !hasAgtm &&
                 hdrType == HdrRenderType::GENERIC_HDR) {
                 buffers.push_back(layerFEState->buffer);
                 layerIds.push_back(layer->getLayerFE().getSequence());

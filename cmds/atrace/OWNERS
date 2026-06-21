@@ -1,0 +1,3 @@
+# OWNERS of Trace-related files
+
+include platform/frameworks/base:/TRACE_OWNERS

@@ -57,6 +57,12 @@ _BLOCKED_EXTENSIONS = [
     'VK_NV_win32_keyed_mutex',
     'VK_NVX_image_view_handle',
     'VK_QNX_screen_surface',
+    'VK_OHOS_surface',
+]
+
+# Extensions not to probe in vkjson, but otherwise may be supportable
+_VKJSON_BLOCKED_EXTENSIONS = [
+    'VK_ARM_shader_core_properties'     # b/446075812
 ]
 
 # Extensions not to probe in vkjson, but otherwise may be supportable
@@ -196,7 +202,7 @@ def version_code(version):
   Args:
     version: Vulkan version string.
   """
-  return version[11:]
+  return version[-3:]
 
 
 def version_2_api_version(version):
@@ -329,7 +335,7 @@ def init_proc(name, f):
 
   if name in _OPTIONAL_COMMANDS:
     f.write('false, ')
-  elif version_dict[name] == 'VK_VERSION_1_0':
+  elif version_dict[name].endswith("_1_0"):
     f.write('true, ')
   else:
     f.write('false, ')
@@ -373,11 +379,19 @@ def parse_vulkan_registry():
         extname = extension.get('name')
         if (extension.get('type') == 'instance' and
             extension.get('promotedto') is not None):
-          promoted_inst_ext_dict[extname] = \
-              version_2_api_version(extension.get('promotedto'))
+            if extension.get('promotedto').startswith('VK_VERSION'):
+                # Note: we only want promotions to core versions!
+                # vk.xml has started describing promotions from EXT to KHR this
+                # way as well, which we skip.
+                promoted_inst_ext_dict[extname] = \
+                        version_2_api_version(extension.get('promotedto'))
         for req in extension.iter('require'):
           if req.get('feature') is not None:
             apiversion = req.get('feature')
+          elif req.get('depends') is not None:
+            deps = req.get('depends')
+            if deps.startswith('VK_VERSION') and deps.isidentifier():
+              apiversion = deps
           for commands in req:
             if commands.tag == 'command':
               cmd_name = commands.get('name')

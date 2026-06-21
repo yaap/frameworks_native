@@ -22,6 +22,7 @@ rust_defaults {
         "libbitflags",
         "libcxx",
         "libinput_bindgen",
+        "libinput_flags_rust",
         "liblog_rust",
         "liblogger",
         "libserde",

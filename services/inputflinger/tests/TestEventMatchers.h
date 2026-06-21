@@ -17,16 +17,18 @@
 #pragma once
 
 #include <cmath>
-#include <compare>
 #include <ios>
 
 #include <android-base/stringprintf.h>
 #include <android/input.h>
+#include <ftl/enum.h>
 #include <ftl/flags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
+#include <input/MotionEventAxis.h>
 #include <input/PrintTools.h>
+#include <linux/input-event-codes.h>
 
 #include "NotifyArgs.h"
 #include "TestConstants.h"
@@ -67,6 +69,10 @@ public:
     }
 
     bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream*) const {
+        return mSource == args.source;
+    }
+
+    bool MatchAndExplain(const NotifySensorArgs& args, std::ostream*) const {
         return mSource == args.source;
     }
 
@@ -212,6 +218,10 @@ public:
         return mDeviceId == args.deviceId;
     }
 
+    bool MatchAndExplain(const NotifySensorArgs& args, std::ostream*) const {
+        return mDeviceId == args.deviceId;
+    }
+
     bool MatchAndExplain(const NotifyDeviceResetArgs& args, std::ostream*) const {
         return mDeviceId == args.deviceId;
     }
@@ -230,6 +240,40 @@ private:
 
 inline WithDeviceIdMatcher WithDeviceId(DeviceId deviceId) {
     return WithDeviceIdMatcher(deviceId);
+}
+
+MATCHER_P(WithSensorType, sensorType, "NotifySensorArgs with specified sensor type") {
+    *result_listener << "expected sensor type " << ftl::enum_string(sensorType) << ", but got "
+                     << ftl::enum_string(arg.sensorType);
+    return arg.sensorType == sensorType;
+}
+
+MATCHER_P(WithSensorAccuracy, accuracy, "NotifySensorArgs with specified sensor accuracy") {
+    *result_listener << "expected sensor accuracy " << ftl::enum_string(accuracy) << ", but got "
+                     << ftl::enum_string(arg.accuracy);
+    return arg.accuracy == accuracy;
+}
+
+MATCHER_P(WithSensorTimestamp, timestamp, "NotifySensorArgs with specified sensor timestamp") {
+    *result_listener << "expected sensor timestamp " << timestamp << ", but got "
+                     << arg.hwTimestamp;
+    return arg.hwTimestamp == timestamp;
+}
+
+MATCHER_P(WithSensorValues, values, "NotifySensorArgs with specified sensor values") {
+    if (arg.values.size() != values.size()) {
+        *result_listener << "expected " << values.size() << " values, but got "
+                         << arg.values.size();
+        return false;
+    }
+    for (size_t i = 0; i < values.size(); i++) {
+        if (!internal::valuesMatch(values[i], arg.values[i])) {
+            *result_listener << "expected value at index " << i << " to be " << values[i]
+                             << ", but got " << arg.values[i];
+            return false;
+        }
+    }
+    return true;
 }
 
 /// Flags
@@ -291,20 +335,20 @@ public:
     using is_gtest_matcher = void;
     explicit WithDownTimeMatcher(nsecs_t downTime) : mDownTime(downTime) {}
 
-    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
-        return mDownTime == args.downTime;
+    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream* os) const {
+        return check(args.downTime, os);
     }
 
-    bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream*) const {
-        return mDownTime == args.downTime;
+    bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream* os) const {
+        return check(args.downTime, os);
     }
 
-    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
-        return mDownTime == event.getDownTime();
+    bool MatchAndExplain(const MotionEvent& event, std::ostream* os) const {
+        return check(event.getDownTime(), os);
     }
 
-    bool MatchAndExplain(const KeyEvent& event, std::ostream*) const {
-        return mDownTime == event.getDownTime();
+    bool MatchAndExplain(const KeyEvent& event, std::ostream* os) const {
+        return check(event.getDownTime(), os);
     }
 
     void DescribeTo(std::ostream* os) const { *os << "with down time " << mDownTime; }
@@ -313,6 +357,14 @@ public:
 
 private:
     const nsecs_t mDownTime;
+
+    bool check(nsecs_t actual, std::ostream* os) const {
+        if (mDownTime != actual) {
+            *os << "expected down time " << mDownTime << ", but got " << actual;
+            return false;
+        }
+        return true;
+    }
 };
 
 inline WithDownTimeMatcher WithDownTime(nsecs_t downTime) {
@@ -577,7 +629,7 @@ public:
     }
 
     void DescribeTo(std::ostream* os) const {
-        *os << "with key code " << KeyEvent::getLabel(mKeyCode);
+        *os << "with key code " << KeyEvent::getLabelOrCode(mKeyCode);
     }
 
     void DescribeNegationTo(std::ostream* os) const { *os << "wrong key code"; }
@@ -605,7 +657,7 @@ public:
     }
 
     void DescribeTo(std::ostream* os) const {
-        *os << "with scan code " << KeyEvent::getLabel(mScanCode);
+        *os << "with scan code " << InputEventLookup::getLinuxEvdevCodeLabel(EV_KEY, mScanCode);
     }
 
     void DescribeNegationTo(std::ostream* os) const { *os << "wrong scan code"; }
@@ -768,6 +820,57 @@ private:
     const float mRelY;
 };
 
+/// Axes matcher
+class WithAxesMatcher {
+public:
+    using is_gtest_matcher = void;
+    explicit WithAxesMatcher(size_t pointerIndex, std::map<int32_t, float> axes)
+          : mPointerIndex(pointerIndex), mAxes(std::move(axes)) {}
+
+    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream* os) const {
+        if (mPointerIndex >= args.pointerCoords.size()) {
+            *os << "Pointer index " << mPointerIndex << " is out of bounds";
+            return false;
+        }
+
+        const PointerCoords& coords = args.pointerCoords[mPointerIndex];
+        for (const auto& [axis, expectedValue] : mAxes) {
+            const float actualValue = coords.getAxisValue(axis);
+            if (!internal::valuesMatch(expectedValue, actualValue)) {
+                *os << "expected axis " << MotionEvent::getLabelOrCode(axis) << " to be "
+                    << expectedValue << " but was " << actualValue;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void DescribeTo(std::ostream* os) const {
+        *os << "with axes "
+            << dumpMap(
+                       mAxes, [](const int32_t& axis) { return MotionEvent::getLabelOrCode(axis); },
+                       constToString<float>);
+    }
+
+    void DescribeNegationTo(std::ostream* os) const { *os << "wrong axes values"; }
+
+private:
+    const size_t mPointerIndex;
+    const std::map<int32_t, float> mAxes;
+};
+
+inline WithAxesMatcher WithAxes(const std::map<int32_t, float>& axes) {
+    return WithAxesMatcher(0, axes);
+}
+
+inline WithAxesMatcher WithAxes(const std::map<MotionEventAxis, float>& axes) {
+    std::map<int32_t, float> rawAxes;
+    for (const auto& [axis, value] : axes) {
+        rawAxes[ftl::to_underlying(axis)] = value;
+    }
+    return WithAxesMatcher(0, rawAxes);
+}
+
 inline WithRelativeMotionMatcher WithRelativeMotion(float relX, float relY) {
     return WithRelativeMotionMatcher(0, relX, relY);
 }
@@ -922,6 +1025,11 @@ MATCHER_P(WithEventTime, eventTime, "InputEvent with specified eventTime") {
     return arg.eventTime == eventTime;
 }
 
+MATCHER_P(WithReadTime, readTime, "InputEvent with specified readTime") {
+    *result_listener << "expected read time " << readTime << ", but got " << arg.readTime;
+    return arg.readTime == readTime;
+}
+
 MATCHER_P(WithDownTime, downTime, "InputEvent with specified downTime") {
     *result_listener << "expected down time " << downTime << ", but got " << arg.downTime;
     return arg.downTime == downTime;
@@ -937,6 +1045,32 @@ MATCHER_P(WithPolicyFlags, policyFlags, "InputEvent with specified policy flags"
     *result_listener << "expected policy flags 0x" << std::hex << policyFlags << ", but got 0x"
                      << arg.policyFlags;
     return arg.policyFlags == static_cast<uint32_t>(policyFlags);
+}
+
+MATCHER_P(WithSwitchValues, switchValues, "NotifySwitchArgs with specified switchValues") {
+    *result_listener << "expected switchValues " << switchValues << ", but got "
+                     << arg.switchValues;
+    return arg.switchValues == switchValues;
+}
+
+MATCHER_P(WithSwitchMask, switchMask, "NotifySwitchArgs with specified switchMask") {
+    *result_listener << "expected switchMask " << switchMask << ", but got " << arg.switchMask;
+    return arg.switchMask == switchMask;
+}
+
+// --- NotifyPointerCaptureChangedArgs ---
+
+MATCHER_P(WithCaptureRequest, request,
+          "NotifyPointerCaptureChangedArgs with specified capture request") {
+    *result_listener << "expected request " << request << ", but got " << arg.request;
+    return arg.request == request;
+}
+
+MATCHER_P(WithCaptureEnable, isEnable,
+          "NotifyPointerCaptureChangedArgs with specified enable state") {
+    *result_listener << "expected request enable state " << isEnable << ", but got "
+                     << arg.request.isEnable();
+    return arg.request.isEnable() == isEnable;
 }
 
 } // namespace android

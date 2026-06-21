@@ -20,7 +20,6 @@
 #include <android-base/stringprintf.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <com_android_graphics_surfaceflinger_flags.h>
-#include <com_android_input_flags.h>
 #include <common/FlagManager.h>
 #include <common/test/FlagUtils.h>
 #include <compositionengine/LayerFECompositionState.h>
@@ -49,8 +48,6 @@
 
 namespace android::compositionengine {
 namespace {
-
-namespace input_flags = com::android::input::flags;
 
 using namespace com::android::graphics::surfaceflinger;
 
@@ -637,40 +634,7 @@ TEST_F(OutputTest, getDirtyRegion) {
     EXPECT_THAT(mOutput->getDirtyRegion(), RegionEq(Region(Rect(50, 200))));
 }
 
-/*
- * Output::includesLayer()
- */
-
-TEST_F_WITH_FLAGS(OutputTest, layerFiltering,
-                  REQUIRES_FLAGS_DISABLED(ACONFIG_FLAG(input_flags, connected_displays_cursor))) {
-    const ui::LayerStack layerStack1{123u};
-    const ui::LayerStack layerStack2{456u};
-
-    // If the output is associated to layerStack1 and to an internal display...
-    mOutput->setLayerFilter({layerStack1, true});
-
-    // It excludes layers with no layer stack, internal-only or not.
-    EXPECT_FALSE(mOutput->includesLayer({ui::UNASSIGNED_LAYER_STACK, false}));
-    EXPECT_FALSE(mOutput->includesLayer({ui::UNASSIGNED_LAYER_STACK, true}));
-
-    // It includes layers on layerStack1, internal-only or not.
-    EXPECT_TRUE(mOutput->includesLayer({layerStack1, false}));
-    EXPECT_TRUE(mOutput->includesLayer({layerStack1, true}));
-    EXPECT_FALSE(mOutput->includesLayer({layerStack2, true}));
-    EXPECT_FALSE(mOutput->includesLayer({layerStack2, false}));
-
-    // If the output is associated to layerStack1 but not to an internal display...
-    mOutput->setLayerFilter({layerStack1, false});
-
-    // It includes layers on layerStack1, unless they are internal-only.
-    EXPECT_TRUE(mOutput->includesLayer({layerStack1, false}));
-    EXPECT_FALSE(mOutput->includesLayer({layerStack1, true}));
-    EXPECT_FALSE(mOutput->includesLayer({layerStack2, true}));
-    EXPECT_FALSE(mOutput->includesLayer({layerStack2, false}));
-}
-
-TEST_F_WITH_FLAGS(OutputTest, layerFiltering_skipScreenshot,
-                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(input_flags, connected_displays_cursor))) {
+TEST_F(OutputTest, layerFiltering_skipScreenshot) {
     const ui::LayerStack layerStack1{123u};
     const ui::LayerStack layerStack2{456u};
 
@@ -708,56 +672,7 @@ TEST_F(OutputTest, layerFilteringWithoutCompositionState) {
     EXPECT_FALSE(mOutput->includesLayer(layerFE));
 }
 
-TEST_F_WITH_FLAGS(OutputTest, layerFilteringWithCompositionState,
-                  REQUIRES_FLAGS_DISABLED(ACONFIG_FLAG(input_flags, connected_displays_cursor))) {
-    NonInjectedLayer layer;
-    sp<LayerFE> layerFE(layer.layerFE);
-
-    const ui::LayerStack layerStack1{123u};
-    const ui::LayerStack layerStack2{456u};
-
-    // If the output is associated to layerStack1 and to an internal display...
-    mOutput->setLayerFilter({layerStack1, true});
-
-    // It excludes layers with no layer stack, internal-only or not.
-    layer.layerFEState.outputFilter = {ui::UNASSIGNED_LAYER_STACK, false};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {ui::UNASSIGNED_LAYER_STACK, true};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    // It includes layers on layerStack1, internal-only or not.
-    layer.layerFEState.outputFilter = {layerStack1, false};
-    EXPECT_TRUE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack1, true};
-    EXPECT_TRUE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack2, true};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack2, false};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    // If the output is associated to layerStack1 but not to an internal display...
-    mOutput->setLayerFilter({layerStack1, false});
-
-    // It includes layers on layerStack1, unless they are internal-only.
-    layer.layerFEState.outputFilter = {layerStack1, false};
-    EXPECT_TRUE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack1, true};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack2, true};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-
-    layer.layerFEState.outputFilter = {layerStack2, false};
-    EXPECT_FALSE(mOutput->includesLayer(layerFE));
-}
-
-TEST_F_WITH_FLAGS(OutputTest, layerFilteringWithCompositionState_skipScreenshot,
-                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(input_flags, connected_displays_cursor))) {
+TEST_F(OutputTest, layerFilteringWithCompositionState_skipScreenshot) {
     NonInjectedLayer layer;
     sp<LayerFE> layerFE(layer.layerFE);
 
@@ -3220,7 +3135,6 @@ TEST_F(OutputFinishFrameTest, queuesBufferIfComposeSurfacesReturnsAFence) {
 }
 
 TEST_F(OutputFinishFrameTest, queuesBufferWithHdrSdrRatio) {
-    SET_FLAG_FOR_TEST(flags::fp16_client_target, true);
     mOutput.mState.isEnabled = true;
 
     InSequence seq;
@@ -3326,8 +3240,6 @@ struct OutputPostFramebufferTest : public testing::Test {
 };
 
 TEST_F(OutputPostFramebufferTest, ifNotEnabledDoesNothing) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
-                      true);
     mOutput.mState.isEnabled = false;
     EXPECT_CALL(mOutput, executeCommands()).Times(0);
     EXPECT_CALL(mOutput, presentFrame()).Times(0);
@@ -3337,8 +3249,6 @@ TEST_F(OutputPostFramebufferTest, ifNotEnabledDoesNothing) {
 }
 
 TEST_F(OutputPostFramebufferTest, ifNotEnabledExecutesCommandsIfFlush) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
-                      true);
     mOutput.mState.isEnabled = false;
     EXPECT_CALL(mOutput, executeCommands());
     EXPECT_CALL(mOutput, presentFrame()).Times(0);
@@ -3348,8 +3258,6 @@ TEST_F(OutputPostFramebufferTest, ifNotEnabledExecutesCommandsIfFlush) {
 }
 
 TEST_F(OutputPostFramebufferTest, ifEnabledDoNotExecuteCommands) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
-                      true);
     mOutput.mState.isEnabled = true;
 
     compositionengine::Output::FrameFences frameFences;
@@ -3371,8 +3279,6 @@ TEST_F(OutputPostFramebufferTest, ifEnabledDoNotExecuteCommands2) {
     // Same test as ifEnabledDoNotExecuteCommands, but with this variable set to false.
     constexpr bool kFlushEvenWhenDisabled = false;
 
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::flush_buffer_slots_to_uncache,
-                      true);
     mOutput.mState.isEnabled = true;
 
     compositionengine::Output::FrameFences frameFences;
@@ -3414,6 +3320,9 @@ TEST_F(OutputPostFramebufferTest, releaseFencesAreSetInLayerFE) {
     // Therefore, disable the flag and re-write it with a looser check when we clean up the flag.
     SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
                               force_slower_follower_gpu_composition,
+                      false);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
+                              force_slower_follower_gpu_composition_platform,
                       false);
 
     // Simulate getting release fences from each layer, and ensure they are passed to the
@@ -3476,6 +3385,8 @@ TEST_F(OutputPostFramebufferTest, releaseFencesAreSetInLayerFE) {
 
 TEST_F(OutputPostFramebufferTest, setReleaseFencesIncludeClientTargetAcquireFence) {
     SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition, false);
+    SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition_platform, false);
+
     mOutput.mState.isEnabled = true;
     mOutput.mState.usesClientComposition = true;
 
@@ -3520,6 +3431,8 @@ TEST_F(OutputPostFramebufferTest, setReleaseFencesIncludeClientTargetAcquireFenc
 
 TEST_F(OutputPostFramebufferTest, setReleaseFencesIncludeLastClientTargetAcquireFence) {
     SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition, true);
+    SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition_platform, true);
+
     mOutput.mState.isEnabled = true;
     mOutput.mState.usesClientComposition = true;
 
@@ -3581,6 +3494,8 @@ TEST_F(OutputPostFramebufferTest, setReleaseFencesIncludeLastClientTargetAcquire
 
 TEST_F(OutputPostFramebufferTest, setReleaseFencesNoLayerOrLastAcquiredFence) {
     SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition, true);
+    SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition_platform, true);
+
     mOutput.mState.isEnabled = true;
     mOutput.mState.usesClientComposition = true;
 
@@ -4490,7 +4405,6 @@ TEST_F(OutputComposeSurfacesTest_UsesExpectedDisplaySettings,
 
 TEST_F(OutputComposeSurfacesTest_UsesExpectedDisplaySettings,
        usesExpectedDisplaySettingsWithFp16Buffer) {
-    SET_FLAG_FOR_TEST(flags::fp16_client_target, true);
     verify().ifMixedCompositionIs(false)
             .andIfUsesHdr(true)
             .withDisplayBrightnessNits(kDisplayLuminance)
@@ -5757,6 +5671,7 @@ TEST_F(OutputUpdateProtectedContentStateTest, ifProtectedContentLayerComposeByHW
     mLayer2.mLayerFEState.hasProtectedContent = true;
     EXPECT_CALL(mRenderEngine, supportsProtectedContent()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mRenderSurface, isProtected).WillOnce(Return(false));
+    EXPECT_CALL(*mRenderSurface, setProtected(true));
     EXPECT_CALL(mLayer1.mOutputLayer, requiresClientComposition()).WillRepeatedly(Return(true));
     EXPECT_CALL(mLayer2.mOutputLayer, requiresClientComposition()).WillRepeatedly(Return(false));
     mOutput.updateProtectedContentState();

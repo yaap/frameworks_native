@@ -154,8 +154,8 @@ std::string KeyEntry::getDescription() const {
                         "repeatCount=%d), policyFlags=0x%08x",
                         deviceId, eventTime, inputEventSourceToString(source).c_str(),
                         displayId.toString().c_str(), KeyEvent::actionToString(action), flags,
-                        KeyEvent::getLabel(keyCode), keyCode, scanCode, metaState, repeatCount,
-                        policyFlags);
+                        KeyEvent::getLabelOrCode(keyCode).c_str(), keyCode, scanCode, metaState,
+                        repeatCount, policyFlags);
 }
 
 std::ostream& operator<<(std::ostream& out, const KeyEntry& keyEntry) {

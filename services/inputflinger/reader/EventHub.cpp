@@ -38,6 +38,7 @@
 
 // #define LOG_NDEBUG 0
 #include <android-base/file.h>
+#include <android-base/parseint.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android_companion_virtualdevice_flags.h>
@@ -46,6 +47,7 @@
 #include <ftl/enum.h>
 #include <input/Input.h>
 #include <input/InputEventLabels.h>
+#include <input/KeyCode.h>
 #include <input/KeyCharacterMap.h>
 #include <input/KeyLayoutMap.h>
 #include <input/PrintTools.h>
@@ -57,6 +59,7 @@
 #include <utils/Timers.h>
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <utility>
@@ -554,18 +557,6 @@ ftl::Flags<InputDeviceClass> getAbsAxisUsage(int32_t axis,
     return deviceClasses & InputDeviceClass::JOYSTICK;
 }
 
-// --- RawAbsoluteAxisInfo ---
-
-std::ostream& operator<<(std::ostream& out, const std::optional<RawAbsoluteAxisInfo>& info) {
-    if (info) {
-        out << "min=" << info->minValue << ", max=" << info->maxValue << ", flat=" << info->flat
-            << ", fuzz=" << info->fuzz << ", resolution=" << info->resolution;
-    } else {
-        out << "unknown range";
-    }
-    return out;
-}
-
 // --- EventHub::Device ---
 
 EventHub::Device::Device(int fd, int32_t id, std::string path, InputDeviceIdentifier identifier,
@@ -598,7 +589,7 @@ void EventHub::Device::close() {
 status_t EventHub::Device::enable() {
     fd = open(path.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0) {
-        ALOGE("could not open %s, %s\n", path.c_str(), strerror(errno));
+        ALOGE("could not enable %s: %s\n", path.c_str(), strerror(errno));
         return -errno;
     }
     enabled = true;
@@ -620,7 +611,7 @@ const std::shared_ptr<KeyCharacterMap> EventHub::Device::getKeyCharacterMap() co
 }
 
 template <std::size_t N>
-status_t EventHub::Device::readDeviceBitMask(unsigned long ioctlCode, BitArray<N>& bitArray) {
+status_t EventHub::Device::readDeviceBitMask(unsigned long ioctlCode, BitArray<N>& bitArray) const {
     if (!hasValidFd()) {
         return BAD_VALUE;
     }
@@ -686,7 +677,7 @@ bool EventHub::Device::populateAbsoluteAxisStates() {
                   identifier.name.c_str(),
                   InputEventLookup::getLinuxEvdevLabel(EV_ABS, axis, 0).code.c_str(), fd,
                   strerror(errno));
-            if (input_flags::abort_device_opening_on_enodev() && errno == ENODEV) {
+            if (errno == ENODEV) {
                 // The device no longer exists. There's no point trying to query any more axes.
                 return false;
             }
@@ -876,6 +867,98 @@ void EventHub::Device::trackInputEvent(const struct input_event& event) {
         default:
             break;
     }
+}
+
+input_trace::TracedEvdevDevice EventHub::Device::toTracedEvdevDevice(
+        const std::string& devicePath) const {
+    uint32_t nodeNumber = std::numeric_limits<uint32_t>::max();
+    if (!base::ParseUint(devicePath.substr(devicePath.find_last_not_of("0123456789") + 1),
+                         &nodeNumber)) {
+        ALOGW("Couldn't parse evdev node number from device path '%s'; reporting %d instead",
+              devicePath.c_str(), nodeNumber);
+    }
+    BitArray<EV_MAX + 1> evBitmask;
+    readDeviceBitMask(EVIOCGBIT(0, 0), evBitmask);
+    input_trace::TracedEvdevDevice tracedDevice = {
+            .eventHubId = id,
+            .evdevNodeNumber = nodeNumber,
+            .identifier = identifier,
+            .evBitmask = evBitmask.toVector(),
+            .propBitmask = propBitmask.toVector(),
+    };
+
+    // We could check the bits in evBitmask in these if statements, but since the rest of the system
+    // processes events from an axis type whether or not that axis is present in evBitmask, let's
+    // match that behaviour with the data we record in the trace.
+    if (keyBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_KEY] = keyBitmask.toVector();
+        for (size_t i = 0; i <= KEY_MAX; i++) {
+            if (keyBitmask.test(i) && keyState.test(i)) {
+                tracedDevice.axisStates[EV_KEY][i] = 1;
+            }
+        }
+    }
+    if (absBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_ABS] = absBitmask.toVector();
+        for (const auto& [axis, state] : absState) {
+            tracedDevice.absInfos[axis] = state.info;
+            tracedDevice.axisStates[EV_ABS][axis] = state.value;
+        }
+
+        if (auto it = absState.find(ABS_MT_SLOT);
+            absBitmask.test(ABS_MT_SLOT) && it != absState.end()) {
+            const int32_t slotCount = it->second.info.maxValue + 1;
+            for (int32_t axis = ABS_MT_TOUCH_MAJOR; axis <= ABS_MT_TOOL_Y; axis++) {
+                if (!absBitmask.test(axis)) {
+                    continue;
+                }
+                std::vector<int32_t> outValues(slotCount + 1);
+                outValues[0] = axis;
+                if (status_t ret = ioctl(fd, EVIOCGMTSLOTS(outValues.size() * sizeof(int32_t)),
+                                         outValues.data());
+                    ret != OK) {
+                    ALOGW("Couldn't fetch current slot values for %s from device %d for tracing "
+                          "(status %d)",
+                          InputEventLookup::getLinuxEvdevLabel(EV_ABS, axis, 0).code.c_str(), id,
+                          ret);
+                }
+                outValues.erase(outValues.begin());
+                tracedDevice.absMtStates[axis] = outValues;
+            }
+        }
+    }
+    if (relBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_REL] = relBitmask.toVector();
+    }
+    if (swBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_SW] = swBitmask.toVector();
+        for (size_t i = 0; i <= SW_MAX; i++) {
+            if (swBitmask.test(i) && swState.test(i)) {
+                tracedDevice.axisStates[EV_SW][i] = 1;
+            }
+        }
+    }
+    if (ledBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_LED] = ledBitmask.toVector();
+        BitArray<LED_CNT> ledState;
+        if (status_t ret = readDeviceBitMask(EVIOCGLED(0), ledState); ret == OK) {
+            for (size_t i = 0; i <= LED_MAX; i++) {
+                if (ledBitmask.test(i) && ledState.test(i)) {
+                    tracedDevice.axisStates[EV_LED][i] = 1;
+                }
+            }
+        } else {
+            ALOGW("Couldn't fetch LED states from device %d for tracing (status %d)", id, ret);
+        }
+    }
+    if (ffBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_FF] = ffBitmask.toVector();
+    }
+    if (mscBitmask.any()) {
+        tracedDevice.eventTypeBitmasks[EV_MSC] = mscBitmask.toVector();
+    }
+
+    return tracedDevice;
 }
 
 /**
@@ -1127,8 +1210,14 @@ int32_t EventHub::getKeyCodeForKeyLocation(RawDeviceId deviceId, int32_t locatio
         device->keyMap.keyLayoutMap == nullptr) {
         return AKEYCODE_UNKNOWN;
     }
+
+    Device* virtualKeyboard = getDeviceLocked(VIRTUAL_KEYBOARD_ID);
+    if (virtualKeyboard == nullptr || virtualKeyboard->keyMap.keyLayoutMap == nullptr) {
+        return AKEYCODE_UNKNOWN;
+    }
+    // Find scancode for key location by lookup into standard QWERTY layout
     std::vector<int32_t> scanCodes =
-            device->keyMap.keyLayoutMap->findScanCodesForKey(locationKeyCode);
+            virtualKeyboard->keyMap.keyLayoutMap->findScanCodesForKey(locationKeyCode);
     if (scanCodes.empty()) {
         ALOGW("Failed to get key code for key location: no scan code maps to key code %d for input"
               "device %d",
@@ -1140,23 +1229,22 @@ int32_t EventHub::getKeyCodeForKeyLocation(RawDeviceId deviceId, int32_t locatio
               locationKeyCode);
     }
     int32_t outKeyCode;
-    status_t mapKeyRes =
-            device->getKeyCharacterMap()->mapKey(scanCodes[0], /*usageCode=*/0, &outKeyCode);
-    switch (mapKeyRes) {
-        case OK:
-            break;
-        case NAME_NOT_FOUND:
-            // key character map doesn't re-map this scanCode, hence the keyCode remains the same
-            outKeyCode = locationKeyCode;
-            break;
-        default:
-            ALOGW("Failed to get key code for key location: Key character map returned error %s",
-                  statusToString(mapKeyRes).c_str());
-            outKeyCode = AKEYCODE_UNKNOWN;
-            break;
+    status_t result = NAME_NOT_FOUND;
+    if (!device->getKeyCharacterMap()->mapKey(scanCodes[0], /*usageCode=*/0, &outKeyCode)) {
+        result = NO_ERROR;
+    }
+    uint32_t outFlags;
+    // key character map doesn't re-map this scanCode, use key layout file instead
+    if (result != NO_ERROR && !device->keyMap.keyLayoutMap->mapKey(scanCodes[0], /*usageCode=*/0,
+                                                                   &outKeyCode, &outFlags)) {
+        result = NO_ERROR;
+    }
+    if (result != NO_ERROR) {
+        return AKEYCODE_UNKNOWN;
     }
     // Remap if there is a Key remapping added to the KCM and return the remapped key
-    return device->getKeyCharacterMap()->applyKeyRemapping(outKeyCode);
+    outKeyCode = device->getKeyCharacterMap()->applyKeyRemapping(outKeyCode);
+    return outKeyCode;
 }
 
 int32_t EventHub::getSwitchState(RawDeviceId deviceId, int32_t sw) const {
@@ -1226,7 +1314,7 @@ bool EventHub::markSupportedKeyCodes(RawDeviceId deviceId, const std::vector<int
 }
 
 void EventHub::setKeyRemapping(RawDeviceId deviceId,
-                               const std::map<int32_t, int32_t>& keyRemapping) const {
+                               const std::unordered_map<int32_t, int32_t>& keyRemapping) {
     std::scoped_lock _l(mLock);
     Device* device = getDeviceLocked(deviceId);
     if (device == nullptr) {
@@ -1238,26 +1326,46 @@ void EventHub::setKeyRemapping(RawDeviceId deviceId,
     }
 }
 
-status_t EventHub::mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
-                          int32_t metaState, int32_t* outKeycode, int32_t* outMetaState,
-                          uint32_t* outFlags) const {
+void EventHub::setAxisRemapping(RawDeviceId deviceId,
+                                const std::unordered_map<int32_t, int32_t>& axisRemapping) {
+    std::scoped_lock _l(mLock);
+    Device* device = getDeviceLocked(deviceId);
+
+    if (device == nullptr) {
+        ALOGE("Invalid device id=%" PRId32 " provided to %s", deviceId, __func__);
+        return;
+    }
+    if (!device->keyMap.haveKeyLayout()) {
+        ALOGW("Device %d does not have a key layout, cannot set axis remapping.", deviceId);
+        return;
+    }
+    device->keyMap.keyLayoutMap->setAxisRemapping(axisRemapping);
+}
+
+std::optional<MappedKey> EventHub::mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
+                                          int32_t metaState) const {
     std::scoped_lock _l(mLock);
     Device* device = getDeviceLocked(deviceId);
     status_t status = NAME_NOT_FOUND;
+
+    int32_t outKeycode = 0;
+    uint32_t outFlags = 0;
+    KeyCode outOriginalKeyCode = KeyCode::UNKNOWN;
+    int32_t outMetaState = metaState;
 
     if (device != nullptr) {
         // Check the key character map first.
         const std::shared_ptr<KeyCharacterMap> kcm = device->getKeyCharacterMap();
         if (kcm) {
-            if (!kcm->mapKey(scanCode, usageCode, outKeycode)) {
-                *outFlags = 0;
+            if (!kcm->mapKey(scanCode, usageCode, &outKeycode)) {
+                outFlags = 0;
                 status = NO_ERROR;
             }
         }
 
         // Check the key layout next.
         if (status != NO_ERROR && device->keyMap.haveKeyLayout()) {
-            if (!device->keyMap.keyLayoutMap->mapKey(scanCode, usageCode, outKeycode, outFlags)) {
+            if (!device->keyMap.keyLayoutMap->mapKey(scanCode, usageCode, &outKeycode, &outFlags)) {
                 status = NO_ERROR;
             }
         }
@@ -1266,24 +1374,27 @@ status_t EventHub::mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageC
             if (kcm) {
                 // Remap keys based on user-defined key remappings and key behavior defined in the
                 // corresponding kcm file
-                *outKeycode = kcm->applyKeyRemapping(*outKeycode);
+                outOriginalKeyCode = static_cast<KeyCode>(outKeycode);
+                outKeycode = kcm->applyKeyRemapping(outKeycode);
 
                 // Remap keys based on Key behavior defined in KCM file
-                std::tie(*outKeycode, *outMetaState) =
-                        kcm->applyKeyBehavior(*outKeycode, metaState);
+                std::tie(outKeycode, outMetaState) = kcm->applyKeyBehavior(outKeycode, metaState);
             } else {
-                *outMetaState = metaState;
+                outMetaState = metaState;
             }
         }
     }
 
     if (status != NO_ERROR) {
-        *outKeycode = 0;
-        *outFlags = 0;
-        *outMetaState = metaState;
+        return std::nullopt;
     }
 
-    return status;
+    return MappedKey{
+            .keyCode = outKeycode,
+            .originalKeyCode = outOriginalKeyCode,
+            .metaState = outMetaState,
+            .flags = outFlags,
+    };
 }
 
 status_t EventHub::mapAxis(RawDeviceId deviceId, int32_t scanCode, AxisInfo* outAxisInfo) const {
@@ -2676,6 +2787,11 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
           device->keyMap.keyLayoutFile.c_str(), device->keyMap.keyCharacterMapFile.c_str(),
           toString(mBuiltInKeyboardId == deviceId));
 
+    if (mTracer) {
+        mTracer->traceDeviceAddition(systemTime(SYSTEM_TIME_MONOTONIC),
+                                     device->toTracedEvdevDevice(devicePath));
+    }
+
     addDeviceLocked(std::move(device));
 }
 
@@ -2938,6 +3054,10 @@ void EventHub::closeDeviceLocked(Device& device) {
     releaseControllerNumberLocked(device.controllerNumber);
     device.controllerNumber = 0;
     device.close();
+
+    if (mTracer) {
+        mTracer->traceDeviceRemoval(systemTime(SYSTEM_TIME_MONOTONIC), device.id);
+    }
 
     // Try to remove this device from mDevices.
     if (auto it = mDevices.find(device.id); it != mDevices.end()) {

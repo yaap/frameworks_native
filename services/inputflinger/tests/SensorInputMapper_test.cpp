@@ -109,25 +109,21 @@ TEST_F(SensorInputMapperTest, ProcessAccelerometerSensor) {
     ASSERT_TRUE(mMapper->enableSensor(InputDeviceSensorType::ACCELEROMETER,
                                       std::chrono::microseconds(10000),
                                       std::chrono::microseconds(0)));
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_X, 20000);
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_Y, -20000);
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_Z, 40000);
-    args += process(ARBITRARY_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_ABS, ABS_X, 20000);
+    process(ARBITRARY_TIME, EV_ABS, ABS_Y, -20000);
+    process(ARBITRARY_TIME, EV_ABS, ABS_Z, 40000);
+    process(ARBITRARY_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
     std::vector<float> values = {20000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT,
                                  -20000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT,
                                  40000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT};
 
-    ASSERT_EQ(args.size(), 1u);
-    const NotifySensorArgs& arg = std::get<NotifySensorArgs>(args.front());
-    ASSERT_EQ(arg.source, AINPUT_SOURCE_SENSOR);
-    ASSERT_EQ(arg.deviceId, DEVICE_ID);
-    ASSERT_EQ(arg.sensorType, InputDeviceSensorType::ACCELEROMETER);
-    ASSERT_EQ(arg.accuracy, InputDeviceSensorAccuracy::HIGH);
-    ASSERT_EQ(arg.hwTimestamp, ARBITRARY_TIME);
-    ASSERT_EQ(arg.values, values);
+    mFakeListener.expectSensorEvent(AllOf(WithSource(AINPUT_SOURCE_SENSOR), WithDeviceId(DEVICE_ID),
+                                          WithSensorType(InputDeviceSensorType::ACCELEROMETER),
+                                          WithSensorAccuracy(InputDeviceSensorAccuracy::HIGH),
+                                          WithSensorTimestamp(ARBITRARY_TIME),
+                                          WithSensorValues(values)));
     mMapper->flushSensor(InputDeviceSensorType::ACCELEROMETER);
 }
 
@@ -154,25 +150,21 @@ TEST_F(SensorInputMapperTest, ProcessGyroscopeSensor) {
     ASSERT_TRUE(mMapper->enableSensor(InputDeviceSensorType::GYROSCOPE,
                                       std::chrono::microseconds(10000),
                                       std::chrono::microseconds(0)));
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_RX, 20000);
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_RY, -20000);
-    args += process(ARBITRARY_TIME, EV_ABS, ABS_RZ, 40000);
-    args += process(ARBITRARY_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_ABS, ABS_RX, 20000);
+    process(ARBITRARY_TIME, EV_ABS, ABS_RY, -20000);
+    process(ARBITRARY_TIME, EV_ABS, ABS_RZ, 40000);
+    process(ARBITRARY_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
     std::vector<float> values = {20000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT,
                                  -20000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT,
                                  40000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT};
 
-    ASSERT_EQ(args.size(), 1u);
-    const NotifySensorArgs& arg = std::get<NotifySensorArgs>(args.front());
-    ASSERT_EQ(arg.source, AINPUT_SOURCE_SENSOR);
-    ASSERT_EQ(arg.deviceId, DEVICE_ID);
-    ASSERT_EQ(arg.sensorType, InputDeviceSensorType::GYROSCOPE);
-    ASSERT_EQ(arg.accuracy, InputDeviceSensorAccuracy::HIGH);
-    ASSERT_EQ(arg.hwTimestamp, ARBITRARY_TIME);
-    ASSERT_EQ(arg.values, values);
+    mFakeListener.expectSensorEvent(AllOf(WithSource(AINPUT_SOURCE_SENSOR), WithDeviceId(DEVICE_ID),
+                                          WithSensorType(InputDeviceSensorType::GYROSCOPE),
+                                          WithSensorAccuracy(InputDeviceSensorAccuracy::HIGH),
+                                          WithSensorTimestamp(ARBITRARY_TIME),
+                                          WithSensorValues(values)));
     mMapper->flushSensor(InputDeviceSensorType::GYROSCOPE);
 }
 

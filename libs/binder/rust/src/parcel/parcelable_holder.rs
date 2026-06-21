@@ -16,15 +16,20 @@
 
 use crate::binder::Stability;
 use crate::binder::StabilityType;
+use crate::binder_impl::panic_if_poisoned;
+use crate::binder_impl::Mutex;
 use crate::error::StatusCode;
 use crate::parcel::{
     BorrowedParcel, Deserialize, Parcel, Parcelable, Serialize, NON_NULL_PARCELABLE_FLAG,
     NULL_PARCELABLE_FLAG,
 };
 
+use alloc::string::String;
+use alloc::sync::Arc;
+use core::any::Any;
+use core::fmt::Debug;
+use core::marker::PhantomData;
 use downcast_rs::{impl_downcast, DowncastSync};
-use std::any::Any;
-use std::sync::{Arc, Mutex};
 
 /// Metadata that `ParcelableHolder` needs for all parcelables.
 ///
@@ -42,9 +47,9 @@ pub trait ParcelableMetadata {
     }
 }
 
-trait AnyParcelable: DowncastSync + Parcelable + std::fmt::Debug {}
+trait AnyParcelable: DowncastSync + Parcelable + Debug {}
 impl_downcast!(sync AnyParcelable);
-impl<T> AnyParcelable for T where T: DowncastSync + Parcelable + std::fmt::Debug {}
+impl<T> AnyParcelable for T where T: DowncastSync + Parcelable + Debug {}
 
 #[derive(Debug, Clone)]
 enum ParcelableHolderData {
@@ -70,7 +75,7 @@ pub struct ParcelableHolder<STABILITY: StabilityType> {
     // `ParcelableHolder` even for that getter method.
     data: Mutex<ParcelableHolderData>,
 
-    _stability_phantom: std::marker::PhantomData<STABILITY>,
+    _stability_phantom: PhantomData<STABILITY>,
 }
 
 impl<STABILITY: StabilityType> ParcelableHolder<STABILITY> {
@@ -87,20 +92,20 @@ impl<STABILITY: StabilityType> ParcelableHolder<STABILITY> {
     /// Note that this method does not reset the stability,
     /// only the contents.
     pub fn reset(&mut self) {
-        *self.data.get_mut().unwrap() = ParcelableHolderData::Empty;
+        *panic_if_poisoned!(self.data.get_mut()) = ParcelableHolderData::Empty;
         // We could also clear stability here, but C++ doesn't
     }
 
     /// Set the parcelable contained in this `ParcelableHolder`.
     pub fn set_parcelable<T>(&mut self, p: Arc<T>) -> Result<(), StatusCode>
     where
-        T: Any + Parcelable + ParcelableMetadata + std::fmt::Debug + Send + Sync,
+        T: Any + Parcelable + ParcelableMetadata + Debug + Send + Sync,
     {
         if STABILITY::VALUE > p.get_stability() {
             return Err(StatusCode::BAD_VALUE);
         }
 
-        *self.data.get_mut().unwrap() =
+        *panic_if_poisoned!(self.data.get_mut()) =
             ParcelableHolderData::Parcelable { parcelable: p, name: T::get_descriptor().into() };
 
         Ok(())
@@ -121,10 +126,10 @@ impl<STABILITY: StabilityType> ParcelableHolder<STABILITY> {
     ///   with the correct descriptor
     pub fn get_parcelable<T>(&self) -> Result<Option<Arc<T>>, StatusCode>
     where
-        T: Any + Parcelable + ParcelableMetadata + Default + std::fmt::Debug + Send + Sync,
+        T: Any + Parcelable + ParcelableMetadata + Default + Debug + Send + Sync,
     {
         let parcelable_desc = T::get_descriptor();
-        let mut data = self.data.lock().unwrap();
+        let mut data = panic_if_poisoned!(self.data.lock());
         match *data {
             ParcelableHolderData::Empty => Ok(None),
             ParcelableHolderData::Parcelable { ref parcelable, ref name } => {
@@ -175,7 +180,7 @@ impl<STABILITY: StabilityType> Default for ParcelableHolder<STABILITY> {
 impl<STABILITY: StabilityType> Clone for ParcelableHolder<STABILITY> {
     fn clone(&self) -> Self {
         ParcelableHolder {
-            data: Mutex::new(self.data.lock().unwrap().clone()),
+            data: Mutex::new(panic_if_poisoned!(self.data.lock()).clone()),
             _stability_phantom: Default::default(),
         }
     }
@@ -213,7 +218,7 @@ impl<STABILITY: StabilityType> Parcelable for ParcelableHolder<STABILITY> {
     fn write_to_parcel(&self, parcel: &mut BorrowedParcel<'_>) -> Result<(), StatusCode> {
         parcel.write(&STABILITY::VALUE)?;
 
-        let mut data = self.data.lock().unwrap();
+        let mut data = panic_if_poisoned!(self.data.lock());
         match *data {
             ParcelableHolderData::Empty => parcel.write(&0i32),
             ParcelableHolderData::Parcelable { ref parcelable, ref name } => {
@@ -258,7 +263,7 @@ impl<STABILITY: StabilityType> Parcelable for ParcelableHolder<STABILITY> {
             return Err(StatusCode::BAD_VALUE);
         }
         if data_size == 0 {
-            *self.data.get_mut().unwrap() = ParcelableHolderData::Empty;
+            *panic_if_poisoned!(self.data.get_mut()) = ParcelableHolderData::Empty;
             return Ok(());
         }
 
@@ -269,7 +274,7 @@ impl<STABILITY: StabilityType> Parcelable for ParcelableHolder<STABILITY> {
 
         let mut new_parcel = Parcel::new();
         new_parcel.append_from(parcel, data_start, data_size)?;
-        *self.data.get_mut().unwrap() = ParcelableHolderData::Parcel(new_parcel);
+        *panic_if_poisoned!(self.data.get_mut()) = ParcelableHolderData::Parcel(new_parcel);
 
         // Safety: `append_from` checks if `data_size` overflows
         // `parcel` and returns `BAD_VALUE` if that happens. We also

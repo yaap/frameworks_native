@@ -59,6 +59,11 @@ class Dumpsys {
         TYPE_CLIENTS = 0x10,   // dump pid of clients
     };
 
+    enum class ServiceBehavior {
+        DUMP_IF_STARTED,
+        WAIT_UNTIL_STARTED,  // Will wait forever if configured improperly
+    };
+
     /**
      * Starts a thread to connect to a service and get its dump output. The thread redirects
      * the output to a pipe. Thread must be stopped by a subsequent call to {@code
@@ -66,12 +71,14 @@ class Dumpsys {
      * @param dumpTypeFlags operations to perform
      * @param serviceName
      * @param args list of arguments to pass to service dump method.
+     * @param serviceBehavior `WAIT_UNTIL_STARTED` will wait for the service to be started,
+     *           `DUMP_IF_STARTED` will only dump if the service is already started.
      * @return {@code OK} thread is started successfully.
      *         {@code NAME_NOT_FOUND} service could not be found.
      *         {@code != OK} error
      */
     status_t startDumpThread(int dumpTypeFlags, const String16& serviceName,
-                             const Vector<String16>& args);
+                             const Vector<String16>& args, ServiceBehavior serviceBehavior);
 
     /**
      * Writes a section header to a file descriptor.

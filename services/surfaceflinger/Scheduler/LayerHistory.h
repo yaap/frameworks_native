@@ -17,10 +17,10 @@
 #pragma once
 
 #include <android-base/thread_annotations.h>
+#include <ftl/small_map.h>
 #include <utils/RefBase.h>
 #include <utils/Timers.h>
 
-#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -105,9 +105,15 @@ private:
     friend class LayerHistoryIntegrationTest;
     friend class TestableScheduler;
 
+    // A reasonable guess as to how many layers can be created. If more are
+    // created, ftl::SmallMap degrades to use std::vector storage under the hood.
+    // This value doesn't need to be very accurate but needs to be large enough to
+    // maintain the performance improvement of using ftl::SmallMap.
+    static constexpr size_t kLayerMapSize = 64;
+
     using LayerPair = std::pair<Layer*, std::unique_ptr<LayerInfo>>;
     // keyed by id as returned from Layer::getSequence()
-    using LayerInfos = std::unordered_map<int32_t, LayerPair>;
+    using LayerInfos = ftl::SmallMap<int32_t, LayerPair, kLayerMapSize>;
 
     std::string dumpGameFrameRateOverridesLocked() const REQUIRES(mLock);
 

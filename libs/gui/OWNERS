@@ -1,20 +1,30 @@
 # Bug component: 1075131
 
-carlosmr@google.com
-chrisforbes@google.com
-jshargo@google.com
-jreck@google.com
+include platform/frameworks/base:/graphics/java/android/graphics/CORE_GRAPHICS_OWNERS
 
-file:/services/surfaceflinger/OWNERS
+chrisforbes@google.com
 
 per-file EndToEndNativeInputTest.cpp = svv@google.com
 
 # BufferQueue is feature-frozen
 per-file BufferQueue* = set noparent
-per-file BufferQueue* = jreck@google.com, sumir@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
+per-file BufferQueue* = jreck@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
 per-file IGraphicBuffer* = set noparent
-per-file IGraphicBuffer* = jreck@google.com, sumir@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
+per-file IGraphicBuffer* = jreck@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
 per-file include/gui/BufferQueue* = set noparent
-per-file include/gui/BufferQueue* = jreck@google.com, sumir@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
+per-file include/gui/BufferQueue* = jreck@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
 per-file include/gui/IGraphicBuffer* = set noparent
-per-file include/gui/IGraphicBuffer* = jreck@google.com, sumir@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
+per-file include/gui/IGraphicBuffer* = jreck@google.com, alecmouri@google.com, jshargo@google.com, carlosmr@google.com
+
+# SF front end related
+per-file **BLASTBufferQueue* = file:/services/surfaceflinger/OWNERS
+per-file **BufferReleaseChannel.* = file:/services/surfaceflinger/OWNERS
+per-file **ITransactionCompletedListener.* = file:/services/surfaceflinger/OWNERS
+per-file **Layer* = file:/services/surfaceflinger/OWNERS
+per-file **SurfaceControl.* = file:/services/surfaceflinger/OWNERS
+per-file **SurfaceComposerClient.* = file:/services/surfaceflinger/OWNERS
+per-file **Window* = file:/services/surfaceflinger/OWNERS
+per-file **RenderCommandBuffer* = file:/services/surfaceflinger/OWNERS
+per-file **LocklessTripleBuffer* = file:/services/surfaceflinger/OWNERS
+
+per-file Android.bp = file:/services/surfaceflinger/OWNERS

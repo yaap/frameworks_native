@@ -17,23 +17,25 @@
 #include <chrono>
 #include <vector>
 
+#include <android-base/result-gmock.h>
 #include <attestation/HmacKeyManager.h>
 #include <com_android_input_flags.h>
 #include <flag_macros.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/InputConsumer.h>
 #include <input/InputTransport.h>
+#include <input/ScopedFlagOverride.h>
 
 using namespace std::chrono_literals;
 
-namespace android {
+using android::base::testing::Ok;
 
-namespace {
+namespace android {
 
 namespace input_flags = com::android::input::flags;
 
-const auto CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS =
-        ACONFIG_FLAG(input_flags, clear_relative_axes_in_resampled_coords);
+namespace {
 
 struct Pointer {
     int32_t id;
@@ -80,7 +82,7 @@ protected:
                                   const std::vector<Pointer>& pointers, ui::LogicalDisplayId);
     void publishInputEventEntries(const std::vector<InputEventEntry>& entries);
     void consumeInputEventEntries(const std::vector<InputEventEntry>& entries,
-                                  std::chrono::nanoseconds frameTime);
+                                  std::chrono::nanoseconds frameTime, bool consumeBatches);
     void receiveResponseUntilSequence(uint32_t seq);
 };
 
@@ -156,7 +158,7 @@ void TouchResamplingTest::receiveResponseUntilSequence(uint32_t seq) {
     while (consumedEvents < 100) {
         android::base::Result<InputPublisher::ConsumerResponse> response =
                 mPublisher->receiveConsumerResponse();
-        ASSERT_TRUE(response.ok());
+        ASSERT_THAT(response, Ok());
         ASSERT_TRUE(std::holds_alternative<InputPublisher::Finished>(*response));
         const InputPublisher::Finished& finish = std::get<InputPublisher::Finished>(*response);
         ASSERT_TRUE(finish.handled)
@@ -175,15 +177,55 @@ void TouchResamplingTest::receiveResponseUntilSequence(uint32_t seq) {
  * must contain identical values for the action field.
  */
 void TouchResamplingTest::consumeInputEventEntries(const std::vector<InputEventEntry>& entries,
-                                                   std::chrono::nanoseconds frameTime) {
-    ASSERT_GE(entries.size(), 1U) << "Must have at least 1 InputEventEntry to compare against";
-
+                                                   std::chrono::nanoseconds frameTime,
+                                                   bool consumeBatches) {
     uint32_t consumeSeq;
     InputEvent* event;
 
-    status_t status = mConsumer->consume(&mEventFactory, /*consumeBatches=*/true, frameTime.count(),
-                                         &consumeSeq, &event);
-    ASSERT_EQ(OK, status);
+    auto [result, unfinishedInputMessages] =
+            mConsumer->consume(&mEventFactory, consumeBatches, frameTime.count(), &consumeSeq,
+                               &event);
+
+    if (!consumeBatches) {
+        // When consumeBatches is false, mConsumer->consume only returns an event if a NEW message
+        // is received from the channel *and* that message is either not batchable
+        // (e.g., DOWN, UP) or causes a pending batch to be flushed.
+        if (!result.ok() && result.error().code() == WOULD_BLOCK) {
+            // This is the common case if no new message has arrived on the channel
+            // since the last call. No event should have been produced.
+            ASSERT_TRUE(entries.empty())
+                    << "consume(consumeBatches=false) returned WOULD_BLOCK, indicating no new "
+                    << "channel message was processed. Expected entries should be empty.";
+            return;
+        }
+
+        // If not WOULD_BLOCK, an event must have been consumed. This implies a new message
+        // arrived and was processed, resulting in an event.
+        ASSERT_THAT(result, Ok()) << "consume(consumeBatches=false) failed unexpectedly: "
+                                  << result.error().message();
+        ASSERT_FALSE(entries.empty()) << "consume(consumeBatches=false) returned an event, but the "
+                                         "expected entries list is empty.";
+    } else { // consumeBatches == true
+        // When consumeBatches is true, mConsumer->consume will always try to produce an event
+        // from any buffered batches if the channel has no new messages (WOULD_BLOCK).
+        // An error result here would likely indicate a more serious issue like NO_MEMORY.
+        ASSERT_THAT(result, Ok()) << "consume(consumeBatches=true) failed unexpectedly: "
+                                  << result.error().message();
+
+        if (event == nullptr) {
+            // This means consumeBatch was called but determined no batched events were ready
+            // to be dispatched for the given frameTime.
+            ASSERT_TRUE(entries.empty())
+                    << "consume(consumeBatches=true) returned OK but no event (event == nullptr), "
+                    << "indicating no batch was ready. Expected entries should be empty.";
+            return;
+        }
+        // An event was successfully consumed from a batch.
+        ASSERT_FALSE(entries.empty()) << "consume(consumeBatches=true) returned an event, but the "
+                                         "expected entries list is empty.";
+    }
+
+    ASSERT_TRUE(event != nullptr) << "Result is OK, but no event was returned.";
     MotionEvent* motionEvent = static_cast<MotionEvent*>(event);
 
     ASSERT_EQ(entries.size() - 1, motionEvent->getHistorySize());
@@ -221,7 +263,7 @@ void TouchResamplingTest::consumeInputEventEntries(const std::vector<InputEventE
         }
     }
 
-    status = mConsumer->sendFinishedSignal(consumeSeq, true);
+    status_t status = mConsumer->sendFinishedSignal(consumeSeq, true);
     ASSERT_EQ(OK, status);
 
     receiveResponseUntilSequence(consumeSeq);
@@ -258,7 +300,7 @@ TEST_F(TouchResamplingTest, EventIsResampled) {
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -274,7 +316,7 @@ TEST_F(TouchResamplingTest, EventIsResampled) {
             {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
             {25ms, {{0, 35, 30, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -297,7 +339,7 @@ TEST_F(TouchResamplingTest, EventIsResampledWithDifferentId) {
             //      id  x   y
             {0ms, {{1, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -313,7 +355,7 @@ TEST_F(TouchResamplingTest, EventIsResampledWithDifferentId) {
             {20ms, {{1, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
             {25ms, {{1, 35, 30, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -335,7 +377,7 @@ TEST_F(TouchResamplingTest, StylusEventIsResampled) {
             //      id  x   y
             {0ms, {{0, 10, 20, .toolType = ToolType::STYLUS}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -353,7 +395,7 @@ TEST_F(TouchResamplingTest, StylusEventIsResampled) {
              {{0, 35, 30, .toolType = ToolType::STYLUS, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -375,7 +417,7 @@ TEST_F(TouchResamplingTest, MouseEventIsResampled) {
             //      id  x   y
             {0ms, {{0, 10, 20, .toolType = ToolType::MOUSE}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -393,14 +435,13 @@ TEST_F(TouchResamplingTest, MouseEventIsResampled) {
              {{0, 35, 30, .toolType = ToolType::MOUSE, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
  * Mouse pointer coordinates are resampled.
  */
-TEST_F_WITH_FLAGS(TouchResamplingTest, MouseEventIsResampledClearingRelativeAxes,
-                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+TEST_F(TouchResamplingTest, MouseEventIsResampledClearingRelativeAxes) {
     std::chrono::nanoseconds frameTime;
     std::vector<InputEventEntry> entries, expectedEntries;
 
@@ -416,7 +457,7 @@ TEST_F_WITH_FLAGS(TouchResamplingTest, MouseEventIsResampledClearingRelativeAxes
             //      id  x   y
             {0ms, {{0, 10, 20, .toolType = ToolType::MOUSE}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y.
     // In the resampled event, RELATIVE_X and RELATIVE_Y are cleared to zero.
@@ -453,7 +494,7 @@ TEST_F_WITH_FLAGS(TouchResamplingTest, MouseEventIsResampledClearingRelativeAxes
                               {AMOTION_EVENT_AXIS_RELATIVE_Y, 0}}}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -475,7 +516,7 @@ TEST_F(TouchResamplingTest, PalmEventIsNotResampled) {
             //      id  x   y
             {0ms, {{0, 10, 20, .toolType = ToolType::PALM}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -490,7 +531,7 @@ TEST_F(TouchResamplingTest, PalmEventIsNotResampled) {
             {10ms, {{0, 20, 30, .toolType = ToolType::PALM}}, AMOTION_EVENT_ACTION_MOVE},
             {20ms, {{0, 30, 30, .toolType = ToolType::PALM}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -512,7 +553,7 @@ TEST_F(TouchResamplingTest, SampleTimeEqualsEventTime) {
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -528,7 +569,7 @@ TEST_F(TouchResamplingTest, SampleTimeEqualsEventTime) {
             {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
             // no resampled event because the time of resample falls exactly on the existing event
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 /**
@@ -552,7 +593,7 @@ TEST_F(TouchResamplingTest, ResampledValueIsUsedForIdenticalCoordinates) {
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -568,7 +609,7 @@ TEST_F(TouchResamplingTest, ResampledValueIsUsedForIdenticalCoordinates) {
             {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
             {25ms, {{0, 35, 30, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Coordinate value 30 has been resampled to 35. When a new event comes in with value 30 again,
     // the system should still report 35.
@@ -587,7 +628,7 @@ TEST_F(TouchResamplingTest, ResampledValueIsUsedForIdenticalCoordinates) {
              {{0, 35, 30, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE}, // resampled event, rewritten
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
@@ -606,7 +647,7 @@ TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -622,7 +663,7 @@ TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
             {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
             {25ms, {{0, 35, 30, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
     // Above, the resampled event is at 25ms rather than at 30 ms = 35ms - RESAMPLE_LATENCY
     // because we are further bound by how far we can extrapolate by the "last time delta".
     // That's 50% of (20 ms - 10ms) => 5ms. So we can't predict more than 5 ms into the future
@@ -645,12 +686,11 @@ TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccurs) {
              {{0, 45, 30, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE}, // resampled event, rewritten
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 // Similar to OldEventReceivedAfterResampleOccurs, but axis values are set and verified.
-TEST_F_WITH_FLAGS(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerifyAxes,
-                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+TEST_F(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerifyAxes) {
     std::chrono::nanoseconds frameTime;
     std::vector<InputEventEntry> entries, expectedEntries;
 
@@ -666,7 +706,7 @@ TEST_F_WITH_FLAGS(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerify
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y
     entries = {
@@ -702,7 +742,7 @@ TEST_F_WITH_FLAGS(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerify
                               {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
     // Above, the resampled event is at 25ms rather than at 30 ms = 35ms - RESAMPLE_LATENCY
     // because we are further bound by how far we can extrapolate by the "last time delta".
     // That's 50% of (20 ms - 10ms) => 5ms. So we can't predict more than 5 ms into the future
@@ -733,7 +773,7 @@ TEST_F_WITH_FLAGS(TouchResamplingTest, OldEventReceivedAfterResampleOccursVerify
                               {AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE, 0}}}},
              AMOTION_EVENT_ACTION_MOVE}, // axis values are cleared
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
@@ -761,7 +801,7 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
             //      id  x   y
             {0ms, {{0, 100, 100}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     entries = {
             //       id  x   y
@@ -774,7 +814,7 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
             {10ms, {{0, 100, 100}}, AMOTION_EVENT_ACTION_MOVE},
             // no resampled value because frameTime - RESAMPLE_LATENCY == eventTime
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Second pointer id=1 appears
     entries = {
@@ -788,7 +828,7 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
             {15ms, {{0, 100, 100}, {1, 500, 500}}, actionPointer1Down},
             // no resampled value because frameTime - RESAMPLE_LATENCY == eventTime
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Both pointers move
     entries = {
@@ -806,7 +846,7 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
              {{0, 130, 130, .isResampled = true}, {1, 650, 650, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Both pointers move again
     entries = {
@@ -831,21 +871,43 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
              {{0, 135, 135, .isResampled = true}, {1, 750, 750, .isResampled = true}},
              AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // First pointer id=0 leaves the screen
-    entries = {
+    if (input_flags::fix_action_up_resampling()) {
+        // We resample the ACTION_UP event to use the coordinates of the previous move
+        // event's resampled coordinates. This fixes situations where the last ACTION_MOVE would use
+        // resampled coordinates, but the ACTION_UP used the non-resampled coordinates. This caused
+        // an unwanted 'jump back' in coordinates.
+        entries = {
             //      id  x    y
-            {80ms, {{0, 120, 120}, {1, 600, 600}}, actionPointer0Up},
-    };
+            {80ms, {{0, 135, 135, .isResampled = true},
+                    {1, 750, 750, .isResampled = true}}, actionPointer0Up},
+        };
+    } else {
+        entries = {
+            //      id  x    y
+            {80ms, {{0, 120, 120},
+                    {1, 600, 600}}, actionPointer0Up},
+        };
+    }
     publishInputEventEntries(entries);
     frameTime = 90ms;
-    expectedEntries = {
+    if (input_flags::fix_action_up_resampling()) {
+        expectedEntries = {
             //      id  x    y
-            {80ms, {{0, 120, 120}, {1, 600, 600}}, actionPointer0Up},
+            {80ms, {{0, 135, 135, .isResampled = true},
+                    {1, 750, 750, .isResampled = true}}, actionPointer0Up},
+        };
+    } else {
+        expectedEntries = {
+            //      id  x    y
+            {80ms, {{0, 120, 120},
+                    {1, 600, 600}}, actionPointer0Up},
             // no resampled event for ACTION_POINTER_UP
-    };
-    consumeInputEventEntries(expectedEntries, frameTime);
+        };
+    }
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Remaining pointer id=1 is still present, but doesn't move
     entries = {
@@ -863,7 +925,7 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
              */
             {95ms, {{1, 575, 575, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 }
 
 TEST_F(TouchResamplingTest, EventsOnDifferentDisplaysAreNotResampled) {
@@ -882,7 +944,7 @@ TEST_F(TouchResamplingTest, EventsOnDifferentDisplaysAreNotResampled) {
             //      id  x   y
             {0ms, {{0, 10, 20}}, AMOTION_EVENT_ACTION_DOWN},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
 
     // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y, but on
     // different displays.
@@ -899,12 +961,191 @@ TEST_F(TouchResamplingTest, EventsOnDifferentDisplaysAreNotResampled) {
             //      id  x   y
             {10ms, {{0, 20, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId::DEFAULT},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
     expectedEntries = {
             //      id  x   y
             {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE, ui::LogicalDisplayId(1)},
     };
-    consumeInputEventEntries(expectedEntries, frameTime);
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
+}
+
+/*
+ * When an ACTION_UP occurs and there are no pending move events, we expect that the ACTION_UP is
+ * resampled to the last resampled ACTION_MOVE's coordinate. Note this applies when the
+ * fix_action_up_resampling flag is enabled.
+ */
+TEST_F(TouchResamplingTest, ActionUpUsesLastConsumedResampledStateNoPendingMoves) {
+    SCOPED_FLAG_OVERRIDE(fix_action_up_resampling, true);
+
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN
+    entries = {
+            //     id  x   y
+            {0ms, {{0, 10, 10}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    consumeInputEventEntries(entries, frameTime, /*consumeBatches=*/true);
+
+    // Two ACTION_MOVE events to establish a resampling history
+    entries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+
+    // Consume the batch, frameTime will cause extrapolation
+    frameTime = 35ms; // RESAMPLE_LATENCY is 5ms, so sampleTime is 30ms
+    // Extrapolation limit: 20ms + (20ms - 10ms) / 2 = 25ms
+    expectedEntries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+            {25ms, {{0, 35, 35, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
+    // At this point, TouchState::lastResample is based on the 25ms resampled event (x=35, y=35)
+
+    // Publish ACTION_UP
+    entries = {
+            //      id  x   y
+            {60ms, {{0, 205, 205}}, AMOTION_EVENT_ACTION_UP},
+    };
+    publishInputEventEntries(entries);
+
+    expectedEntries = {
+            //      id  x   y
+            {60ms, {{0, 35, 35, .isResampled = true}}, AMOTION_EVENT_ACTION_UP},
+    };
+
+    consumeInputEventEntries(expectedEntries, -1ms, /*consumeBatches=*/false);
+}
+
+/*
+ * A test for the legacy behaviour of the test above. The expected behaviour is to not resample
+ * the ACTION_UP event coordinates.
+ */
+TEST_F(TouchResamplingTest, ActionUpUsesLastConsumedResampledStateNoPendingMoves_legacy) {
+    SCOPED_FLAG_OVERRIDE(fix_action_up_resampling, false);
+
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN
+    entries = {
+            //     id  x   y
+            {0ms, {{0, 10, 10}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    consumeInputEventEntries(entries, frameTime, /*consumeBatches=*/true);
+
+    // Two ACTION_MOVE events to establish a resampling history
+    entries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+
+    // Consume the batch, frameTime will cause extrapolation
+    frameTime = 35ms; // RESAMPLE_LATENCY is 5ms, so sampleTime is 30ms
+    // Extrapolation limit: 20ms + (20ms - 10ms) / 2 = 25ms
+    expectedEntries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+            {25ms, {{0, 35, 35, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
+    // At this point, TouchState::lastResample is based on the 25ms resampled event (x=35, y=35)
+
+    // Publish ACTION_UP
+    entries = {
+            //      id  x   y
+            {60ms, {{0, 205, 205}}, AMOTION_EVENT_ACTION_UP},
+    };
+    publishInputEventEntries(entries);
+
+    expectedEntries = {
+            //      id  x   y
+            {60ms, {{0, 205, 205}}, AMOTION_EVENT_ACTION_UP},
+    };
+
+    consumeInputEventEntries(expectedEntries, -1ms, /*consumeBatches=*/false);
+}
+
+/*
+ * Similar to above, however we don't resample as the previously resampled batched move coordinates
+ * are invalid in regards to lastResample given that we have pending moves. Therefore we just use
+ * the ACTION_UP's actual coordinates.
+ */
+TEST_F(TouchResamplingTest, ActionUpUsesLastConsumedResampledStatePendingMoves) {
+    std::chrono::nanoseconds frameTime;
+    std::vector<InputEventEntry> entries, expectedEntries;
+
+    // Initial ACTION_DOWN
+    entries = {
+            //     id  x   y
+            {0ms, {{0, 10, 10}}, AMOTION_EVENT_ACTION_DOWN},
+    };
+    publishInputEventEntries(entries);
+    frameTime = 5ms;
+    consumeInputEventEntries(entries, frameTime, /*consumeBatches=*/true);
+
+    // Two ACTION_MOVE events to establish a resampling history
+    entries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+
+    // Consume the batch, frameTime will cause extrapolation
+    frameTime = 35ms; // RESAMPLE_LATENCY is 5ms, so sampleTime is 30ms
+    // Extrapolation limit: 20ms + (20ms - 10ms) / 2 = 25ms
+    expectedEntries = {
+            //      id  x   y
+            {10ms, {{0, 20, 20}}, AMOTION_EVENT_ACTION_MOVE},
+            {20ms, {{0, 30, 30}}, AMOTION_EVENT_ACTION_MOVE},
+            {25ms, {{0, 35, 35, .isResampled = true}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    consumeInputEventEntries(expectedEntries, frameTime, /*consumeBatches=*/true);
+    // At this point, TouchState::lastResample is based on the 25ms resampled event (x=35, y=35)
+
+    // Publish more ACTION_MOVEs (new batch), NOT consumed yet.
+    entries = {
+            //      id  x   y
+            {40ms, {{0, 100, 100}}, AMOTION_EVENT_ACTION_MOVE},
+            {50ms, {{0, 200, 200}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+    publishInputEventEntries(entries);
+
+    // Publish ACTION_UP
+    entries = {
+            //      id  x   y
+            {60ms, {{0, 205, 205}}, AMOTION_EVENT_ACTION_UP},
+    };
+    publishInputEventEntries(entries);
+
+    expectedEntries = {
+            //      id  x   y
+            {40ms, {{0, 100, 100}}, AMOTION_EVENT_ACTION_MOVE},
+            {50ms, {{0, 200, 200}}, AMOTION_EVENT_ACTION_MOVE},
+    };
+
+    // The batched moves are consumed, but the ACTION_UP is deferred to the next consume cycle.
+    consumeInputEventEntries(expectedEntries, -1ms, /*consumeBatches=*/false);
+
+    expectedEntries = {
+            //      id  x   y
+            {60ms, {{0, 205, 205}}, AMOTION_EVENT_ACTION_UP},
+    };
+
+    consumeInputEventEntries(expectedEntries, -1ms, /*consumeBatches=*/false);
 }
 
 } // namespace android

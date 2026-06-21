@@ -24,42 +24,18 @@
 
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <com_android_input_flags.h>
 #include <ftl/enum.h>
 #include <linux/input-event-codes.h>
 #include <log/log_main.h>
 #include <ui/FloatRect.h>
 
 #include "TouchCursorInputMapperCommon.h"
+#include "gestures/GestureConverterCommon.h"
 #include "input/Input.h"
-
-namespace input_flags = com::android::input::flags;
 
 namespace android {
 
 namespace {
-
-// In addition to v1, v2 will also cancel ongoing move gestures while typing and add delay in
-// re-enabling the tap to click.
-const bool ENABLE_TOUCHPAD_PALM_REJECTION_V2 =
-        input_flags::enable_v2_touchpad_typing_palm_rejection();
-
-uint32_t gesturesButtonToMotionEventButton(uint32_t gesturesButton) {
-    switch (gesturesButton) {
-        case GESTURES_BUTTON_LEFT:
-            return AMOTION_EVENT_BUTTON_PRIMARY;
-        case GESTURES_BUTTON_MIDDLE:
-            return AMOTION_EVENT_BUTTON_TERTIARY;
-        case GESTURES_BUTTON_RIGHT:
-            return AMOTION_EVENT_BUTTON_SECONDARY;
-        case GESTURES_BUTTON_BACK:
-            return AMOTION_EVENT_BUTTON_BACK;
-        case GESTURES_BUTTON_FORWARD:
-            return AMOTION_EVENT_BUTTON_FORWARD;
-        default:
-            return 0;
-    }
-}
 
 bool isGestureNoFocusChange(MotionClassification classification) {
     switch (classification) {
@@ -127,6 +103,7 @@ std::list<NotifyArgs> UncapturedGestureConverter::reset(nsecs_t when) {
         default:
             break;
     }
+    out += exitHover(when, when);
     mCurrentClassification = MotionClassification::NONE;
     mDownTime = 0;
     return out;
@@ -202,31 +179,13 @@ std::list<NotifyArgs> UncapturedGestureConverter::handleMove(nsecs_t when, nsecs
                                                              const Gesture& gesture) {
     float deltaX = gesture.details.move.dx;
     float deltaY = gesture.details.move.dy;
-    if (ENABLE_TOUCHPAD_PALM_REJECTION_V2) {
-        bool wasHoverCancelled = mIsHoverCancelled;
-        // Gesture will be cancelled if it started before the user started typing and
-        // there is a active IME connection.
-        mIsHoverCancelled = gestureStartTime <= mReaderContext.getLastKeyDownTimestamp() &&
-                mReaderContext.getPolicy()->isInputMethodConnectionActive();
-
-        if (!wasHoverCancelled && mIsHoverCancelled) {
-            // This is the first event of the cancelled gesture, we won't return because we need to
-            // generate a HOVER_EXIT event
-            return exitHover(when, readTime);
-        } else if (mIsHoverCancelled) {
-            return {};
-        }
-    }
 
     rotateDelta(mOrientation, &deltaX, &deltaY);
 
-    // Update the cursor, and enable tap to click if the gesture is not cancelled
-    if (!mIsHoverCancelled) {
-        // handleFling calls hoverMove with zero delta on FLING_TAP_DOWN. Don't enable tap to click
-        // for this case as subsequent handleButtonsChange may choose to ignore this tap.
-        if (std::abs(deltaX) > 0 || std::abs(deltaY) > 0) {
-            enableTapToClick(when);
-        }
+    // handleFling calls hoverMove with zero delta on FLING_TAP_DOWN. Don't enable tap to click
+    // for this case as subsequent handleButtonsChange may choose to ignore this tap.
+    if (std::abs(deltaX) > 0 || std::abs(deltaY) > 0) {
+        enableTapToClick(when);
     }
 
     std::list<NotifyArgs> out;
@@ -269,14 +228,7 @@ std::list<NotifyArgs> UncapturedGestureConverter::handleButtonsChange(nsecs_t wh
     coords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, 0);
     coords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, 0);
 
-    // V2 palm rejection should override V1
-    if (ENABLE_TOUCHPAD_PALM_REJECTION_V2) {
-        enableTapToClick(when);
-        if (gesture.details.buttons.is_tap && when <= mWhenToEnableTapToClick) {
-            // return early to prevent this tap
-            return out;
-        }
-    } else if (mReaderContext.isPreventingTouchpadTaps()) {
+    if (mReaderContext.isPreventingTouchpadTaps()) {
         enableTapToClick(when);
         if (gesture.details.buttons.is_tap) {
             // return early to prevent this tap
@@ -297,6 +249,10 @@ std::list<NotifyArgs> UncapturedGestureConverter::handleButtonsChange(nsecs_t wh
             buttonsPressed &
                     (GESTURES_BUTTON_LEFT | GESTURES_BUTTON_MIDDLE | GESTURES_BUTTON_RIGHT);
     coords.setAxisValue(AMOTION_EVENT_AXIS_PRESSURE, pointerDown ? 1.0f : 0.0f);
+    if (!isPointerDown(mButtonState) && pointerDown) {
+        out += exitHover(when, readTime);
+        mDownTime = when;
+    }
 
     uint32_t newButtonState = mButtonState;
     std::list<NotifyArgs> pressEvents = {};
@@ -310,8 +266,6 @@ std::list<NotifyArgs> UncapturedGestureConverter::handleButtonsChange(nsecs_t wh
         }
     }
     if (!isPointerDown(mButtonState) && isPointerDown(newButtonState)) {
-        mDownTime = when;
-        out += exitHover(when, readTime);
         out.push_back(makeMotionArgs(when, readTime, AMOTION_EVENT_ACTION_DOWN,
                                      /* actionButton= */ 0, newButtonState, /* pointerCount= */ 1,
                                      &coords));

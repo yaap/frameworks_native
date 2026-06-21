@@ -25,10 +25,6 @@
 
 namespace android {
 
-bool operator==(const Color& left, const Color& right) {
-    return left.a == right.a && left.r == right.r && left.g == right.g && left.b == right.b;
-}
-
 class TextureFilteringTest : public LayerTransactionTest {
 protected:
     virtual void SetUp() {

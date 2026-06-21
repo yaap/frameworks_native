@@ -40,7 +40,7 @@ inline bool equalIgnoringSource(const renderengine::LayerSettings& lhs,
             lhs.backgroundBlurScale == rhs.backgroundBlurScale &&
             lhs.stretchEffect == rhs.stretchEffect &&
             lhs.edgeExtensionEffect == rhs.edgeExtensionEffect &&
-            lhs.whitePointNits == rhs.whitePointNits;
+            lhs.whitePointNits == rhs.whitePointNits && lhs.blurRegions == rhs.blurRegions;
 }
 
 inline bool equalIgnoringBuffer(const renderengine::Buffer& lhs, const renderengine::Buffer& rhs) {
@@ -64,6 +64,7 @@ inline bool equalIgnoringBuffer(const renderengine::LayerSettings& lhs,
 
 bool layerSettingsAreEqual(const LayerFE::LayerSettings& lhs, const LayerFE::LayerSettings& rhs) {
     return lhs.bufferId == rhs.bufferId && lhs.frameNumber == rhs.frameNumber &&
+            lhs.renderCommandBufferFrameId == rhs.renderCommandBufferFrameId &&
             equalIgnoringBuffer(lhs, rhs);
 }
 

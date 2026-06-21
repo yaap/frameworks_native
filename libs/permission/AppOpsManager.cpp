@@ -192,4 +192,14 @@ bool AppOpsManager::shouldCollectNotes(int32_t opcode) {
     return appOpsToNote[opcode] == 2;
 }
 
+int32_t AppOpsManager::checkOperationForDevice(int32_t op, int32_t uid,
+                                               const String16& callingPackage,
+                                               const std::optional<String16>& attributionTag,
+                                               int32_t virtualDeviceId) {
+    sp<IAppOpsService> service = getService();
+    return service != nullptr ? service->checkOperationForDevice(op, uid, callingPackage,
+                                                                 attributionTag, virtualDeviceId)
+                              : AppOpsManager::MODE_IGNORED;
+}
+
 } // namespace android

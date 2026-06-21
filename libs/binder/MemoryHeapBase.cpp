@@ -154,6 +154,7 @@ status_t MemoryHeapBase::mapfd(int fd, bool writeableByCaller, size_t size, off_
             if ((off_t)size != sb.st_size) {
                 ALOGE("%s: size of file %lld cannot fit in memory",
                         __func__, (long long)sb.st_size);
+                close(fd);
                 return INVALID_OPERATION;
             }
         }

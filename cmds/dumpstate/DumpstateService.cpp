@@ -171,14 +171,31 @@ binder::Status DumpstateService::startBugreport(int32_t calling_uid,
     calling_uid_ = calling_uid;
     calling_package_ = calling_package;
 
+    // Initialize dumpstate
+    switch (ds_->Initialize()) {
+        case Dumpstate::InitializeStatus::INIT_OK:
+            break;
+        case Dumpstate::InitializeStatus::INIT_ERROR:
+            MYLOGE(
+                "startBugreport(): Unexpected error when initializing a new bugreport "
+                "session\n");
+            signalErrorAndExit(listener, IDumpstateListener::BUGREPORT_ERROR_RUNTIME_ERROR);
+            break;
+        case Dumpstate::InitializeStatus::LOCK_OCCUPIED:
+            MYLOGE(
+                "startBugreport(): A bugreport is undergoing somewhere else on the system. "
+                "Aborting.\n");
+            signalErrorAndExit(listener,
+                               IDumpstateListener::BUGREPORT_ERROR_ANOTHER_REPORT_IN_PROGRESS);
+            break;
+    }
+
     DumpstateInfo* ds_info = new DumpstateInfo();
     ds_info->ds = ds_;
     ds_info->calling_uid = calling_uid;
     ds_info->calling_package = calling_package;
 
     pthread_t thread;
-    // Initialize dumpstate
-    ds_->Initialize();
     status_t err = pthread_create(&thread, nullptr, dumpstate_thread_bugreport, ds_info);
     if (err != 0) {
         delete ds_info;

@@ -487,5 +487,14 @@ int SensorManager::setOperationParameter(
     return mSensorServer->setOperationParameter(handle, type, floats, ints);
 }
 
+status_t SensorManager::registerClientListener(
+        const sp<android::hardware::sensor::ISensorClientListener>& listener) {
+    Mutex::Autolock _l(mLock);
+    if (assertStateLocked() != NO_ERROR) {
+        return NO_INIT;
+    }
+    return mSensorServer->registerClientListener(listener);
+}
+
 // ----------------------------------------------------------------------------
 }; // namespace android

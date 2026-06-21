@@ -48,7 +48,8 @@ public:
     /* Notifies the system that an application does not have a focused window.
      */
     virtual void notifyNoFocusedWindowAnr(
-            const std::shared_ptr<InputApplicationHandle>& inputApplicationHandle) = 0;
+            const std::shared_ptr<InputApplicationHandle>& inputApplicationHandle, int32_t eventId,
+            nsecs_t eventTime, std::chrono::milliseconds timeoutDuration) = 0;
 
     /* Notifies the system that a window just became unresponsive. This indicates that ANR
      * should be raised for this window. The window can be identified via its input token and the
@@ -56,7 +57,9 @@ public:
      * haven't received a response for.
      */
     virtual void notifyWindowUnresponsive(const sp<IBinder>& token, std::optional<gui::Pid> pid,
-                                          const std::string& reason) = 0;
+                                          const std::string& reason, int32_t eventId,
+                                          nsecs_t eventTime,
+                                          std::chrono::milliseconds timeoutDuration) = 0;
 
     /* Notifies the system that a window just became responsive. This is only called after the
      * window was first marked "unresponsive". This indicates that ANR dialog (if any) should
@@ -64,6 +67,14 @@ public:
      * future.
      */
     virtual void notifyWindowResponsive(const sp<IBinder>& token, std::optional<gui::Pid> pid) = 0;
+
+    /* Called before a no focused window ANR starts so the system can begin
+     * tracing or other diagnostics while the app is still alive.
+     */
+    virtual void notifyPreNoFocusedWindowAnr(
+            const std::shared_ptr<InputApplicationHandle>& inputApplicationHandle, int32_t eventId,
+            std::chrono::milliseconds elapsedDuration,
+            std::chrono::milliseconds timeoutDuration) = 0;
 
     /* Notifies the system that an input channel is unrecoverably broken. */
     virtual void notifyInputChannelBroken(const sp<IBinder>& token) = 0;
@@ -162,8 +173,8 @@ public:
      */
     virtual void setPointerCapture(const PointerCaptureRequest&) = 0;
 
-    /* Notifies the policy that the drag window has moved over to another window */
-    virtual void notifyDropWindow(const sp<IBinder>& token, float x, float y) = 0;
+    /* Notifies the system that a window has been dropped on. */
+    virtual void notifyDropWindow(const sp<IBinder>& token, vec2 location, vec2 rawLocation) = 0;
 
     /* Notifies the policy that there was an input device interaction with apps. */
     virtual void notifyDeviceInteraction(DeviceId deviceId, nsecs_t timestamp,

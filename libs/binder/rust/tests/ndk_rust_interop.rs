@@ -16,9 +16,7 @@
 
 //! Rust Binder NDK interop tests
 
-use ::IBinderRustNdkInteropTest::aidl::IBinderRustNdkInteropTest::{
-    BnBinderRustNdkInteropTest, IBinderRustNdkInteropTest,
-};
+use ::IBinderRustNdkInteropTest::aidl::IBinderRustNdkInteropTest as Iface;
 use ::IBinderRustNdkInteropTest::aidl::IBinderRustNdkInteropTestOther::IBinderRustNdkInteropTestOther;
 use ::IBinderRustNdkInteropTest::binder::{self, BinderFeatures, Interface, StatusCode};
 use std::ffi::CStr;
@@ -36,7 +34,7 @@ pub unsafe extern "C" fn rust_call_ndk(service_name: *const c_char) -> c_int {
 
     // The Rust class descriptor pointer will not match the NDK one, but the
     // descriptor strings match so this needs to still associate.
-    let service: binder::Strong<dyn IBinderRustNdkInteropTest> =
+    let service: binder::Strong<dyn Iface::IBinderRustNdkInteropTest> =
         match binder::get_interface(service_name) {
             Err(e) => {
                 eprintln!("Could not find Ndk service {}: {:?}", service_name, e);
@@ -76,7 +74,7 @@ struct Service;
 
 impl Interface for Service {}
 
-impl IBinderRustNdkInteropTest for Service {
+impl Iface::IBinderRustNdkInteropTest for Service {
     fn echo(&self, s: &str) -> binder::Result<String> {
         Ok(s.to_string())
     }
@@ -91,9 +89,34 @@ impl IBinderRustNdkInteropTest for Service {
 pub unsafe extern "C" fn rust_start_service(service_name: *const c_char) -> c_int {
     // SAFETY: Our caller promises that service_name is a valid C string.
     let service_name = unsafe { CStr::from_ptr(service_name) }.to_str().unwrap();
-    let service = BnBinderRustNdkInteropTest::new_binder(Service, BinderFeatures::default());
+    let service = Iface::BnBinderRustNdkInteropTest::new_binder(Service, BinderFeatures::default());
     match binder::add_service(service_name, service.as_binder()) {
         Ok(_) => StatusCode::OK as c_int,
         Err(e) => e as c_int,
     }
+}
+
+/// Test the get_function_name API.
+#[no_mangle]
+pub extern "C" fn rust_test_get_function_name() -> c_int {
+    let service = Iface::BnBinderRustNdkInteropTest::new_binder(Service, BinderFeatures::default());
+    let code = Iface::transactions::r#echo;
+    let mut binder = service.as_binder();
+    let class = binder.get_class().unwrap();
+    // SAFETY: The class pointer is valid because it comes from a valid
+    // binder object. The transaction code is valid because it's for a
+    // known method.
+    let name = unsafe { binder_rs_ndk_compat::get_function_name(class.into(), code) };
+    if name.is_null() {
+        eprintln!("Transaction name for code {} not found", code);
+        return StatusCode::BAD_VALUE as c_int;
+    }
+    // SAFETY: The pointer returned by get_function_name is guaranteed to be
+    // a valid, null-terminated C string.
+    let name_str = unsafe { CStr::from_ptr(name) }.to_str().unwrap();
+    if name_str != "echo" {
+        eprintln!("Expected transaction name 'echo', but got '{}'", name_str);
+        return StatusCode::BAD_VALUE as c_int;
+    }
+    StatusCode::OK as c_int
 }

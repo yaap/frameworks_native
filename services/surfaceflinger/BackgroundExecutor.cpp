@@ -39,7 +39,7 @@ void set_thread_priority(bool highPriority) {
 
 } // anonymous namespace
 
-BackgroundExecutor::BackgroundExecutor(bool highPriority) {
+BackgroundExecutor::BackgroundExecutor(bool highPriority, const char* threadName) {
     // mSemaphore must be initialized before any calls to
     // BackgroundExecutor::sendCallbacks. For this reason, we initialize it
     // within the constructor instead of within mThread.
@@ -57,11 +57,7 @@ BackgroundExecutor::BackgroundExecutor(bool highPriority) {
             }
         }
     });
-    if (highPriority) {
-        pthread_setname_np(mThread.native_handle(), "BckgrndExec HP");
-    } else {
-        pthread_setname_np(mThread.native_handle(), "BckgrndExec LP");
-    }
+    pthread_setname_np(mThread.native_handle(), threadName);
 }
 
 BackgroundExecutor::~BackgroundExecutor() {

@@ -187,6 +187,13 @@ inline auto asVirtualDisplayId(Variant variant) -> ftl::Optional<VirtualDisplayI
             [](auto) -> ftl::Optional<VirtualDisplayId> { return std::nullopt; });
 }
 
+template <typename Variant>
+bool isVirtualDisplayId(Variant variant) {
+    return ftl::match(
+            variant, [](GpuVirtualDisplayId) { return true; },
+            [](HalVirtualDisplayId) { return true; }, [](auto) { return false; });
+}
+
 inline auto asDisplayId(DisplayIdVariant variant) -> DisplayId {
     return ftl::match(variant, [](auto id) -> DisplayId { return static_cast<DisplayId>(id); });
 }

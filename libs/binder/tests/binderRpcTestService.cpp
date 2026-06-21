@@ -24,6 +24,8 @@ class MyBinderRpcTestAndroid : public MyBinderRpcTestBase {
 public:
     wp<RpcServer> server;
 
+    MyBinderRpcTestAndroid(int clientUid) { mClientUid = clientUid; }
+
     Status countBinders(std::vector<int32_t>* out) override {
         return countBindersImpl(server, out);
     }
@@ -95,6 +97,11 @@ public:
 
     Status blockingRecvInt(int* n) override {
         *n = mIntChannel.read();
+        return Status::ok();
+    }
+
+    Status getClientUid(int* uid) override {
+        *uid = mClientUid;
         return Status::ok();
     }
 };
@@ -173,16 +180,20 @@ int main(int argc, char* argv[]) {
     }
 
     server->setPerSessionRootObject([&](wp<RpcSession> session, const void* addrPtr, size_t len) {
-        {
-            sp<RpcSession> spSession = session.promote();
-            LOG_ALWAYS_FATAL_IF(nullptr == spSession.get());
+        sp<RpcSession> spSession = session.promote();
+        LOG_ALWAYS_FATAL_IF(nullptr == spSession.get());
+
+        uid_t uid;
+        int clientUid = -1;
+        if (spSession->getClientUid(&uid)) {
+            clientUid = static_cast<int>(uid);
         }
 
         // UNIX sockets with abstract addresses return
         // sizeof(sa_family_t)==2 in addrlen
         LOG_ALWAYS_FATAL_IF(len < sizeof(sa_family_t));
         const sockaddr* addr = reinterpret_cast<const sockaddr*>(addrPtr);
-        sp<MyBinderRpcTestAndroid> service = sp<MyBinderRpcTestAndroid>::make();
+        sp<MyBinderRpcTestAndroid> service = sp<MyBinderRpcTestAndroid>::make(clientUid);
         switch (addr->sa_family) {
             case AF_UNIX:
                 // nothing to save
@@ -204,6 +215,8 @@ int main(int argc, char* argv[]) {
         }
         service->setMinRpcThreads(serverConfig.numMinThreadsPerBinder);
         service->server = server;
+        sp<MyBinderRpcTestAndroid> extension = sp<MyBinderRpcTestAndroid>::make(clientUid);
+        service->setExtension(extension);
         return service;
     });
 

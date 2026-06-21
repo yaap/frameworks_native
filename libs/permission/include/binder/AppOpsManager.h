@@ -186,6 +186,8 @@ public:
     void stopWatchingMode(const sp<com::android::internal::app::IAppOpsCallback>& callback);
     int32_t permissionToOpCode(const String16& permission);
     void setCameraAudioRestriction(int32_t mode);
+    int checkOperationForDevice(int32_t op, int32_t uid, const String16& callingPackage,
+            const std::optional<String16>& attributionTag, int32_t virtualDeviceId);
 
 private:
     Mutex mLock;

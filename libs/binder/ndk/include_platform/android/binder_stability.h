@@ -41,9 +41,9 @@ enum {
 /**
  * This interface has the stability of the vendor image.
  */
-void AIBinder_markVendorStability(AIBinder* binder);
+void AIBinder_markVendorStability(AIBinder* _Nonnull binder);
 
-static inline void AIBinder_markCompilationUnitStability(AIBinder* binder) {
+static inline void AIBinder_markCompilationUnitStability(AIBinder* _Nonnull binder) {
     AIBinder_markVendorStability(binder);
 }
 
@@ -62,9 +62,9 @@ static inline void AIBinder_markCompilationUnitStability(AIBinder* binder) {
  *     AIBinder_forceDowngradeToVendorStability(binder.get());
  *     doSomething(binder);
  */
-void AIBinder_forceDowngradeToVendorStability(AIBinder* binder);
+void AIBinder_forceDowngradeToVendorStability(AIBinder* _Nonnull binder);
 
-static inline void AIBinder_forceDowngradeToLocalStability(AIBinder* binder) {
+static inline void AIBinder_forceDowngradeToLocalStability(AIBinder* _Nonnull binder) {
     AIBinder_forceDowngradeToVendorStability(binder);
 }
 
@@ -77,9 +77,9 @@ enum {
 /**
  * This interface has the stability of the system image.
  */
-__attribute__((weak)) void AIBinder_markSystemStability(AIBinder* binder);
+__attribute__((weak)) void AIBinder_markSystemStability(AIBinder* _Nonnull binder);
 
-static inline void AIBinder_markCompilationUnitStability(AIBinder* binder) {
+static inline void AIBinder_markCompilationUnitStability(AIBinder* _Nonnull binder) {
     if (AIBinder_markSystemStability == nullptr) return;
 
     AIBinder_markSystemStability(binder);
@@ -100,9 +100,9 @@ static inline void AIBinder_markCompilationUnitStability(AIBinder* binder) {
  *     AIBinder_forceDowngradeToSystemStability(binder.get());
  *     doSomething(binder);
  */
-void AIBinder_forceDowngradeToSystemStability(AIBinder* binder);
+void AIBinder_forceDowngradeToSystemStability(AIBinder* _Nonnull binder);
 
-static inline void AIBinder_forceDowngradeToLocalStability(AIBinder* binder) {
+static inline void AIBinder_forceDowngradeToLocalStability(AIBinder* _Nonnull binder) {
     AIBinder_forceDowngradeToSystemStability(binder);
 }
 
@@ -121,6 +121,31 @@ static inline void AIBinder_forceDowngradeToLocalStability(AIBinder* binder) {
 #if defined(__ANDROID_MIN_SDK_VERSION__) && __ANDROID_MIN_SDK_VERSION__ < 30
 __attribute__((weak))
 #endif  // defined(__ANDROID_MIN_SDK_VERSION__) && __ANDROID_MIN_SDK_VERSION__ < 30
-void AIBinder_markVintfStability(AIBinder* binder);
+void AIBinder_markVintfStability(AIBinder* _Nonnull binder);
+
+/**
+ * Returns true if the binder declares VINTF stability, and thus needs to be declared in the
+ * VINTF manifest, or else false.
+ *
+ * For more information on stability see:
+ * https://source.android.com/docs/core/architecture/aidl/aidl-hals
+ */
+bool AIBinder_requiresVintfDeclaration(AIBinder* _Nonnull binder) __INTRODUCED_IN(37);
+
+/**
+ * Returns true if the binder declares vendor stability, or else false.
+ *
+ * For more information on stability see:
+ * https://source.android.com/docs/core/architecture/aidl/aidl-hals
+ */
+bool AIBinder_isVendorStable(AIBinder* _Nonnull binder) __INTRODUCED_IN(37);
+
+/**
+ * Returns true if the binder declares system stability, or else false.
+ *
+ * For more information on stability see:
+ * https://source.android.com/docs/core/architecture/aidl/aidl-hals
+ */
+bool AIBinder_isSystemStable(AIBinder* _Nonnull binder) __INTRODUCED_IN(37);
 
 __END_DECLS

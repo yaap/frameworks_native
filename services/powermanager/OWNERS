@@ -1,0 +1,3 @@
+# Bug component: 46788
+
+include platform/frameworks/base:/services/core/java/com/android/server/power/OWNERS

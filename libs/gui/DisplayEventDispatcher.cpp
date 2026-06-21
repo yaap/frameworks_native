@@ -40,11 +40,10 @@ static const size_t EVENT_BUFFER_SIZE = 100;
 static constexpr nsecs_t WAITING_FOR_VSYNC_TIMEOUT = ms2ns(300);
 
 DisplayEventDispatcher::DisplayEventDispatcher(const sp<Looper>& looper,
-                                               gui::ISurfaceComposer::VsyncSource vsyncSource,
                                                EventRegistrationFlags eventRegistration,
                                                const sp<IBinder>& layerHandle)
       : mLooper(looper),
-        mReceiver(vsyncSource, eventRegistration, layerHandle),
+        mReceiver(eventRegistration, layerHandle),
         mWaitingForVsync(false),
         mLastVsyncCount(0),
         mLastScheduleVsyncTime(0) {
@@ -164,8 +163,6 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
     ssize_t n;
     while ((n = mReceiver.getEvents(buf, EVENT_BUFFER_SIZE)) > 0) {
         ALOGV("dispatcher %p ~ Read %d events.", this, int(n));
-        mFrameRateOverrides.reserve(n);
-        mSupportedRefreshRates.reserve(n);
         for (ssize_t i = 0; i < n; i++) {
             const DisplayEventReceiver::Event& ev = buf[i];
             switch (ev.header.type) {
@@ -201,8 +198,10 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                               ev.modeChange.vsyncPeriod,
                                                               ev.modeChange.appVsyncOffset,
                                                               ev.modeChange.presentationDeadline,
-                                                              std::move(mFrameRateOverrides),
-                                                              std::move(mSupportedRefreshRates));
+                                                              mFrameRateOverrides,
+                                                              mSupportedRefreshRates);
+                    mFrameRateOverrides.clear();
+                    mSupportedRefreshRates.clear();
                     break;
                 case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);

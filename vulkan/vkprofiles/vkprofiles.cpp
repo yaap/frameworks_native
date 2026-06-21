@@ -189,6 +189,20 @@ std::string vkVpa16GetSupport() {
                                VP_ANDROID_16_MINIMUMS_MIN_API_VERSION);
 }
 
+std::string vkVra17GetSupport() {
+    VpProfileProperties profile{VP_ANDROID_17_REQUIREMENTS_NAME,
+                                VP_ANDROID_17_REQUIREMENTS_SPEC_VERSION};
+    return vkProfileGetSupport(&profile,
+                               VP_ANDROID_17_REQUIREMENTS_MIN_API_VERSION);
+}
+
+std::string vkAvp2025GetSupport() {
+    VpProfileProperties profile{VP_ANDROID_VULKAN_PROFILE_2025_NAME,
+                                VP_ANDROID_VULKAN_PROFILE_2025_SPEC_VERSION};
+    return vkProfileGetSupport(&profile,
+                               VP_ANDROID_VULKAN_PROFILE_2025_MIN_API_VERSION);
+}
+
 std::string vkProfiles() {
     return "{"
            "\"" + std::string(VP_ANDROID_BASELINE_2021_NAME) + "\": "
@@ -200,7 +214,11 @@ std::string vkProfiles() {
            "\"" + std::string(VP_ANDROID_15_MINIMUMS_NAME) + "\": "
            "\"" + vkVpa15GetSupport() + "\","
            "\"" + std::string(VP_ANDROID_16_MINIMUMS_NAME) + "\": "
-           "\"" + vkVpa16GetSupport() + "\""
+           "\"" + vkVpa16GetSupport() + "\","
+           "\"" + std::string(VP_ANDROID_17_REQUIREMENTS_NAME) + "\": "
+           "\"" + vkVra17GetSupport() + "\","
+           "\"" + std::string(VP_ANDROID_VULKAN_PROFILE_2025_NAME) + "\": "
+           "\"" + vkAvp2025GetSupport() + "\""
            "}";
 }
 

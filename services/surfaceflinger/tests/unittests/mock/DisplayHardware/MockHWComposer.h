@@ -36,10 +36,8 @@ public:
                 (HWDisplayId, uint8_t*, display::DisplayIdentificationData*,
                  android::ScreenPartStatus*),
                 (const, override));
-    MOCK_METHOD(bool, hasCapability, (aidl::android::hardware::graphics::composer3::Capability),
-                (const, override));
-    MOCK_METHOD(bool, hasDisplayCapability,
-                (HalDisplayId, aidl::android::hardware::graphics::composer3::DisplayCapability),
+    MOCK_METHOD(bool, hasCapability, (composer3::Capability), (const, override));
+    MOCK_METHOD(bool, hasDisplayCapability, (HalDisplayId, composer3::DisplayCapability),
                 (const, override));
 
     MOCK_METHOD(size_t, getMaxVirtualDisplayCount, (), (const, override));
@@ -61,7 +59,7 @@ public:
     MOCK_METHOD(status_t, presentAndGetReleaseFences,
                 (HalDisplayId, std::optional<std::chrono::steady_clock::time_point>), (override));
     MOCK_METHOD(status_t, executeCommands, (HalDisplayId));
-    MOCK_METHOD(status_t, setPowerMode, (PhysicalDisplayId, PowerMode), (override));
+    MOCK_METHOD(ftl::Future<status_t>, setPowerMode, (PhysicalDisplayId, PowerMode), (override));
     MOCK_METHOD(status_t, setColorTransform, (HalDisplayId, const mat4&), (override));
     MOCK_METHOD(void, disconnectDisplay, (HalDisplayId), (override));
     MOCK_METHOD(sp<Fence>, getPresentFence, (HalDisplayId), (const, override));
@@ -83,6 +81,10 @@ public:
                 (HalDisplayId, uint64_t, uint64_t, DisplayedFrameStats*), (override));
     MOCK_METHOD(ftl::Future<status_t>, setDisplayBrightness,
                 (PhysicalDisplayId, float, float, const Hwc2::Composer::DisplayBrightnessOptions&),
+                (override));
+    MOCK_METHOD(status_t, setDisplayMode, (PhysicalDisplayId, hal::HWConfigId, bool), (override));
+    MOCK_METHOD(status_t, setDisplayModes,
+                ((const std::vector<std::pair<PhysicalDisplayId, hal::HWConfigId>>&), bool),
                 (override));
     MOCK_METHOD(std::optional<display::DisplayIdentificationInfo>, onHotplug,
                 (hal::HWDisplayId, HWComposer::HotplugEvent), (override));
@@ -146,8 +148,7 @@ public:
     MOCK_METHOD(Hwc2::AidlTransform, getPhysicalDisplayOrientation, (PhysicalDisplayId),
                 (const, override));
     MOCK_METHOD(bool, getValidateSkipped, (HalDisplayId), (const, override));
-    MOCK_METHOD(const aidl::android::hardware::graphics::composer3::OverlayProperties&,
-                getOverlaySupport, (), (const, override));
+    MOCK_METHOD(const composer3::OverlayProperties&, getOverlaySupport, (), (const, override));
     MOCK_METHOD(status_t, setRefreshRateChangedCallbackDebugEnabled, (PhysicalDisplayId, bool));
     MOCK_METHOD(status_t, notifyExpectedPresent, (PhysicalDisplayId, TimePoint, Fps));
     MOCK_METHOD(HWC2::Display::LutFileDescriptorMapper&, getLutFileDescriptorMapper, (),
@@ -159,14 +160,15 @@ public:
                 (PhysicalDisplayId, const aidl::android::hardware::drm::HdcpLevels&));
     MOCK_METHOD(status_t, getLuts,
                 (PhysicalDisplayId, const std::vector<sp<GraphicBuffer>>&,
-                 std::vector<aidl::android::hardware::graphics::composer3::Luts>*));
+                 std::vector<composer3::Luts>*));
 
     MOCK_METHOD(status_t, getReadbackBufferAttributes,
-                (PhysicalDisplayId,
-                 aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*));
+                (PhysicalDisplayId, composer3::ReadbackBufferAttributes*));
     MOCK_METHOD(status_t, setReadbackBuffer,
                 (PhysicalDisplayId, const sp<GraphicBuffer>&, const android::sp<android::Fence>&));
     MOCK_METHOD(sp<Fence>, getReadbackBufferFence, (PhysicalDisplayId));
+    MOCK_METHOD(std::optional<composer3::VsyncSample>, getDisplayKnownVsyncSample,
+                (PhysicalDisplayId));
 };
 
 } // namespace android::mock

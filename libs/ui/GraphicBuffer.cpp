@@ -204,6 +204,11 @@ status_t GraphicBuffer::getDataspace(ui::Dataspace* outDataspace) const {
     return mBufferMapper.getDataspace(handle, outDataspace);
 }
 
+status_t GraphicBuffer::getSmpte2094_50(
+        std::optional<std::vector<uint8_t>>* outSmpte2094_50) const {
+    return mBufferMapper.getSmpte2094_50(handle, outSmpte2094_50);
+}
+
 status_t GraphicBuffer::reallocate(uint32_t inWidth, uint32_t inHeight,
         PixelFormat inFormat, uint32_t inLayerCount, uint64_t inUsage)
 {

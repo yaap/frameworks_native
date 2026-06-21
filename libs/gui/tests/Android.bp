@@ -53,9 +53,12 @@ cc_test {
         "-Wthread-safety",
         // Allow access to buffer queue core private members
         "-DENABLE_BQC_TESTING",
+        "-fexceptions",
+        "-Wno-unused-parameter",
     ],
 
     srcs: [
+        "BitSet_test.cpp",
         "BLASTBufferQueue_test.cpp",
         "BufferItemConsumer_test.cpp",
         "BufferQueue_test.cpp",
@@ -71,12 +74,18 @@ cc_test {
         "FrameRateUtilsTest.cpp",
         "GLTest.cpp",
         "IGraphicBufferProducer_test.cpp",
+        "LayerState_test.cpp",
         "LibGuiMain.cpp", // Custom gtest entrypoint
+        "MagicRingBuffer_test.cpp",
         "Malicious.cpp",
         "MultiTextureConsumer_test.cpp",
         "RegionSampling_test.cpp",
+        ":rendercommandbuffer_sources",
+        "RenderCommandBuffer_test.cpp",
         "StreamSplitter_test.cpp",
         "Surface_test.cpp",
+        "Surface2HGraphicBufferProducer_test.cpp",
+        "Surface2HGraphicBufferProducer10_test.cpp",
         "SurfaceTextureClient_test.cpp",
         "SurfaceTextureFBO_test.cpp",
         "SurfaceTextureGL_test.cpp",
@@ -94,8 +103,6 @@ cc_test {
     ],
 
     shared_libs: [
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore-utils",
         "libSurfaceFlingerProp",
         "libGLESv1_CM",
         "libgui",

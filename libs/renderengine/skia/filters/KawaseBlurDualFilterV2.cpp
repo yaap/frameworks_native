@@ -17,24 +17,32 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "KawaseBlurDualFilterV2.h"
+
 #include <SkAlphaType.h>
 #include <SkBlendMode.h>
 #include <SkCanvas.h>
+#include <SkColorType.h>
 #include <SkData.h>
+#include <SkImage.h>
+#include <SkImageInfo.h>
 #include <SkPaint.h>
 #include <SkRRect.h>
+#include <SkRect.h>
 #include <SkRuntimeEffect.h>
 #include <SkShader.h>
 #include <SkSize.h>
 #include <SkString.h>
 #include <SkSurface.h>
 #include <SkTileMode.h>
+#include <common/FlagManager.h>
+#include <common/ThreadStateCrashLogger.h>
+#include <common/trace.h>
 #include <include/gpu/GpuTypes.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
 #include <log/log.h>
-#include <utils/Trace.h>
 
 #include "RuntimeEffectManager.h"
+#include "renderengine/RenderEngine.h"
 
 namespace android {
 namespace renderengine {
@@ -123,22 +131,45 @@ KawaseBlurDualFilterV2::KawaseBlurDualFilterV2(RuntimeEffectManager& effectManag
     mUpSampleBlurEffect = effectManager.mKnownEffects[kKawaseBlurDualFilterV2_UpSampleBlurEffect];
 }
 
-void KawaseBlurDualFilterV2::blurInto(const sk_sp<SkSurface>& drawSurface,
-                                      const sk_sp<SkImage>& readImage, const float radius,
+void KawaseBlurDualFilterV2::blurInto(const sk_sp<SkSurface>& drawSurface, const int destWidth,
+                                      const sk_sp<SkImage>& readImage, const SkIRect& srcRect,
+                                      const bool inputEdgesNeedClamp, const float radius,
                                       const float alpha,
                                       const sk_sp<SkRuntimeEffect>& blurEffect) const {
-    const float scale = static_cast<float>(drawSurface->width()) / readImage->width();
+    const float scale = static_cast<float>(destWidth) / static_cast<float>(srcRect.width());
     SkMatrix blurMatrix = SkMatrix::Scale(scale, scale);
     blurInto(drawSurface,
              readImage->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
-                                   SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone),
-                                   blurMatrix),
-             radius, alpha, blurEffect);
+                                   SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone)),
+             srcRect, blurMatrix, inputEdgesNeedClamp, radius, alpha, blurEffect);
 }
 
 void KawaseBlurDualFilterV2::blurInto(const sk_sp<SkSurface>& drawSurface, sk_sp<SkShader> input,
-                                      const float radius, const float alpha,
+                                      const SkIRect& srcRect, const SkMatrix& srcRectToInputMatrix,
+                                      const bool inputEdgesNeedClamp, const float radius,
+                                      const float alpha,
                                       const sk_sp<SkRuntimeEffect>& blurEffect) const {
+    // Using preallocated textures that may be larger than the current blur region could lead to
+    // bilinear filtering sampling beyond the desired bounds. This is prevented by insetting srcRect
+    // slightly more than 0.5 texel (with a tiny epsilon to avoid rounding ambiguity on some
+    // drivers. The epsilon of 0.0001 is lifted from Skia).
+    if (inputEdgesNeedClamp) {
+        constexpr float insetFactor = 0.5001f;
+        SkRect insetRect = SkRect::Make(srcRect).makeInset(insetFactor, insetFactor);
+        if (insetRect.width() < 0) {
+            const float centerX = insetRect.centerX();
+            insetRect.fLeft = centerX;
+            insetRect.fRight = centerX;
+        }
+        if (insetRect.height() < 0) {
+            const float centerY = insetRect.centerY();
+            insetRect.fTop = centerY;
+            insetRect.fBottom = centerY;
+        }
+        input = SkShaders::CoordClamp(input, insetRect);
+    }
+    input = input->makeWithLocalMatrix(srcRectToInputMatrix);
+
     SkPaint paint;
     if (blurEffect == mUpSampleBlurEffect) {
         if (radius == 0) {
@@ -163,16 +194,17 @@ void KawaseBlurDualFilterV2::blurInto(const sk_sp<SkSurface>& drawSurface, sk_sp
     drawSurface->getCanvas()->drawPaint(paint);
 }
 
-sk_sp<SkImage> KawaseBlurDualFilterV2::generate(SkiaGpuContext* context, const uint32_t blurRadius,
-                                                const sk_sp<SkImage> input,
-                                                const SkRect& blurRect) const {
+sk_sp<SkImage> KawaseBlurDualFilterV2::generateTemporaryImage(SkiaGpuContext* context,
+                                                              const DisplaySettings& display,
+                                                              const uint32_t blurRadius,
+                                                              const sk_sp<SkImage> input,
+                                                              const SkRect& blurRect) const {
     // Apply a conversion factor of (1 / sqrt(3)) to match Skia's built-in blur as used by
     // RenderEffect. See the comment in SkBlurMask.cpp for reasoning behind this.
     const float radius = blurRadius * 0.57735f;
 
     // Use a variable number of blur passes depending on the radius. The non-integer part of this
     // calculation is used to mix the final pass into the second-last with an alpha blend.
-    constexpr int kMaxSurfaces = 4;
     const float filterDepth = std::min(kMaxSurfaces - 1.0f, radius * kInputScale / 2.5f);
     const int filterPasses = std::min(kMaxSurfaces - 1, static_cast<int>(ceil(filterDepth)));
 
@@ -187,16 +219,41 @@ sk_sp<SkImage> KawaseBlurDualFilterV2::generate(SkiaGpuContext* context, const u
                 std::max(1, static_cast<int>(static_cast<float>(targetBlurRect.height()) / scale));
         sk_sp<SkSurface> surface =
                 context->createRenderTarget(input->imageInfo().makeWH(newW, newH));
-        LOG_ALWAYS_FATAL_IF(!surface, "%s: Failed to create surface for blurring!", __func__);
+        LOG_THREAD_STATE_AND_CRASH_IF(!surface, "%s: Failed to create surface for blurring!",
+                                      __func__);
         return surface;
     };
 
+    auto makeImageInfo = [&](float scale) -> SkImageInfo {
+        const int newW =
+                std::max(1, static_cast<int>(static_cast<float>(targetBlurRect.width()) / scale));
+        const int newH =
+                std::max(1, static_cast<int>(static_cast<float>(targetBlurRect.height()) / scale));
+        return input->imageInfo().makeWH(newW, newH);
+    };
+
+    const bool isProtected = context->supportsProtectedContent();
+    bool usesPreallocatedTextures =
+            FlagManager::getInstance().window_blur_kawase2_preallocate_buffers() &&
+            (isProtected ||
+             context->getBackend_onlyUseForCriticalWorkarounds() ==
+                     RenderEngine::SkiaBackend::Graphite);
+    auto& preallocatedTexturesRef = isProtected ? mProtectedTextures : mUnprotectedTextures;
+
     // Render into surfaces downscaled by 1x, 2x, 4x and 8x from the initial downscale.
-    sk_sp<SkSurface> surfaces[kMaxSurfaces] =
-            {filterPasses >= 0 ? makeSurface(1 * kInverseInputScale) : nullptr,
-             filterPasses >= 1 ? makeSurface(2 * kInverseInputScale) : nullptr,
-             filterPasses >= 2 ? makeSurface(4 * kInverseInputScale) : nullptr,
-             filterPasses >= 3 ? makeSurface(8 * kInverseInputScale) : nullptr};
+    sk_sp<SkSurface> surfaces[kMaxSurfaces];
+    SkImageInfo imageInfos[kMaxSurfaces];
+    if (!usesPreallocatedTextures) {
+        for (int i = 0; i < kMaxSurfaces; i++) {
+            surfaces[i] = filterPasses >= i ? makeSurface(kScales[i]) : nullptr;
+            imageInfos[i] = surfaces[i] != nullptr ? surfaces[i]->imageInfo() : SkImageInfo();
+        }
+    } else {
+        for (int i = 0; i < kMaxSurfaces; i++) {
+            surfaces[i] = preallocatedTexturesRef[i]->getOrCreateSurface(display.outputDataspace);
+            imageInfos[i] = makeImageInfo(kScales[i]);
+        }
+    }
 
     // Kawase is an approximation of Gaussian, but behaves differently because it is made up of many
     // simpler blurs. A transformation is required to approximate the same effect as Gaussian.
@@ -220,26 +277,93 @@ sk_sp<SkImage> KawaseBlurDualFilterV2::generate(SkiaGpuContext* context, const u
         blurMatrix.postScale(kInputScale, kInputScale);
         const auto sourceShader =
                 input->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
-                                  SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone),
-                                  blurMatrix);
-        blurInto(surfaces[0], std::move(sourceShader),
+                                  SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone));
+        blurInto(surfaces[0], std::move(sourceShader), targetBlurRect, blurMatrix,
+                 usesPreallocatedTextures,
                  0, // unused blur radius. The blur effect hardcodes the radius.
                  1.0f, mQuarterResDownSampleBlurEffect);
     }
 
     // Next the remaining downscale blur passes.
     for (int i = 0; i < filterPasses; i++) {
-        blurInto(surfaces[i + 1], surfaces[i]->makeTemporaryImage(),
+        blurInto(surfaces[i + 1], imageInfos[i + 1].width(), surfaces[i]->makeTemporaryImage(),
+                 imageInfos[i].bounds(), usesPreallocatedTextures,
                  0, // unused blur radius. The blur effect hardcodes the radius.
                  1.0f, mHalfResDownSampleBlurEffect);
     }
     // Finally blur+upscale back to our original size.
     for (int i = filterPasses - 1; i >= 0; i--) {
-        blurInto(surfaces[i], surfaces[i + 1]->makeTemporaryImage(), step,
+        blurInto(surfaces[i], imageInfos[i].width(), surfaces[i + 1]->makeTemporaryImage(),
+                 imageInfos[i + 1].bounds(), usesPreallocatedTextures, step,
                  std::min(1.0f, filterDepth - i), mUpSampleBlurEffect);
     }
 
     return surfaces[0]->makeTemporaryImage();
+}
+
+bool KawaseBlurDualFilterV2::areBuffersPreallocated(const SkiaGpuContext* context,
+                                                    ui::Size displaySize) const {
+    const bool isProtected = context->supportsProtectedContent();
+
+    // Lie about buffers be preallocated if on the unprotected context in GaneshGL, so that callers
+    // don't need to be aware of this nuance of not being supported.
+    if (!isProtected &&
+        context->getBackend_onlyUseForCriticalWorkarounds() == RenderEngine::SkiaBackend::Ganesh) {
+        return true;
+    }
+
+    const auto& preallocatedTextures = isProtected ? mProtectedTextures : mUnprotectedTextures;
+    if (preallocatedTextures[0] == nullptr) {
+        return false;
+    }
+
+    const ui::Size preallocatedDisplaySize =
+            isProtected ? mProtectedDisplaySize : mUnprotectedDisplaySize;
+    return displaySize.width <= preallocatedDisplaySize.width &&
+            displaySize.height <= preallocatedDisplaySize.height;
+}
+
+void KawaseBlurDualFilterV2::preallocateBuffers(SkiaGpuContext* context, ui::Size size) {
+    SFTRACE_CALL();
+    std::lock_guard<std::mutex> lock(mRenderingMutex);
+
+    const bool isProtected = context->supportsProtectedContent();
+    if (!isProtected &&
+        context->getBackend_onlyUseForCriticalWorkarounds() == RenderEngine::SkiaBackend::Ganesh) {
+        return;
+    }
+
+    auto& texturesRef = isProtected ? mProtectedTextures : mUnprotectedTextures;
+    ui::Size& displaySizeRef = isProtected ? mProtectedDisplaySize : mUnprotectedDisplaySize;
+    const uint64_t usageFlags = isProtected ? kProtectedUsageFlags : kUnprotectedUsageFlags;
+    // Use the longer side as the ref size for the preallocated square, so that it can handle
+    // both portrait and landscape cases.
+    // TODO(b/486256401): use transform to handle screen rotation better.
+    const int32_t side = std::max(size.width, size.height);
+    displaySizeRef = ui::Size(side, side);
+    size_t totalBytes = 0;
+    for (int i = 0; i < kMaxSurfaces; i++) {
+        const int newW = std::max(1, static_cast<int>(static_cast<float>(side) / kScales[i]));
+        const int newH = std::max(1, static_cast<int>(static_cast<float>(side) / kScales[i]));
+
+        sp<GraphicBuffer> buffer = sp<GraphicBuffer>::make(newW, newH, PIXEL_FORMAT_RGBA_8888, 1,
+                                                           usageFlags, "KawaseBlurDualFilterV2");
+        LOG_THREAD_STATE_AND_CRASH_IF(buffer->initCheck() != OK,
+                                      "Failed to preallocate %s GraphicBuffer for intermediate "
+                                      "blur surface: %s. %s(i:%d, %dx%x, RGBA_8888, "
+                                      "usage:0x%" PRIx64 ")",
+                                      isProtected ? "protected" : "unprotected",
+                                      statusToString(buffer->initCheck()).c_str(),
+                                      isProtected ? "Is protected memory supported? " : "", i, newW,
+                                      newH, kUnprotectedUsageFlags);
+        std::unique_ptr<SkiaBackendTexture> backendTexture =
+                context->makeBackendTexture(buffer->toAHardwareBuffer(), true);
+        texturesRef[i] = std::make_shared<AutoBackendTexture::LocalRef>(std::move(backendTexture),
+                                                                        mTextureCleanupMgr);
+        totalBytes += newW * newH * bytesPerPixel(PIXEL_FORMAT_RGBA_8888);
+    }
+    ALOGD("(Re)allocated %zu bytes of %s memory for intermediate blur surfaces (%dx%d display)",
+          totalBytes, isProtected ? "protected" : "unprotected", size.width, size.height);
 }
 
 } // namespace skia

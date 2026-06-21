@@ -20,8 +20,11 @@
 
 #include "NotifyArgs.h"
 
+#include <string>
+
 #include <android-base/stringprintf.h>
 #include <android/log.h>
+#include <input/Input.h>
 #include <math.h>
 #include <utils/Trace.h>
 
@@ -189,18 +192,25 @@ struct Visitor : V... { using V::operator()...; };
 template <typename... V>
 Visitor(V...) -> Visitor<V...>;
 
-const char* toString(const NotifyArgs& args) {
+const std::string toString(const NotifyArgs& args) {
     Visitor toStringVisitor{
-            [&](const NotifyInputDevicesChangedArgs&) { return "NotifyInputDevicesChangedArgs"; },
-            [&](const NotifyKeyArgs&) { return "NotifyKeyArgs"; },
-            [&](const NotifyMotionArgs&) { return "NotifyMotionArgs"; },
-            [&](const NotifySensorArgs&) { return "NotifySensorArgs"; },
-            [&](const NotifySwitchArgs&) { return "NotifySwitchArgs"; },
-            [&](const NotifyDeviceResetArgs&) { return "NotifyDeviceResetArgs"; },
-            [&](const NotifyPointerCaptureChangedArgs&) {
+            [&](const NotifyInputDevicesChangedArgs&) -> std::string {
+                return "NotifyInputDevicesChangedArgs";
+            },
+            [&](const NotifyKeyArgs&) -> std::string { return "NotifyKeyArgs"; },
+            [&](const NotifyMotionArgs& motionArgs) { return motionArgs.dump(); },
+            [&](const NotifySensorArgs&) -> std::string { return "NotifySensorArgs"; },
+            [&](const NotifySwitchArgs&) -> std::string { return "NotifySwitchArgs"; },
+            [&](const NotifyDeviceResetArgs& resetArgs) -> std::string {
+                return std::string("NotifyDeviceResetArgs (deviceId=") +
+                        std::to_string(resetArgs.deviceId) + ")";
+            },
+            [&](const NotifyPointerCaptureChangedArgs&) -> std::string {
                 return "NotifyPointerCaptureChangedArgs";
             },
-            [&](const NotifyVibratorStateArgs&) { return "NotifyVibratorStateArgs"; },
+            [&](const NotifyVibratorStateArgs&) -> std::string {
+                return "NotifyVibratorStateArgs";
+            },
     };
     return std::visit(toStringVisitor, args);
 }

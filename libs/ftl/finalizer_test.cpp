@@ -177,7 +177,6 @@ TEST(Finalizer, NullifiesTheFunctionWhenInvokedIfPossible) {
   auto shared = std::make_shared<int>(0);
   std::weak_ptr<int> weak = shared;
 
-  int count = 0;
   {
     auto lambda = [capture = std::move(shared)]() {};
     auto finalizer = ftl::Finalizer(std::move(lambda));

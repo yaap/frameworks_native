@@ -30,7 +30,6 @@
 #include <android/dlext.h>
 #include <binder/IServiceManager.h>
 #include <bionic/dlext_namespaces.h>
-#include <com_android_graphics_graphicsenv_flags.h>
 #include <graphicsenv/IGpuService.h>
 #include <log/log.h>
 #include <sys/prctl.h>
@@ -69,8 +68,6 @@ static bool isVndkEnabled() {
     return false;
 }
 } // namespace
-
-namespace graphicsenv_flags = com::android::graphics::graphicsenv::flags;
 
 namespace android {
 
@@ -200,6 +197,14 @@ static sp<IGpuService> getGpuService() {
     }
 
     return interface_cast<IGpuService>(binder);
+}
+
+GraphicsEnv::GraphicsEnv() : mZygoteDisableGlPreload(false) {
+    // RO properties cannot change at runtime, so it only needs to be queried once.
+    auto disableGlPreload = base::GetProperty("ro.zygote.disable_gl_preload", "");
+    if (!disableGlPreload.empty() && disableGlPreload == "true") {
+        mZygoteDisableGlPreload = true;
+    }
 }
 
 /*static*/ GraphicsEnv& GraphicsEnv::getInstance() {
@@ -619,10 +624,6 @@ void GraphicsEnv::setAngleInfo(const std::string& path, const bool shouldUseNati
         mShouldUseAngle = true;
     }
     mShouldUseNativeDriver = shouldUseNativeDriver;
-
-    if (mShouldUseAngle) {
-        updateAngleFeatureOverrides();
-    }
 }
 
 std::string& GraphicsEnv::getPackageName() {
@@ -637,10 +638,6 @@ const std::vector<std::string>& GraphicsEnv::getAngleEglFeatures() {
 // List of ANGLE features to override (enabled or disable).
 // The list of overrides is loaded and parsed by GpuService.
 void GraphicsEnv::updateAngleFeatureOverrides() {
-    if (!graphicsenv_flags::angle_feature_overrides()) {
-        return;
-    }
-
     const sp<IGpuService> gpuService = getGpuService();
     if (!gpuService) {
         ALOGE("No GPU service");
@@ -652,10 +649,6 @@ void GraphicsEnv::updateAngleFeatureOverrides() {
 
 void GraphicsEnv::getAngleFeatureOverrides(std::vector<const char*>& enabled,
                                            std::vector<const char*>& disabled) {
-    if (!graphicsenv_flags::angle_feature_overrides()) {
-        return;
-    }
-
     for (const FeatureConfig& feature : mFeatureOverrides.mGlobalFeatures) {
         if (feature.mEnabled) {
             enabled.push_back(feature.mFeatureName.c_str());
@@ -664,7 +657,7 @@ void GraphicsEnv::getAngleFeatureOverrides(std::vector<const char*>& enabled,
         }
     }
 
-    if (mFeatureOverrides.mPackageFeatures.count(mPackageName)) {
+    if (!mPackageName.empty() && mFeatureOverrides.mPackageFeatures.count(mPackageName)) {
         for (const FeatureConfig& feature : mFeatureOverrides.mPackageFeatures[mPackageName]) {
             if (feature.mEnabled) {
                 enabled.push_back(feature.mFeatureName.c_str());
@@ -745,9 +738,6 @@ void GraphicsEnv::nativeToggleAngleAsSystemDriver(bool enabled) {
 }
 
 std::string GraphicsEnv::nativeGetPersistGraphicsEgl() {
-    if (!graphicsenv_flags::query_persist_graphics_egl()) {
-        return "";
-    }
     const sp<IGpuService> gpuService = getGpuService();
     if (!gpuService) {
         ALOGE("No GPU service");
@@ -762,6 +752,10 @@ bool GraphicsEnv::shouldUseSystemAngle() {
 
 bool GraphicsEnv::shouldUseNativeDriver() {
     return mShouldUseNativeDriver;
+}
+
+bool GraphicsEnv::isZygoteDisableGlPreload() {
+    return mZygoteDisableGlPreload;
 }
 
 /**

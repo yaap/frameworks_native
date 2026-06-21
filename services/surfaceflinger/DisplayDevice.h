@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 #include <android-base/thread_annotations.h>
 #include <android/native_window.h>
@@ -27,6 +28,7 @@
 #include <compositionengine/Display.h>
 #include <compositionengine/DisplaySurface.h>
 #include <gui/LayerState.h>
+#include <gui/Surface.h>
 #include <math/mat4.h>
 #include <renderengine/RenderEngine.h>
 #include <system/window.h>
@@ -55,7 +57,6 @@ namespace android {
 class Fence;
 class HWComposer;
 class HdrSdrRatioOverlay;
-class IGraphicBufferProducer;
 class Layer;
 class RefreshRateOverlay;
 class SurfaceFlinger;
@@ -82,7 +83,7 @@ class DisplayDevice : public RefBase {
 public:
     constexpr static float sDefaultMinLumiance = 0.0;
     constexpr static float sDefaultMaxLumiance = 500.0;
-    enum { eReceivesInput = 0x01 };
+    enum { eReceivesInput = 0x01, eOptimizationPolicyPower = 0x02 };
 
     explicit DisplayDevice(DisplayDeviceCreationArgs& args);
 
@@ -93,8 +94,11 @@ public:
         return mCompositionDisplay;
     }
 
-    bool isVirtual() const;
     bool isPrimary() const { return mIsPrimary; }
+
+    bool isPhysical() const { return !isVirtual(); }
+    bool isVirtual() const;
+
     bool isGpuVirtualDisplay() const {
         return std::holds_alternative<GpuVirtualDisplayId>(getDisplayIdVariant());
     }
@@ -107,7 +111,7 @@ public:
     // The optimization policy influences whether this display is optimized for power or
     // performance.
     gui::ISurfaceComposer::OptimizationPolicy getOptimizationPolicy() const;
-    void setOptimizationPolicy(gui::ISurfaceComposer::OptimizationPolicy optimizationPolicy);
+    void enableForceOptimizationPolicyForPower();
 
     int getWidth() const;
     int getHeight() const;
@@ -266,8 +270,7 @@ private:
     // TODO(b/182939859): Remove special cases for primary display.
     const bool mIsPrimary;
 
-    gui::ISurfaceComposer::OptimizationPolicy mOptimizationPolicy =
-            gui::ISurfaceComposer::OptimizationPolicy::optimizeForPerformance;
+    bool mForceOptimizationPolicyForPower = false;
 
     uint32_t mFlags = 0;
 
@@ -301,11 +304,29 @@ struct DisplayDeviceState {
         }
     };
 
-    bool isVirtual() const { return !physical; }
+    struct Virtual {
+        uid_t ownerUid = static_cast<uid_t>(-1);
+        sp<Surface> surface;
+
+        bool operator==(const Virtual&) const = default;
+    };
+
+    static DisplayDeviceState createPhysical(
+            PhysicalDisplayId id, hardware::graphics::composer::hal::HWDisplayId hwcDisplayId,
+            uint8_t port, DisplayModePtr activeMode);
+
+    static DisplayDeviceState createVirtual(uid_t ownerUid);
+
+    bool isPhysical() const { return std::holds_alternative<Physical>(physicalOrVirtual); }
+    bool isVirtual() const { return std::holds_alternative<Virtual>(physicalOrVirtual); }
+
+    Physical& getPhysical() { return std::get<Physical>(physicalOrVirtual); }
+    const Physical& getPhysical() const { return std::get<Physical>(physicalOrVirtual); }
+    Virtual& getVirtual() { return std::get<Virtual>(physicalOrVirtual); }
+    const Virtual& getVirtual() const { return std::get<Virtual>(physicalOrVirtual); }
 
     int32_t sequenceId = sNextSequenceId++;
-    std::optional<Physical> physical;
-    sp<IGraphicBufferProducer> surface;
+    std::variant<Physical, Virtual> physicalOrVirtual;
     ui::LayerStack layerStack;
     uint32_t flags = 0;
     Rect layerStackSpaceRect;
@@ -325,7 +346,12 @@ struct DisplayDeviceState {
     hardware::graphics::composer::hal::PowerMode initialPowerMode{
             hardware::graphics::composer::hal::PowerMode::OFF};
 
+    static int32_t getNextSequenceId() { return sNextSequenceId++; }
+
 private:
+    DisplayDeviceState(std::variant<Physical, Virtual>&& type)
+          : physicalOrVirtual(std::move(type)) {}
+
     static std::atomic<int32_t> sNextSequenceId;
 };
 

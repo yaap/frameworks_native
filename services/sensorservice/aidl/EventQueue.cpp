@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "AidlSensorEventQueue"
+
 #include "EventQueue.h"
 #include "utils.h"
 
 #include <android-base/logging.h>
+#include <log/log.h>
 #include <utils/Looper.h>
 
 namespace android {
@@ -67,17 +70,45 @@ EventQueue::EventQueue(std::shared_ptr<IEventQueueCallback> callback, sp<::andro
 }
 
 EventQueue::~EventQueue() {
+    std::vector<int32_t> activeSensors;
+    {
+        std::lock_guard<std::mutex> lock(mActiveSensorsLock);
+        activeSensors.assign(mActiveSensors.begin(), mActiveSensors.end());
+    }
+
+    for (int32_t handle : activeSensors) {
+        mInternalQueue->disableSensor(handle);
+    }
+
     mLooper->removeFd(mInternalQueue->getFd());
 }
 
 ndk::ScopedAStatus EventQueue::enableSensor(int32_t in_sensorHandle, int32_t in_samplingPeriodUs,
                                             int64_t in_maxBatchReportLatencyUs) {
-    return convertResult(mInternalQueue->enableSensor(in_sensorHandle, in_samplingPeriodUs,
-                                                      in_maxBatchReportLatencyUs, 0));
+    status_t err = mInternalQueue->enableSensor(in_sensorHandle, in_samplingPeriodUs,
+                                                in_maxBatchReportLatencyUs, 0);
+
+    if (err == ::android::OK) {
+        std::lock_guard<std::mutex> lock(mActiveSensorsLock);
+        mActiveSensors.insert(in_sensorHandle);
+    } else {
+        ALOGE("Failed to enable sensor handle %d. Error: %d", in_sensorHandle, err);
+    }
+
+    return convertResult(err);
 }
 
 ndk::ScopedAStatus EventQueue::disableSensor(int32_t in_sensorHandle) {
-    return convertResult(mInternalQueue->disableSensor(in_sensorHandle));
+    status_t err = mInternalQueue->disableSensor(in_sensorHandle);
+
+    if (err == ::android::OK) {
+        std::lock_guard<std::mutex> lock(mActiveSensorsLock);
+        mActiveSensors.erase(in_sensorHandle);
+    } else {
+        ALOGE("Failed to disable sensor handle %d. Error: %d", in_sensorHandle, err);
+    }
+
+    return convertResult(err);
 }
 
 } // namespace implementation

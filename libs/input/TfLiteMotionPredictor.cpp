@@ -81,7 +81,12 @@ std::string getModelPath() {
     }
     return "/system/etc/motion_predictor_model.tflite";
 #else
-    return base::GetExecutableDirectory() + "/motion_predictor_model.tflite";
+    const char* ravenwood_runtime_dir = getenv("RAVENWOOD_RUNTIME_DIR");
+    if (ravenwood_runtime_dir) {
+        return std::string(ravenwood_runtime_dir) + "ravenwood-data/motion_predictor_model.tflite";
+    } else {
+        return base::GetExecutableDirectory() + "/motion_predictor_model.tflite";
+    }
 #endif
 }
 
@@ -218,15 +223,17 @@ void TfLiteMotionPredictorBuffers::pushSample(int64_t timestamp,
     float phi = 0;
     float orientation = 0;
 
-    if (!mAxisFrom && r > 0) { // Second point.
-        // We can only determine the distance from the first point, and not any
-        // angle. However, if the second point forms an axis, the orientation can
-        // be transformed relative to that axis.
-        const float axisPhi = std::atan2(v.y, v.x);
-        // A MotionEvent's orientation is measured clockwise from the vertical
-        // axis, but axisPhi is measured counter-clockwise from the horizontal
-        // axis.
-        orientation = M_PI_2 - sample.orientation - axisPhi;
+    if (!mAxisFrom) { // Second point.
+        if (r > 0) {
+            // We can only determine the distance from the first point, and not any
+            // angle. However, if the second point forms an axis, the orientation can
+            // be transformed relative to that axis.
+            const float axisPhi = std::atan2(v.y, v.x);
+            // A MotionEvent's orientation is measured clockwise from the vertical
+            // axis, but axisPhi is measured counter-clockwise from the horizontal
+            // axis.
+            orientation = M_PI_2 - sample.orientation - axisPhi;
+        }
     } else {
         const TfLiteMotionPredictorSample::Point axis = mAxisTo->position - mAxisFrom->position;
         const float axisPhi = std::atan2(axis.y, axis.x);

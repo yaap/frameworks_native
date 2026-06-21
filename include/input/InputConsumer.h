@@ -43,6 +43,13 @@ public:
     /* Gets the underlying input channel. */
     inline std::shared_ptr<InputChannel> getChannel() { return mChannel; }
 
+    /* Contains both the result of the consumption and any unfinished input messages,
+     * which must both be handled by the caller. */
+    struct ConsumeResult {
+        android::base::Result<void> result;
+        std::vector<InputMessage> unfinishedInputMessages;
+    };
+
     /* Consumes an input event from the input channel and copies its contents into
      * an InputEvent object created using the specified factory.
      *
@@ -60,14 +67,20 @@ public:
      *
      * The returned sequence number is never 0 unless the operation failed.
      *
-     * Returns OK on success.
-     * Returns WOULD_BLOCK if there is no event present.
-     * Returns DEAD_OBJECT if the channel's peer has been closed.
-     * Returns NO_MEMORY if the event could not be created.
+     * Returns a struct containing both the result of the consumption, followed by a vector of
+     * unfinished input messages. The caller must ensure to check both check the result of the
+     * consume as well as finish any unfinished input messages. Even if the consume call fails,
+     * this might return a non-empty vector of unfinished input messages that the caller must
+     * correctly send to the publisher.
+     *
+     * Result is OK on success.
+     * Result is WOULD_BLOCK if there is no event present.
+     * Result is DEAD_OBJECT if the channel's peer has been closed.
+     * Result is NO_MEMORY if the event could not be created.
      * Other errors probably indicate that the channel is broken.
      */
-    status_t consume(InputEventFactoryInterface* factory, bool consumeBatches, nsecs_t frameTime,
-                     uint32_t* outSeq, InputEvent** outEvent);
+    ConsumeResult consume(InputEventFactoryInterface* factory, bool consumeBatches,
+                          nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent);
 
     /* Sends a finished signal to the publisher to inform it that the message
      * with the specified sequence number has finished being process and whether

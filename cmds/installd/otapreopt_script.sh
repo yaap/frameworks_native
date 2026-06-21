@@ -19,6 +19,8 @@
 # This script runs as a postinstall step to drive Pre-reboot Dexopt. During Pre-reboot Dexopt, the
 # new version of this code is run. See system/extras/postinst/postinst.sh for some docs.
 
+set -o pipefail
+
 TARGET_SLOT="$1"
 STATUS_FD="$2"
 
@@ -57,6 +59,22 @@ fi
 function infinite_source {
   while echo .; do
     sleep 1
+  done || true
+}
+
+# Reads standard input line-by-line.
+# Filters "global_progress " lines to the status FD and passes everything else through.
+function process_stdout {
+  # '|| [ -n "$line" ]' catches a final line that might lack a newline character.
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "global_progress "*)
+        echo "$line" >&"$STATUS_FD"
+        ;;
+      *)
+        echo "$line"
+        ;;
+    esac
   done
 }
 
@@ -68,7 +86,7 @@ if [[ "$TRIGGERED_BY_API" = "1" ]]; then
   # When we reach here, it means Pre-reboot Dexopt is enabled in asynchronous
   # mode and the job scheduler determined that it's the time to run the job.
   # Start Pre-reboot Dexopt now and wait for it to finish.
-  infinite_source | pm art on-ota-staged --start
+  infinite_source | pm art on-ota-staged --start | process_stdout
   exit $?
 fi
 
@@ -89,7 +107,7 @@ if (( $? == 0 )) && (( $PR_DEXOPT_JOB_VERSION >= 3 )); then
   #   job scheduler. It will call this script again through the
   #   `UpdateEngine.triggerPostinstall` API, with `TRIGGERED_BY_API` being "1".
   #   This is always the case if the current system is Android 16 or later.
-  if infinite_source | pm art on-ota-staged --slot "$TARGET_SLOT_SUFFIX"; then
+  if infinite_source | pm art on-ota-staged --slot "$TARGET_SLOT_SUFFIX" | process_stdout; then
     # Handled by Pre-reboot Dexopt.
     exit 0
   fi

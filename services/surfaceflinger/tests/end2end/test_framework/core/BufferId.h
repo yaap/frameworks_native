@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include <aidl/android/hardware/common/NativeHandle.h>
@@ -44,3 +46,12 @@ inline auto format_as(const BufferId& event) -> std::string {
 }
 
 }  // namespace android::surfaceflinger::tests::end2end::test_framework::core
+
+template <>
+struct std::hash<::android::surfaceflinger::tests::end2end::test_framework::core::BufferId> {
+    constexpr auto operator()(
+            const ::android::surfaceflinger::tests::end2end::test_framework::core::BufferId& value)
+            const -> size_t {
+        return std::hash<uint64_t>()(value.inode) ^ (std::hash<uint64_t>()(value.device) << 1);
+    }
+};

@@ -19,6 +19,7 @@
 
 #define BPF_MAP_MAKE_VISIBLE_FOR_TESTING
 #include <bpf/BpfMap.h>
+#include <bpf/BpfUtils.h>
 #include <gpumem/GpuMem.h>
 #include <gtest/gtest.h>
 #include <perfetto/trace/trace.pb.h>

@@ -30,7 +30,8 @@ FenceMonitor::FenceMonitor(const char* name) : mName(name), mFencesQueued(0), mF
     thread.detach();
 }
 
-void FenceMonitor::queueFence(const sp<Fence>& fence) {
+void FenceMonitor::queueFence(const sp<Fence>& fence,
+                              std::function<void(std::function<void()>)> tracer) {
     char message[64];
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -45,7 +46,7 @@ void FenceMonitor::queueFence(const sp<Fence>& fence) {
     snprintf(message, sizeof(message), "Trace %s fence %u", mName, mFencesQueued);
     ATRACE_NAME(message);
 
-    mQueue.push_back(fence);
+    mQueue.emplace_back(std::move(fence), std::move(tracer));
     mCondition.notify_one();
     mFencesQueued++;
     ATRACE_INT(mName, int32_t(mQueue.size()));
@@ -59,25 +60,37 @@ void FenceMonitor::loop() {
 
 void FenceMonitor::threadLoop() {
     sp<Fence> fence;
+    std::function<void(std::function<void()>)> tracer;
     uint32_t fenceNum;
     {
         std::unique_lock<std::mutex> lock(mMutex);
         while (mQueue.empty()) {
             mCondition.wait(lock);
         }
-        fence = mQueue[0];
+
+        auto& entry = mQueue[0];
+        fence = entry.fence;
+        tracer = entry.tracer;
         fenceNum = mFencesSignaled;
     }
-    {
+
+    auto inner = [&]() {
         char message[64];
         snprintf(message, sizeof(message), "waiting for %s %u", mName, fenceNum);
         ATRACE_NAME(message);
-
         status_t result = fence->waitForever(message);
         if (result != OK) {
             ALOGE("Error waiting for fence: %d", result);
         }
+    };
+
+    if (tracer) {
+        tracer(inner);
+    } else {
+        inner();
     }
+    tracer = {};
+
     {
         std::lock_guard<std::mutex> lock(mMutex);
         mQueue.pop_front();

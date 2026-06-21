@@ -245,7 +245,7 @@ sp<BpBinder> BpBinder::create(int32_t handle, std::function<void()>* postTask) {
     return sp<BpBinder>::make(BinderHandle{handle}, trackedUid);
 }
 
-sp<BpBinder> BpBinder::create(const sp<RpcSession>& session, uint64_t address) {
+sp<BpBinder> BpBinder::create(sp<RpcSession>&& session, uint64_t address) {
     LOG_ALWAYS_FATAL_IF(session == nullptr, "BpBinder::create null session");
 
     // These are not currently tracked, since there is no UID or other
@@ -253,7 +253,7 @@ sp<BpBinder> BpBinder::create(const sp<RpcSession>& session, uint64_t address) {
     // needed, session objects keep track of all BpBinder objects on a
     // per-session basis.
 
-    return sp<BpBinder>::make(RpcHandle{session, address});
+    return sp<BpBinder>::make(RpcHandle{std::move(session), address});
 }
 
 BpBinder::BpBinder(Handle&& handle)
@@ -614,13 +614,14 @@ status_t BpBinder::addFrozenStateChangeCallback(const wp<FrozenStateChangeCallba
     LOG_ALWAYS_FATAL_IF(isRpcBinder(),
                         "addFrozenStateChangeCallback() is not supported for RPC Binder.");
     LOG_ALWAYS_FATAL_IF(!kEnableKernelIpc, "Binder kernel driver disabled at build time");
-    LOG_ALWAYS_FATAL_IF(ProcessState::self()->getThreadPoolMaxTotalThreadCount() == 0,
-                        "addFrozenStateChangeCallback on %s but there are no threads "
-                        "(yet?) listening to incoming transactions. See "
-                        "ProcessState::startThreadPool "
-                        "and ProcessState::setThreadPoolMaxThreadCount. Generally you should "
-                        "setup the binder threadpool before other initialization steps.",
-                        String8(getInterfaceDescriptor()).c_str());
+    if (ProcessState::self()->getThreadPoolMaxTotalThreadCount() == 0) {
+        ALOGE("addFrozenStateChangeCallback on %s but there are no threads "
+              "(yet?) listening to incoming transactions. See "
+              "ProcessState::startThreadPool "
+              "and ProcessState::setThreadPoolMaxThreadCount. Generally you should "
+              "setup the binder threadpool before other initialization steps.",
+              String8(getInterfaceDescriptor()).c_str());
+    }
     LOG_ALWAYS_FATAL_IF(callback == nullptr,
                         "addFrozenStateChangeCallback(): callback must be non-NULL");
 
@@ -720,21 +721,32 @@ void BpBinder::onFrozenStateChanged(bool isFrozen) {
     if (mFrozen->isPendingClear) {
         return;
     }
+
     bool stateChanged = !mFrozen->initialStateReceived || mFrozen->isFrozen != isFrozen;
-    if (stateChanged) {
-        mFrozen->isFrozen = isFrozen;
-        mFrozen->initialStateReceived = true;
-        for (size_t i = 0; i < mFrozen->callbacks.size();) {
-            sp<FrozenStateChangeCallback> callback = mFrozen->callbacks.itemAt(i).promote();
-            if (callback != nullptr) {
-                callback->onStateChanged(wp<BpBinder>::fromExisting(this),
-                                         isFrozen ? FrozenStateChangeCallback::State::FROZEN
-                                                  : FrozenStateChangeCallback::State::UNFROZEN);
-                i++;
-            } else {
-                mFrozen->callbacks.removeItemsAt(i);
-            }
+    if (!stateChanged) {
+        return;
+    }
+
+    std::vector<sp<FrozenStateChangeCallback>> callbacksToCall;
+    mFrozen->isFrozen = isFrozen;
+    mFrozen->initialStateReceived = true;
+    for (size_t i = 0; i < mFrozen->callbacks.size();) {
+        sp<FrozenStateChangeCallback> callback = mFrozen->callbacks.itemAt(i).promote();
+        if (callback != nullptr) {
+            callbacksToCall.emplace_back(std::move(callback));
+            i++;
+        } else {
+            mFrozen->callbacks.removeItemsAt(i);
         }
+    }
+
+    const auto newState = isFrozen ? FrozenStateChangeCallback::State::FROZEN
+                                   : FrozenStateChangeCallback::State::UNFROZEN;
+    const auto wpThis = wp<BpBinder>::fromExisting(this);
+
+    _l.unlock(); // Issue the state change callback and call the sp<> dtor outside of mLock.
+    for (const auto& callback : callbacksToCall) {
+        callback->onStateChanged(wpThis, newState);
     }
 }
 
@@ -860,8 +872,9 @@ void BpBinder::onLastStrongRef(const void* /*id*/) {
     Vector<Obituary>* obits = mObituaries;
     if(obits != nullptr) {
         if (!obits->isEmpty()) {
-            ALOGV("onLastStrongRef automatically unlinking death recipients for descriptor: '%s'",
-                  BPBINDER_BEST_DESCRIPTOR_LOCKED);
+            ALOGI("onLastStrongRef automatically unlinking death recipients for binder (%p) with "
+                  "descriptor: '%s'",
+                  this, BPBINDER_BEST_DESCRIPTOR_LOCKED);
         }
 
         if (ipc) ipc->clearDeathNotification(binderHandle(), this);
@@ -873,9 +886,9 @@ void BpBinder::onLastStrongRef(const void* /*id*/) {
                 std::ignore =
                         IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(),
                                                                                 this);
-                mFrozen->isPendingClear = true;
             }
-            mFrozen->callbacks.clear();
+            *mFrozen = {};
+            mFrozen->isPendingClear = true;
         } else {
             std::ignore =
                     IPCThreadState::self()->removeFrozenStateChangeCallback(binderHandle(), this);

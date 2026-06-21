@@ -29,6 +29,8 @@
 #include "../egl_impl.h"
 #include "egl_display.h"
 
+#include <com_android_graphics_egl_flags.h>
+
 // Monolithic cache size limits.
 static const size_t kMaxMonolithicKeySize = 12 * 1024;
 static const size_t kMaxMonolithicValueSize = 64 * 1024;
@@ -262,7 +264,28 @@ void egl_cache_t::updateMode() {
             mCacheByteLimit = debugCacheSize;
         }
 
-        ALOGV("Using multifile EGL blobcache limit of %zu bytes", mCacheByteLimit);
+        if (flags::multifile_blobcache_configurable_entry_limit()) {
+            // If an entry limit has been set, use it now
+            mCacheEntryLimit =
+                    base::GetUintProperty<size_t>("ro.egl.blobcache.multifile_entry_limit",
+                                                  kMaxMultifileTotalEntries);
+
+            // Check for an entry limit debug value
+            const int32_t debugEntryLimit =
+                    base::GetIntProperty<int32_t>("debug.egl.blobcache.multifile_entry_limit", -1);
+            if (debugEntryLimit >= 0) {
+                ALOGV("Overriding entry limit %zu with %i from "
+                      "debug.egl.blobcache.multifile_entry_limit",
+                      mCacheEntryLimit, debugEntryLimit);
+                mCacheEntryLimit = static_cast<size_t>(debugEntryLimit);
+            }
+
+            ALOGV("Using multifile EGL blobcache byte limit of %zu bytes, entry limit of %zu",
+                  mCacheByteLimit, mCacheEntryLimit);
+        } else {
+            mCacheEntryLimit = static_cast<size_t>(kMaxMultifileTotalEntries);
+            ALOGV("Using multifile EGL blobcache byte limit of %zu bytes", mCacheByteLimit);
+        }
     }
 }
 
@@ -278,7 +301,7 @@ MultifileBlobCache* egl_cache_t::getMultifileBlobCacheLocked() {
     if (mMultifileBlobCache == nullptr) {
         mMultifileBlobCache.reset(new MultifileBlobCache(kMaxMultifileKeySize,
                                                          kMaxMultifileValueSize, mCacheByteLimit,
-                                                         kMaxMultifileTotalEntries, mFilename));
+                                                         mCacheEntryLimit, mFilename));
     }
     return mMultifileBlobCache.get();
 }

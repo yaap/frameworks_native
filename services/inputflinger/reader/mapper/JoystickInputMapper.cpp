@@ -18,6 +18,20 @@
 
 #include "JoystickInputMapper.h"
 
+#include <android-base/logging.h>
+#include <ftl/enum.h>
+#include <format>
+#include <input/EvdevAbsCode.h>
+#include <input/EvdevKeyCode.h>
+#include <input/KeyCode.h>
+#include <input/MotionEventAxis.h>
+
+#include <map>
+#include <sstream>
+
+#include "EventHub.h"
+#include "android/keycodes.h"
+
 namespace android {
 
 JoystickInputMapper::JoystickInputMapper(InputDeviceContext& deviceContext,
@@ -30,13 +44,23 @@ uint32_t JoystickInputMapper::getSources() const {
     return AINPUT_SOURCE_JOYSTICK;
 }
 
+static bool isAxisEnabled(const int32_t axisId) {
+    return MotionEventAxis(axisId) != MotionEventAxis::UNKNOWN;
+}
+
+static bool isAxisDisabled(const int32_t axisId) {
+    return !isAxisEnabled(axisId);
+}
+
 void JoystickInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
     InputMapper::populateDeviceInfo(info);
 
     for (const auto& [_, axis] : mAxes) {
-        addMotionRange(axis.axisInfo.axis, axis, info);
+        if (isAxisEnabled(axis.axisInfo.axis)) {
+            addMotionRange(axis.axisInfo.axis, axis, info);
+        }
 
-        if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT) {
+        if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT && isAxisEnabled(axis.axisInfo.highAxis)) {
             addMotionRange(axis.axisInfo.highAxis, axis, info);
         }
     }
@@ -73,20 +97,12 @@ void JoystickInputMapper::dump(std::string& dump) {
 
     dump += INDENT3 "Axes:\n";
     for (const auto& [rawAxis, axis] : mAxes) {
-        const char* label = InputEventLookup::getAxisLabel(axis.axisInfo.axis);
-        if (label) {
-            dump += StringPrintf(INDENT4 "%s", label);
-        } else {
-            dump += StringPrintf(INDENT4 "%d", axis.axisInfo.axis);
-        }
+        dump += INDENT4;
+        dump += MotionEvent::getLabelOrCode(axis.axisInfo.axis);
         if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT) {
-            label = InputEventLookup::getAxisLabel(axis.axisInfo.highAxis);
-            if (label) {
-                dump += StringPrintf(" / %s (split at %d)", label, axis.axisInfo.splitValue);
-            } else {
-                dump += StringPrintf(" / %d (split at %d)", axis.axisInfo.highAxis,
-                                     axis.axisInfo.splitValue);
-            }
+            dump += StringPrintf(" / %s (split at %d)",
+                                 MotionEvent::getLabelOrCode(axis.axisInfo.highAxis).c_str(),
+                                 axis.axisInfo.splitValue);
         } else if (axis.axisInfo.mode == AxisInfo::MODE_INVERT) {
             dump += " (invert)";
         }
@@ -102,14 +118,55 @@ void JoystickInputMapper::dump(std::string& dump) {
                              axis.rawAxisInfo.flat, axis.rawAxisInfo.fuzz,
                              axis.rawAxisInfo.resolution);
     }
+
+    dump += INDENT3 "Key to Axis Remappings:\n";
+    std::ostringstream ss;
+    if (mEvdevKeyToEvdevAbs.empty()) {
+        ss << INDENT4 "<empty>\n";
+    } else {
+        for (const auto& [evdevKey, axisData] : mEvdevKeyToEvdevAbs) {
+            const auto& [evdevAbs, isHighAxis] = axisData;
+            ss << INDENT4 << evdevKey << " -> " << evdevAbs
+               << (isHighAxis ? " (high)" : "") << "\n";
+        }
+    }
+    dump += ss.str();
 }
 
 std::list<NotifyArgs> JoystickInputMapper::reconfigure(nsecs_t when,
                                                        const InputReaderConfiguration& config,
                                                        ConfigurationChanges changes) {
     std::list<NotifyArgs> out = InputMapper::reconfigure(when, config, changes);
+    bool refreshAxes = !changes.any();
+    if (changes.test(InputReaderConfiguration::Change::AXIS_REMAPPING) &&
+        !getDeviceContext().isVirtualDevice()) {
+        std::unordered_map<int32_t, int32_t> axisRemapping;
+        if (auto it = config.axisRemappingPerDevice.find(getDeviceId());
+            it != config.axisRemappingPerDevice.end()) {
+            axisRemapping = it->second;
+        }
 
-    if (!changes.any()) { // first time only
+        std::map<KeyCode, MotionEventAxis> keyToAxisRemapping;
+        if (auto it = config.keyToAxisRemappingPerDevice.find(getDeviceId());
+            it != config.keyToAxisRemappingPerDevice.end()) {
+            keyToAxisRemapping = it->second;
+        }
+
+        if (mAxisRemapping != axisRemapping) {
+            mAxisRemapping = axisRemapping;
+            getDeviceContext().setAxisRemapping(axisRemapping);
+            refreshAxes = true;
+        }
+
+        if (mKeyToAxisRemapping != keyToAxisRemapping) {
+            mKeyToAxisRemapping = keyToAxisRemapping;
+            refreshAxes = true;
+        }
+    }
+
+    if (refreshAxes) {
+        bumpGeneration();
+        mAxes.clear();
         // Collect all axes.
         for (int32_t abs = 0; abs <= ABS_MAX; abs++) {
             if (!(getAbsAxisUsage(abs, getDeviceContext().getDeviceClasses())
@@ -127,10 +184,18 @@ std::list<NotifyArgs> JoystickInputMapper::reconfigure(nsecs_t when,
                     // Axis is not explicitly mapped, will choose a generic axis later.
                     axisInfo.mode = AxisInfo::MODE_NORMAL;
                     axisInfo.axis = -1;
+                } else if (isAxisDisabled(axisInfo.axis)) {
+                    if (axisInfo.mode != AxisInfo::MODE_SPLIT ||
+                        isAxisDisabled(axisInfo.highAxis)) {
+                        continue;
+                    }
                 }
+
                 mAxes.insert({abs, createAxis(axisInfo, rawAxisInfo.value(), explicitlyMapped)});
             }
         }
+
+        addAxesMappedFromKeys();
 
         // If there are too many axes, start dropping them.
         // Prefer to keep explicitly mapped axes.
@@ -145,7 +210,7 @@ std::list<NotifyArgs> JoystickInputMapper::reconfigure(nsecs_t when,
         int32_t nextGenericAxisId = AMOTION_EVENT_AXIS_GENERIC_1;
         for (auto it = mAxes.begin(); it != mAxes.end(); /*increment it inside loop*/) {
             Axis& axis = it->second;
-            if (axis.axisInfo.axis < 0) {
+            if (axis.axisInfo.axis < 0 && !axis.explicitlyMapped) {
                 while (nextGenericAxisId <= AMOTION_EVENT_MAXIMUM_VALID_AXIS_VALUE &&
                        haveAxis(nextGenericAxisId)) {
                     nextGenericAxisId += 1;
@@ -165,7 +230,98 @@ std::list<NotifyArgs> JoystickInputMapper::reconfigure(nsecs_t when,
             it++;
         }
     }
+
+    // Remove axes if they were pruned above.
+    std::erase_if(mEvdevKeyToEvdevAbs, [this](const auto& pair) {
+        const auto& [evdevKey, _] = pair.second;
+        return !mAxes.contains(ftl::to_underlying(evdevKey));
+    });
+
     return out;
+}
+
+void JoystickInputMapper::addAxesMappedFromKeys() {
+    mEvdevKeyToEvdevAbs.clear();
+
+    if (mKeyToAxisRemapping.empty()) {
+        return;
+    }
+
+    std::map<MotionEventAxis, std::pair<EvdevAbsCode, /*isHighAxis=*/bool>>
+            motionEventAxisToEvdevAbs{};
+    for (const auto& [abs, axis] : mAxes) {
+        auto evdevAbs = EvdevAbsCode(abs);
+        if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT) {
+            auto motionEventAxis = MotionEventAxis(axis.axisInfo.highAxis);
+            motionEventAxisToEvdevAbs.insert({motionEventAxis, {evdevAbs, /*isHighAxis=*/true}});
+        }
+        auto motionEventAxis = MotionEventAxis(axis.axisInfo.axis);
+        motionEventAxisToEvdevAbs.insert({motionEventAxis, {evdevAbs, /*isHighAxis=*/false}});
+    }
+
+    std::map<EvdevKeyCode, KeyCode> originalKeyMapping = getOriginalKeyMapping();
+
+    // All "real" axes added so far are mapped from ABS_* values lower or equal to ABS_MAX.
+    // Everything above ABS_MAX is guaranteed to not clash with the existing axes.
+    int32_t newAbs = ABS_MAX + 1;
+
+    for (const auto& [evdevKey, originalKeyCode] : originalKeyMapping) {
+        auto keyToAxisIt = mKeyToAxisRemapping.find(originalKeyCode);
+        if (keyToAxisIt == mKeyToAxisRemapping.end()) {
+            // Skip the key code if it is not remapped to any axis.
+            continue;
+        }
+
+        auto motionEventAxis = keyToAxisIt->second;
+
+        auto evdevAbsIt = motionEventAxisToEvdevAbs.find(motionEventAxis);
+        if (evdevAbsIt == motionEventAxisToEvdevAbs.end()) {
+            // The axis to which the key is mapped does not exist, create a new axis in mAxes so
+            // that it can store the value and be reported by populateDeviceInfo(). Use the next
+            // available value above ABS_MAX as the key in the map, so that it does not clash with
+            // any existing axes. This way it also easy to tell which axes were created from key to
+            // axis remappings in a bug report.
+            AxisInfo axisInfo{};
+            axisInfo.axis = ftl::to_underlying(motionEventAxis);
+            RawAbsoluteAxisInfo rawAxisInfo{.minValue = 0,
+                                            .maxValue = 1,
+                                            .flat = 0,
+                                            .fuzz = 0,
+                                            .resolution = 1};
+            newAbs++;
+            mAxes.insert({newAbs, createAxis(axisInfo, rawAxisInfo, /*explicitlyMapped=*/true)});
+            mEvdevKeyToEvdevAbs.insert(
+                    {evdevKey, {static_cast<EvdevAbsCode>(newAbs), /*isHighAxis=*/false}});
+        } else {
+            // The axis is already mapped from a "real" evdev axis, just point to it.
+            const auto& [evdevAbs, isHighAxis] = evdevAbsIt->second;
+            mEvdevKeyToEvdevAbs.insert({evdevKey, {evdevAbs, isHighAxis}});
+        }
+    }
+}
+
+std::map<EvdevKeyCode, KeyCode> JoystickInputMapper::getOriginalKeyMapping() const {
+    std::map<EvdevKeyCode, KeyCode> originalKeyMapping;
+    // Iteration over all possible evdev key codes is not ideal, however it's the most reliable way
+    // of finding which evdev key codes are mapped to a given Android key code, as the mapKey()
+    // method is relatively complex and finding the inverse mapping efficiently is not trivial.
+    for (int32_t evdevKey = 0; evdevKey <= KEY_MAX; evdevKey++) {
+        if (!getDeviceContext().hasScanCode(evdevKey)) {
+            continue;
+        }
+
+        std::optional<MappedKey> mappedKey =
+                getDeviceContext().mapKey(evdevKey, /*usageCode=*/0, /*metaState=*/0);
+        if (!mappedKey) {
+            LOG(FATAL) << "failed to map evdevKey=" << evdevKey;
+            continue;
+        }
+
+        originalKeyMapping.insert(
+                {static_cast<EvdevKeyCode>(evdevKey), mappedKey->originalKeyCode});
+    }
+
+    return originalKeyMapping;
 }
 
 JoystickInputMapper::Axis JoystickInputMapper::createAxis(const AxisInfo& axisInfo,
@@ -189,7 +345,13 @@ JoystickInputMapper::Axis JoystickInputMapper::createAxis(const AxisInfo& axisIn
         highOffset = offset;
         highScale = scale;
         min = -1.0f;
+    } else if (isAnalogTrigger(axisInfo.axis)) {
+        scale = 1.0f / (rawAxisInfo.maxValue - rawAxisInfo.minValue);
+        offset = -rawAxisInfo.minValue * scale;
+        highScale = scale;
+        highOffset = offset;
     } else {
+        // generic axes
         scale = 1.0f / (rawAxisInfo.maxValue - rawAxisInfo.minValue);
         highScale = scale;
     }
@@ -248,6 +410,19 @@ bool JoystickInputMapper::isCenteredAxis(int32_t axis) {
     }
 }
 
+bool JoystickInputMapper::isAnalogTrigger(int32_t axis) {
+    switch (axis) {
+        case AMOTION_EVENT_AXIS_LTRIGGER:
+        case AMOTION_EVENT_AXIS_RTRIGGER:
+        case AMOTION_EVENT_AXIS_GAS:
+        case AMOTION_EVENT_AXIS_BRAKE:
+        case AMOTION_EVENT_AXIS_THROTTLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 std::list<NotifyArgs> JoystickInputMapper::reset(nsecs_t when) {
     // Recenter all axes.
     for (std::pair<const int32_t, Axis>& pair : mAxes) {
@@ -261,6 +436,36 @@ std::list<NotifyArgs> JoystickInputMapper::reset(nsecs_t when) {
 std::list<NotifyArgs> JoystickInputMapper::process(const RawEvent& rawEvent) {
     std::list<NotifyArgs> out;
     switch (rawEvent.type) {
+        case EV_KEY: {
+            auto evdevKey = static_cast<EvdevKeyCode>(rawEvent.code);
+            auto keyIt = mEvdevKeyToEvdevAbs.find(evdevKey);
+            if (keyIt == mEvdevKeyToEvdevAbs.end()) {
+                // Key is not mapped to any axis, no need to process it.
+                break;
+            }
+
+            const auto [evdevAbs, isHighAxis] = keyIt->second;
+
+            auto absIt = mAxes.find(ftl::to_underlying(evdevAbs));
+
+            if (absIt == mAxes.end()) {
+                LOG(FATAL) << "axis " << evdevAbs << " not found for key " << evdevKey;
+                return out;
+            }
+
+            Axis& axis = absIt->second;
+
+            auto newValue = rawEvent.value == 0 ? 0 : 1;
+            if (isHighAxis) {
+                axis.highNewValue = newValue;
+            } else {
+                axis.newValue = newValue;
+            }
+
+            axis.lastUpdateTime = rawEvent.when;
+
+            break;
+        }
         case EV_ABS: {
             auto it = mAxes.find(rawEvent.code);
             if (it != mAxes.end()) {
@@ -286,6 +491,13 @@ std::list<NotifyArgs> JoystickInputMapper::process(const RawEvent& rawEvent) {
                             newValue = 0.0f;
                             highNewValue = 0.0f;
                         }
+
+                        if (isAxisDisabled(axis.axisInfo.axis)) {
+                            newValue = 0.0f;
+                        }
+                        if (isAxisDisabled(axis.axisInfo.highAxis)) {
+                            highNewValue = 0.0f;
+                        }
                         break;
                     default:
                         newValue = rawEvent.value * axis.scale + axis.offset;
@@ -294,6 +506,7 @@ std::list<NotifyArgs> JoystickInputMapper::process(const RawEvent& rawEvent) {
                 }
                 axis.newValue = newValue;
                 axis.highNewValue = highNewValue;
+                axis.lastUpdateTime = rawEvent.when;
             }
             break;
         }
@@ -323,16 +536,36 @@ std::list<NotifyArgs> JoystickInputMapper::sync(nsecs_t when, nsecs_t readTime, 
     pointerProperties.id = 0;
     pointerProperties.toolType = ToolType::UNKNOWN;
 
-    PointerCoords pointerCoords;
-    pointerCoords.clear();
+    // A map from the Android axis ID to the most recent value and update time.
+    // This is used to resolve conflicts if multiple raw axes are mapped to the same
+    // Android axis, ensuring the most recent event takes precedence.
+    std::unordered_map<int32_t, std::pair<float, nsecs_t>> latestAxisValues;
 
     for (std::pair<const int32_t, Axis>& pair : mAxes) {
         const Axis& axis = pair.second;
-        setPointerCoordsAxisValue(&pointerCoords, axis.axisInfo.axis, axis.currentValue);
-        if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT) {
-            setPointerCoordsAxisValue(&pointerCoords, axis.axisInfo.highAxis,
-                                      axis.highCurrentValue);
+
+        // Update the entry for the primary axis if this one is more recent.
+        auto it = latestAxisValues.find(axis.axisInfo.axis);
+        if (it == latestAxisValues.end() || axis.lastUpdateTime > it->second.second) {
+            latestAxisValues[axis.axisInfo.axis] = {axis.currentValue, axis.lastUpdateTime};
         }
+
+        // Update the entry for the high axis (for split mode) if this one is more recent.
+        if (axis.axisInfo.mode == AxisInfo::MODE_SPLIT) {
+            it = latestAxisValues.find(axis.axisInfo.highAxis);
+            if (it == latestAxisValues.end() || axis.lastUpdateTime > it->second.second) {
+                latestAxisValues[axis.axisInfo.highAxis] = {axis.highCurrentValue,
+                                                            axis.lastUpdateTime};
+            }
+        }
+    }
+
+    PointerCoords pointerCoords;
+    pointerCoords.clear();
+
+    // Populate pointerCoords with the definitive, most recent values.
+    for (const auto& [axisId, valuePair] : latestAxisValues) {
+        setPointerCoordsAxisValue(&pointerCoords, axisId, valuePair.first);
     }
 
     // Moving a joystick axis should not wake the device because joysticks can

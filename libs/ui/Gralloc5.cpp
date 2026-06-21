@@ -620,8 +620,8 @@ status_t Gralloc5Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage, cons
         return BAD_VALUE;
     }
 
-    // TODO(b/262279301): Change the return type of ::unlock to unique_fd instead of int so that
-    //  ignoring the return value "just works" instead
+    // Change the return type of ::unlock to unique_fd instead of int so that
+    // ignoring the return value "just works" instead (see b/262279301)
     auto unlock = [this](buffer_handle_t bufferHandle) {
         int fence = this->unlock(bufferHandle);
         if (fence != -1) {
@@ -1033,6 +1033,31 @@ status_t Gralloc5Mapper::setSmpte2094_10(buffer_handle_t bufferHandle,
                                          std::optional<std::vector<uint8_t>> smpte2094_10) const {
     return setStandardMetadata<StandardMetadataType::SMPTE2094_10>(mMapper, bufferHandle,
                                                                    smpte2094_10);
+}
+
+status_t Gralloc5Mapper::getStride(buffer_handle_t bufferHandle, uint32_t *outStride) const {
+    auto value = getStandardMetadata<StandardMetadataType::STRIDE>(mMapper, bufferHandle);
+    if (value.has_value()) {
+        *outStride = *value;
+        return OK;
+    }
+    return UNKNOWN_TRANSACTION;
+}
+
+status_t Gralloc5Mapper::getSmpte2094_50(
+        buffer_handle_t bufferHandle, std::optional<std::vector<uint8_t>>* outSmpte2094_50) const {
+    auto value = getStandardMetadata<StandardMetadataType::SMPTE2094_50>(mMapper, bufferHandle);
+    if (value.has_value()) {
+        *outSmpte2094_50 = std::move(*value);
+        return OK;
+    }
+    return UNKNOWN_TRANSACTION;
+}
+
+status_t Gralloc5Mapper::setSmpte2094_50(buffer_handle_t bufferHandle,
+                                         std::optional<std::vector<uint8_t>> smpte2094_50) const {
+    return setStandardMetadata<StandardMetadataType::SMPTE2094_50>(mMapper, bufferHandle,
+                                                                   smpte2094_50);
 }
 
 } // namespace android

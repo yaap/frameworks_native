@@ -33,6 +33,7 @@ LIBNATIVEWINDOW {
     ANativeWindow_getLastDequeueStartTime; # systemapi introduced=30
     ANativeWindow_getLastQueueDuration; # systemapi introduced=30
     ANativeWindow_getWidth;
+    ANativeWindow_isProducerThrottlingEnabled; # introduced=37
     ANativeWindow_lock;
     ANativeWindow_query; # llndk
     ANativeWindow_queryf; # llndk
@@ -54,6 +55,7 @@ LIBNATIVEWINDOW {
     ANativeWindow_setDequeueTimeout; # systemapi introduced=30
     ANativeWindow_setFrameRate; # introduced=30
     ANativeWindow_setFrameRateWithChangeStrategy; # introduced=31
+    ANativeWindow_setProducerThrottlingEnabled; # introduced=37
     ANativeWindow_setSharedBufferMode; # llndk
     ANativeWindow_setSwapInterval; # llndk
     ANativeWindow_setUsage; # llndk

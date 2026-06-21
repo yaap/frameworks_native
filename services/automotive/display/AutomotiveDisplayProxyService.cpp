@@ -16,9 +16,14 @@
 
 #include <utility>
 
-#include <gui/bufferqueue/2.0/B2HGraphicBufferProducer.h>
-
 #include "AutomotiveDisplayProxyService.h"
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_AAOS)
+#include <bufferqueueconverter/BufferQueueConverter.h>
+#include <gui/bufferqueue/2.0/Surface2HGraphicBufferProducer.h>
+#else
+#include <gui/bufferqueue/2.0/B2HGraphicBufferProducer.h>
+#endif
 
 namespace android {
 namespace frameworks {
@@ -93,9 +98,22 @@ AutomotiveDisplayProxyService::getIGraphicBufferProducer(uint64_t id) {
     // SurfaceControl::getSurface is guaranteed to be not null.
     auto targetSurface = surfaceControl->getSurface();
     return new ::android::hardware::graphics::bufferqueue::V2_0::utils::
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_AAOS)
+               Surface2HGraphicBufferProducer(targetSurface);
+#else
                B2HGraphicBufferProducer(targetSurface->getIGraphicBufferProducer());
+#endif
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_AAOS)
+sp<Surface> AutomotiveDisplayProxyService::getSurface(uint64_t id) {
+    auto igbp = getIGraphicBufferProducer(id);
+    if (igbp == nullptr) {
+        return nullptr;
+    }
+    return getSurfaceFromHGBP(igbp);
+}
+#endif
 
 Return<bool> AutomotiveDisplayProxyService::showWindow(uint64_t id) {
     auto it = mDisplays.find(id);

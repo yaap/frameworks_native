@@ -100,6 +100,40 @@ private:
 } // namespace
 
 struct VSyncPredictorTest : testing::Test {
+    void verifyAccuracy(int minSamples, nsecs_t slope, nsecs_t intercept, nsecs_t timePoint) {
+        tracker.setDisplayModePtr(displayMode(slope));
+
+        // Generate timestamps to create a model with the given slope and intercept.
+        // We choose a large base index to ensure oldestTS is greater than timePoint.
+        const int64_t i_base = 2 * timePoint / slope;
+        nsecs_t oldestTS = 0;
+        for (size_t i = 0; i < minSamples; ++i) {
+            nsecs_t timestamp = intercept + slope * (i_base + i);
+            if (i == 0) oldestTS = timestamp;
+            tracker.addVsyncTimestamp(timestamp);
+        }
+
+        const auto model = tracker.getVSyncPredictionModel();
+        nsecs_t accuracy = 0;
+        {
+            std::lock_guard lock(tracker.mMutex);
+            accuracy = tracker.getModelAccuracyLocked(timePoint).modelErrorNs;
+        }
+
+        EXPECT_LT(accuracy, model.slope);
+
+        const nsecs_t zeroPoint = oldestTS + model.intercept;
+        const double delta = static_cast<double>(timePoint - zeroPoint);
+        const double d_slope = static_cast<double>(model.slope);
+        const int64_t ordinal = static_cast<int64_t>(std::ceil(delta / d_slope));
+
+        const nsecs_t vsync1 = zeroPoint + ordinal * model.slope;
+        const nsecs_t vsync0 = vsync1 - model.slope;
+        const nsecs_t expected_accuracy = std::min(timePoint - vsync0, vsync1 - timePoint);
+
+        EXPECT_EQ(accuracy, expected_accuracy);
+    }
+
     nsecs_t mNow = 0;
     nsecs_t mPeriod = 1000;
     ftl::NonNull<DisplayModePtr> mMode = displayMode(mPeriod);
@@ -265,22 +299,14 @@ TEST_F(VSyncPredictorTest, adaptsToFenceTimelinesDiscontinuous_22hzLowVariance) 
             5591378272, // 122
     };
     auto idealPeriod = 45454545;
-    auto expectedPeriod = 45450152;
-    auto expectedIntercept = 469647;
 
     tracker.setDisplayModePtr(displayMode(idealPeriod));
     for (auto const& timestamp : simulatedVsyncs) {
         tracker.addVsyncTimestamp(timestamp);
     }
     auto [slope, intercept] = tracker.getVSyncPredictionModel();
-    if (FlagManager::getInstance().vsync_predictor_predicts_within_threshold() &&
-        FlagManager::getInstance().resync_on_tx()) {
-        EXPECT_EQ(slope, idealPeriod);
-        EXPECT_EQ(intercept, 0);
-    } else {
-        EXPECT_THAT(slope, IsCloseTo(expectedPeriod, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
-    }
+    EXPECT_EQ(slope, idealPeriod);
+    EXPECT_EQ(intercept, 0);
 }
 
 TEST_F(VSyncPredictorTest, againstOutliersDiscontinuous_500hzLowVariance) {
@@ -297,8 +323,6 @@ TEST_F(VSyncPredictorTest, againstOutliersDiscontinuous_500hzLowVariance) {
             2410121051, // 1204
     };
     auto idealPeriod = 2000000;
-    auto expectedPeriod = 1999892;
-    auto expectedIntercept = 86342;
 
     tracker.setDisplayModePtr(displayMode(idealPeriod));
     for (auto const& timestamp : simulatedVsyncs) {
@@ -306,18 +330,11 @@ TEST_F(VSyncPredictorTest, againstOutliersDiscontinuous_500hzLowVariance) {
     }
 
     auto [slope, intercept] = tracker.getVSyncPredictionModel();
-    if (FlagManager::getInstance().vsync_predictor_predicts_within_threshold() &&
-        FlagManager::getInstance().resync_on_tx()) {
-        EXPECT_EQ(slope, idealPeriod);
-        EXPECT_EQ(intercept, 0);
-    } else {
-        EXPECT_THAT(slope, IsCloseTo(expectedPeriod, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
-    }
+    EXPECT_EQ(slope, idealPeriod);
+    EXPECT_EQ(intercept, 0);
 }
 
 TEST_F(VSyncPredictorTest, recoverAfterDriftedVSyncAreReplacedWithCorrectVSync) {
-    SET_FLAG_FOR_TEST(flags::vsync_predictor_predicts_within_threshold, true);
     auto constexpr idealPeriodNs = 4166666;
     auto constexpr minFrameIntervalNs = 8333333;
     auto constexpr idealPeriod = Fps::fromPeriodNsecs(idealPeriodNs);
@@ -364,7 +381,6 @@ TEST_F(VSyncPredictorTest, recoverAfterDriftedVSyncAreReplacedWithCorrectVSync) 
 }
 
 TEST_F(VSyncPredictorTest, vsyncsOutsideThresholdDoesNotCauseIncorrectPrediction) {
-    SET_FLAG_FOR_TEST(flags::vsync_predictor_predicts_within_threshold, true);
     auto constexpr idealPeriodNs = 8'333'333;
     auto constexpr minFrameIntervalNs = 8'333'333;
     auto constexpr idealPeriod = Fps::fromPeriodNsecs(idealPeriodNs);
@@ -506,8 +522,6 @@ TEST_F(VSyncPredictorTest, doesNotPredictBeforeTimePointWithHigherIntercept) {
             158929650879052, 158929661969209, 158929684198847, 158929695268171, 158929706370359,
     };
     auto const idealPeriod = 11111111;
-    auto const expectedPeriod = 11113919;
-    auto const expectedIntercept = -1195945;
 
     tracker.setDisplayModePtr(displayMode(idealPeriod));
     for (auto const& timestamp : simulatedVsyncs) {
@@ -515,14 +529,8 @@ TEST_F(VSyncPredictorTest, doesNotPredictBeforeTimePointWithHigherIntercept) {
     }
 
     auto [slope, intercept] = tracker.getVSyncPredictionModel();
-    if (FlagManager::getInstance().vsync_predictor_predicts_within_threshold() &&
-        FlagManager::getInstance().resync_on_tx()) {
-        EXPECT_THAT(slope, IsCloseTo(11603853, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(1016896, mMaxRoundingError));
-    } else {
-        EXPECT_THAT(slope, IsCloseTo(expectedPeriod, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
-    }
+    EXPECT_THAT(slope, IsCloseTo(11603853, mMaxRoundingError));
+    EXPECT_THAT(intercept, IsCloseTo(1016896, mMaxRoundingError));
 
     // (timePoint - oldestTS) % expectedPeriod works out to be: 10702663
     // (timePoint - oldestTS) / expectedPeriod works out to be: 37.96
@@ -723,22 +731,14 @@ TEST_F(VSyncPredictorTest, robustToDuplicateTimestamps_60hzRealTraceData) {
             198857715631, 198890885797, 198924199640, 198940873834, 198974204401,
     };
     auto constexpr idealPeriod = 16'666'666;
-    auto constexpr expectedPeriod = 16'644'742;
-    auto constexpr expectedIntercept = 125'626;
 
     tracker.setDisplayModePtr(displayMode(idealPeriod));
     for (auto const& timestamp : simulatedVsyncs) {
         tracker.addVsyncTimestamp(timestamp);
     }
     auto [slope, intercept] = tracker.getVSyncPredictionModel();
-    if (FlagManager::getInstance().vsync_predictor_predicts_within_threshold() &&
-        FlagManager::getInstance().resync_on_tx()) {
-        EXPECT_THAT(slope, IsCloseTo(16664349, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(38082, mMaxRoundingError));
-    } else {
-        EXPECT_THAT(slope, IsCloseTo(expectedPeriod, mMaxRoundingError));
-        EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
-    }
+    EXPECT_THAT(slope, IsCloseTo(16664349, mMaxRoundingError));
+    EXPECT_THAT(intercept, IsCloseTo(38082, mMaxRoundingError));
 }
 
 TEST_F(VSyncPredictorTest, setRenderRateIsRespected) {
@@ -1223,6 +1223,69 @@ TEST_F(VSyncPredictorTest, adjustsOnlyMinFrameViolatingVrrTimeline) {
                             {lastConfirmedSignalTime, lastConfirmedExpectedPresentTime});
     // Enough time without adjusting vsync to present with new rate on time, no need of adjustment
     EXPECT_EQ(5500, vrrTracker.nextAnticipatedVSyncTimeFrom(4000, 3500));
+}
+
+// Checks that when timePoint is before a theoretical VSync (and older than oldestTS), snapToVsync
+// correctly predicts the "next" future VSync.
+TEST_F(VSyncPredictorTest, reportsCorrectAccuracyForPastTimePointBeforeVSync) {
+    SET_FLAG_FOR_TEST(flags::get_display_known_vsync_sample_enabled, true);
+
+    const nsecs_t slope = 8333333;
+    const nsecs_t intercept = 10000;
+    const nsecs_t theoretical_vsync = intercept + slope * 10;
+    const nsecs_t timePoint = theoretical_vsync - 100;
+
+    verifyAccuracy(kMinimumSamplesForPrediction, slope, intercept, timePoint);
+}
+
+// Checks that when timePoint is after a theoretical VSync (and older than oldestTS), snapToVsync
+// correctly predicts the "second" future VSync (not the one just passed).
+TEST_F(VSyncPredictorTest, reportsCorrectAccuracyForPastTimePointAfterVSync) {
+    SET_FLAG_FOR_TEST(flags::get_display_known_vsync_sample_enabled, true);
+
+    const nsecs_t slope = 8333333;
+    const nsecs_t intercept = 10000;
+    const nsecs_t theoretical_vsync = intercept + slope * 10;
+    const nsecs_t timePoint = theoretical_vsync + 100;
+
+    verifyAccuracy(kMinimumSamplesForPrediction, slope, intercept, timePoint);
+}
+
+TEST_F(VSyncPredictorTest, synchronizesWithSingleSample) {
+    SET_FLAG_FOR_TEST(flags::use_last_vsync_predict, true);
+    auto constexpr kPeriod = 10'000'000;
+    auto constexpr kRefreshRate = Fps::fromPeriodNsecs(kPeriod);
+    hal::VrrConfig vrrConfig{.minFrameIntervalNs = kPeriod};
+    const auto mode =
+            ftl::as_non_null(createVrrDisplayMode(DisplayModeId(0), kRefreshRate, vrrConfig));
+
+    constexpr size_t kHistorySize = 1;
+    constexpr size_t kMinSamples = 1;
+    VSyncPredictor vrrTracker{std::make_unique<ClockWrapper>(mClock), mode, kHistorySize,
+                              kMinSamples, kOutlierTolerancePercent};
+
+    EXPECT_TRUE(vrrTracker.needsMoreSamples());
+
+    // First sample synchronizes
+    nsecs_t timestamp = 1'000'000'000;
+    EXPECT_TRUE(vrrTracker.addVsyncTimestamp(timestamp));
+    EXPECT_FALSE(vrrTracker.needsMoreSamples());
+    EXPECT_TRUE(vrrTracker.isCurrentMode(mode));
+
+    // Subsequent valid samples also accepted and update the model
+    for (int i = 1; i < 5; i++) {
+        timestamp += kPeriod;
+        EXPECT_TRUE(vrrTracker.addVsyncTimestamp(timestamp));
+        EXPECT_FALSE(vrrTracker.needsMoreSamples());
+        EXPECT_THAT(vrrTracker.nextAnticipatedVSyncTimeFrom(timestamp), Eq(timestamp + kPeriod));
+    }
+
+    // Outlier sample (e.g., 50% out of phase) is rejected
+    const auto outlierTimestamp = timestamp + kPeriod + (kPeriod / 2);
+    EXPECT_FALSE(vrrTracker.addVsyncTimestamp(outlierTimestamp));
+
+    // Model still predicts based on the last valid sample
+    EXPECT_THAT(vrrTracker.nextAnticipatedVSyncTimeFrom(timestamp), Eq(timestamp + kPeriod));
 }
 } // namespace android::scheduler
 

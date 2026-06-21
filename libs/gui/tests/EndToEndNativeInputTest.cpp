@@ -328,17 +328,29 @@ private:
     InputConsumer* mInputConsumer;
 
     InputEvent* consumeEvent(std::chrono::milliseconds timeout = 3000ms) {
-        mClientChannel->waitForMessage(timeout);
-
         InputEvent* ev;
         uint32_t seqId;
-        status_t consumed = mInputConsumer->consume(&mInputEventFactory, true, -1, &seqId, &ev);
-        if (consumed != OK) {
-            return nullptr;
+        const auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < timeout) {
+            mClientChannel->waitForMessage(timeout);
+
+            auto [result, unfinishedInputMessages] =
+                    mInputConsumer->consume(&mInputEventFactory, true, -1, &seqId, &ev);
+            if (!result.ok()) {
+                return nullptr;
+            }
+            status_t status = mInputConsumer->sendFinishedSignal(seqId, true);
+            EXPECT_EQ(OK, status) << "Could not send finished signal";
+
+            if (ev->getType() == InputEventType::TOUCH_MODE) {
+                // Ignore TouchModeEvent as it is dispatched asynchronously by the system
+                // to sync touch mode state. It is not relevant to the surface cropping
+                // and visibility logic being tested and can cause flakiness.
+                continue;
+            }
+            return ev;
         }
-        status_t status = mInputConsumer->sendFinishedSignal(seqId, true);
-        EXPECT_EQ(OK, status) << "Could not send finished signal";
-        return ev;
+        return nullptr;
     }
 };
 

@@ -22,8 +22,6 @@
 #include <memory>
 #include <vector>
 
-#include <com_android_input_flags.h>
-#include <flag_macros.h>
 #include <input/Input.h>
 #include <input/InputEventBuilders.h>
 #include <input/InputTransport.h>
@@ -32,11 +30,6 @@
 namespace android {
 
 namespace {
-
-namespace input_flags = com::android::input::flags;
-
-const auto CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS =
-        ACONFIG_FLAG(input_flags, clear_relative_axes_in_resampled_coords);
 
 using namespace std::literals::chrono_literals;
 
@@ -315,8 +308,7 @@ TEST_F(ResamplerTest, NonResampledAxesArePreserved) {
                                                        .isResampled = true}});
 }
 
-TEST_F_WITH_FLAGS(ResamplerTest, RelativeAxesAreCleared,
-                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+TEST_F(ResamplerTest, RelativeAxesAreCleared) {
     MotionEvent motionEvent =
             InputStream{{InputSample{5ms, {{.id = 0, .x = 1.0f, .y = 1.0f, .isResampled = false}}},
                          InputSample{10ms,
@@ -892,18 +884,6 @@ TEST_F(ResamplerTest, MultiplePointerShouldNotResampleToolTypeInterpolation) {
                                                          .isResampled = false}}}},
                                           AMOTION_EVENT_ACTION_MOVE};
 
-    const InputMessage futureSample = InputSample{15ms,
-                                                  {{.id = 0,
-                                                    .toolType = ToolType::PALM,
-                                                    .x = 3.0,
-                                                    .y = 3.0,
-                                                    .isResampled = false},
-                                                   {.id = 1,
-                                                    .toolType = ToolType::PALM,
-                                                    .x = 4.0,
-                                                    .y = 4.0,
-                                                    .isResampled = false}}};
-
     const MotionEvent originalMotionEvent = motionEvent;
 
     mResampler->resampleMotionEvent(16ms, motionEvent, /*futureSample=*/nullptr);
@@ -943,8 +923,7 @@ TEST_F(ResamplerTest, MultiplePointerShouldNotResampleToolTypeExtrapolation) {
     assertMotionEventIsNotResampled(originalMotionEvent, motionEvent);
 }
 
-TEST_F_WITH_FLAGS(ResamplerTest, OverwriteStillMotionEventKeepsRelativeAxes,
-                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+TEST_F(ResamplerTest, OverwriteStillMotionEventKeepsRelativeAxes) {
     MotionEvent motionEvent =
             InputStream{{InputSample{10ms,
                                      {{.id = 0, .x = 10.0f, .y = 10.0f, .isResampled = false}}},
@@ -993,8 +972,7 @@ TEST_F_WITH_FLAGS(ResamplerTest, OverwriteStillMotionEventKeepsRelativeAxes,
                                                        {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}});
 }
 
-TEST_F_WITH_FLAGS(ResamplerTest, OverwriteOldPointersKeepsRelativeAxes,
-                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+TEST_F(ResamplerTest, OverwriteOldPointersKeepsRelativeAxes) {
     MotionEvent motionEvent =
             InputStream{{InputSample{10ms,
                                      {{.id = 0, .x = 10.0f, .y = 10.0f, .isResampled = false}}},

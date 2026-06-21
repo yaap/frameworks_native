@@ -22,10 +22,13 @@
 
 #include <com_android_graphics_libgui_flags.h>
 #include <compositionengine/DisplaySurface.h>
+#include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>
-#include <gui/ConsumerBase.h>
 #include <ui/DisplayId.h>
 #include <ui/Size.h>
+#include <utils/Mutex.h>
+
+#include "DisplayHardware/HwcSlotTracker.h"
 
 // ---------------------------------------------------------------------------
 namespace android {
@@ -37,7 +40,8 @@ class HWComposer;
 
 // ---------------------------------------------------------------------------
 
-class FramebufferSurface : public ConsumerBase, public compositionengine::DisplaySurface {
+class FramebufferSurface final : public compositionengine::DisplaySurface,
+                                 public BufferItemConsumer::BufferFreedListener {
 public:
     virtual status_t beginFrame(bool mustRecompose);
     virtual status_t prepareFrame(CompositionType compositionType);
@@ -45,11 +49,13 @@ public:
     virtual void onFrameCommitted();
     virtual void dumpAsString(String8& result) const;
 
+    virtual void onFirstRef() override;
+
     virtual void resizeBuffers(const ui::Size&) override;
 
-    virtual const sp<Fence>& getClientTargetAcquireFence() const override;
+    const sp<Surface>& getSurface() { return mRendererSurface; }
 
-    void onFirstRef() override;
+    virtual const sp<Fence>& getClientTargetAcquireFence() const override;
 
 private:
     friend class FramebufferSurfaceTest;
@@ -58,7 +64,9 @@ private:
     FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId, const ui::Size& size,
                        const ui::Size& maxSize);
 
-    void initializeConsumer();
+    // BufferFreedListener interface
+    void onBufferFreed(const sp<GraphicBuffer>& graphicBuffer) override;
+    void onBufferFreedLocked(const sp<GraphicBuffer>& graphicBuffer) REQUIRES(mMutex);
 
     // Limits the width and height by the maximum width specified.
     ui::Size limitSize(const ui::Size&);
@@ -66,24 +74,18 @@ private:
     // Used for testing purposes.
     static ui::Size limitSizeInternal(const ui::Size&, const ui::Size& maxSize);
 
-    virtual ~FramebufferSurface() { }; // this class cannot be overloaded
-
-    virtual void freeBufferLocked(int slotIndex);
-
-    virtual void dumpLocked(String8& result, const char* prefix) const;
-
+    mutable Mutex mMutex;
     const PhysicalDisplayId mDisplayId;
+
+    // This surface is used by CompositionEngine for GPU rendering. It's sent to HWC as the client
+    // target for the frame.
+    sp<Surface> mRendererSurface;
+    sp<BufferItemConsumer> mRendererConsumer;
 
     // Framebuffer size has a dimension limitation in pixels based on the graphics capabilities of
     // the device.
     const ui::Size mMaxSize;
-
     const ui::Size mLimitedSize;
-
-    // mCurrentBufferIndex is the slot index of the current buffer or
-    // INVALID_BUFFER_SLOT to indicate that either there is no current buffer
-    // or the buffer is not associated with a slot.
-    int mCurrentBufferSlot;
 
     // mDataSpace is the dataspace of the current composition buffer for
     // this FramebufferSurface. It will be 0 when HWC is doing the
@@ -92,24 +94,21 @@ private:
     // on/off.
     ui::Dataspace mDataspace;
 
-    // mCurrentBuffer is the current buffer or nullptr to indicate that there is
-    // no current buffer.
-    sp<GraphicBuffer> mCurrentBuffer;
+    struct FrameData {
+        // Buffer for a particular frame.
+        sp<GraphicBuffer> mBuffer;
+        // Acquire fence for the above buffer.
+        sp<Fence> mFence;
+    };
 
-    // mCurrentFence is the current buffer's acquire fence
-    sp<Fence> mCurrentFence;
+    std::optional<FrameData> mFrameData;
+    std::optional<FrameData> mPreviousFrameData;
 
     // Hardware composer, owned by SurfaceFlinger.
     HWComposer& mHwc;
 
-    // Buffers that HWC has seen before, indexed by slot number.
-    // NOTE: The BufferQueue slot number is the same as the HWC slot number.
-    uint64_t mHwcBufferIds[BufferQueue::NUM_BUFFER_SLOTS];
-
-    // Previous buffer to release after getting an updated retire fence
-    bool mHasPendingRelease;
-    int mPreviousBufferSlot;
-    sp<GraphicBuffer> mPreviousBuffer;
+    // Slot tracker to map buffers to HWC slot IDs
+    HwcSlotTracker mHwcSlotTracker GUARDED_BY(mMutex);
 };
 
 // ---------------------------------------------------------------------------

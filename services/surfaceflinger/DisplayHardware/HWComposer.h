@@ -60,10 +60,12 @@
 #include <aidl/android/hardware/graphics/composer3/Luts.h>
 #include <aidl/android/hardware/graphics/composer3/OutputType.h>
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
+#include <aidl/android/hardware/graphics/composer3/VsyncSample.h>
 
 namespace android {
 
 namespace hal = hardware::graphics::composer::hal;
+namespace composer3 = hal::composer3;
 
 struct DisplayedFrameStats;
 class GraphicBuffer;
@@ -90,14 +92,11 @@ struct KnownHWCGenericLayerMetadata {
 class HWComposer {
 public:
     struct DeviceRequestedChanges {
-        using ChangedTypes =
-                std::unordered_map<HWC2::Layer*,
-                                   aidl::android::hardware::graphics::composer3::Composition>;
-        using ClientTargetProperty =
-                aidl::android::hardware::graphics::composer3::ClientTargetPropertyWithBrightness;
+        using ChangedTypes = std::unordered_map<HWC2::Layer*, composer3::Composition>;
+        using ClientTargetProperty = composer3::ClientTargetPropertyWithBrightness;
         using DisplayRequests = hal::DisplayRequest;
         using LayerRequests = std::unordered_map<HWC2::Layer*, hal::LayerRequest>;
-        using LutProperties = aidl::android::hardware::graphics::composer3::LutProperties;
+        using LutProperties = composer3::LutProperties;
         using LayerLuts = HWC2::Display::LayerLuts;
 
         ChangedTypes changedTypes;
@@ -135,10 +134,8 @@ public:
             hal::HWDisplayId, uint8_t* outPort, display::DisplayIdentificationData* outData,
             android::ScreenPartStatus* outScreenPartStatus) const = 0;
 
-    virtual bool hasCapability(aidl::android::hardware::graphics::composer3::Capability) const = 0;
-    virtual bool hasDisplayCapability(
-            HalDisplayId,
-            aidl::android::hardware::graphics::composer3::DisplayCapability) const = 0;
+    virtual bool hasCapability(composer3::Capability) const = 0;
+    virtual bool hasDisplayCapability(HalDisplayId, composer3::DisplayCapability) const = 0;
 
     virtual size_t getMaxVirtualDisplayCount() const = 0;
     virtual size_t getMaxVirtualDisplayDimension() const = 0;
@@ -178,7 +175,7 @@ public:
     virtual status_t executeCommands(HalDisplayId) = 0;
 
     // set power mode
-    virtual status_t setPowerMode(PhysicalDisplayId, hal::PowerMode) = 0;
+    virtual ftl::Future<status_t> setPowerMode(PhysicalDisplayId, hal::PowerMode) = 0;
 
     // Sets a color transform to be applied to the result of composition
     virtual status_t setColorTransform(HalDisplayId, const mat4& transform) = 0;
@@ -204,8 +201,7 @@ public:
     // Fetches the HDR capabilities of the given display
     virtual status_t getHdrCapabilities(HalDisplayId, HdrCapabilities* outCapabilities) = 0;
 
-    virtual const aidl::android::hardware::graphics::composer3::OverlayProperties&
-    getOverlaySupport() const = 0;
+    virtual const composer3::OverlayProperties& getOverlaySupport() const = 0;
 
     virtual int32_t getSupportedPerFrameMetadata(HalDisplayId) const = 0;
 
@@ -228,6 +224,11 @@ public:
     virtual ftl::Future<status_t> setDisplayBrightness(
             PhysicalDisplayId, float brightness, float brightnessNits,
             const Hwc2::Composer::DisplayBrightnessOptions&) = 0;
+
+    virtual status_t setDisplayMode(PhysicalDisplayId, hal::HWConfigId, bool) = 0;
+    virtual status_t setDisplayModes(
+            const std::vector<std::pair<PhysicalDisplayId, hal::HWConfigId>>& requests,
+            bool seamless) = 0;
 
     // Get whether the display skipped validation on the latest present
     virtual bool getValidateSkipped(HalDisplayId displayId) const = 0;
@@ -333,15 +334,14 @@ public:
     virtual status_t startHdcpNegotiation(PhysicalDisplayId,
                                           const aidl::android::hardware::drm::HdcpLevels&) = 0;
     virtual status_t getLuts(PhysicalDisplayId, const std::vector<sp<GraphicBuffer>>&,
-                             std::vector<aidl::android::hardware::graphics::composer3::Luts>*) = 0;
+                             std::vector<composer3::Luts>*) = 0;
 
     virtual status_t getReadbackBufferAttributes(
-            PhysicalDisplayId,
-            aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*
-                    outAttributes) = 0;
+            PhysicalDisplayId, composer3::ReadbackBufferAttributes* outAttributes) = 0;
     virtual status_t setReadbackBuffer(PhysicalDisplayId, const sp<GraphicBuffer>& buffer,
                                        const android::sp<android::Fence>& acquireFence) = 0;
     virtual sp<Fence> getReadbackBufferFence(PhysicalDisplayId) = 0;
+    virtual std::optional<composer3::VsyncSample> getDisplayKnownVsyncSample(PhysicalDisplayId) = 0;
 };
 
 static inline bool operator==(const android::HWComposer::DeviceRequestedChanges& lhs,
@@ -366,10 +366,8 @@ public:
             hal::HWDisplayId, uint8_t* outPort, display::DisplayIdentificationData* outData,
             android::ScreenPartStatus* outScreenPartStatus) const override;
 
-    bool hasCapability(aidl::android::hardware::graphics::composer3::Capability) const override;
-    bool hasDisplayCapability(
-            HalDisplayId,
-            aidl::android::hardware::graphics::composer3::DisplayCapability) const override;
+    bool hasCapability(composer3::Capability) const override;
+    bool hasDisplayCapability(HalDisplayId, composer3::DisplayCapability) const override;
 
     size_t getMaxVirtualDisplayCount() const override;
     size_t getMaxVirtualDisplayDimension() const override;
@@ -401,7 +399,7 @@ public:
     status_t executeCommands(HalDisplayId) override;
 
     // set power mode
-    status_t setPowerMode(PhysicalDisplayId, hal::PowerMode mode) override;
+    ftl::Future<status_t> setPowerMode(PhysicalDisplayId, hal::PowerMode mode) override;
 
     // Sets a color transform to be applied to the result of composition
     status_t setColorTransform(HalDisplayId, const mat4& transform) override;
@@ -427,8 +425,7 @@ public:
     // Fetches the HDR capabilities of the given display
     status_t getHdrCapabilities(HalDisplayId, HdrCapabilities* outCapabilities) override;
 
-    const aidl::android::hardware::graphics::composer3::OverlayProperties& getOverlaySupport()
-            const override;
+    const composer3::OverlayProperties& getOverlaySupport() const override;
 
     int32_t getSupportedPerFrameMetadata(HalDisplayId) const override;
 
@@ -448,6 +445,11 @@ public:
     ftl::Future<status_t> setDisplayBrightness(
             PhysicalDisplayId, float brightness, float brightnessNits,
             const Hwc2::Composer::DisplayBrightnessOptions&) override;
+
+    status_t setDisplayMode(PhysicalDisplayId, hal::HWConfigId, bool) override;
+    status_t setDisplayModes(
+            const std::vector<std::pair<PhysicalDisplayId, hal::HWConfigId>>& requests,
+            bool seamless) override;
 
     // Events handling ---------------------------------------------------------
 
@@ -512,15 +514,14 @@ public:
     status_t startHdcpNegotiation(PhysicalDisplayId,
                                   const aidl::android::hardware::drm::HdcpLevels&) override;
     status_t getLuts(PhysicalDisplayId, const std::vector<sp<GraphicBuffer>>&,
-                     std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
+                     std::vector<composer3::Luts>*) override;
 
     status_t getReadbackBufferAttributes(
-            PhysicalDisplayId,
-            aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes* outAttributes)
-            override;
+            PhysicalDisplayId, composer3::ReadbackBufferAttributes* outAttributes) override;
     status_t setReadbackBuffer(PhysicalDisplayId, const sp<GraphicBuffer>& buffer,
                                const android::sp<android::Fence>& acquireFence) override;
     sp<Fence> getReadbackBufferFence(PhysicalDisplayId) override;
+    std::optional<composer3::VsyncSample> getDisplayKnownVsyncSample(PhysicalDisplayId) override;
 
     // for debugging ----------------------------------------------------------
     void dump(std::string& out) const override;
@@ -550,7 +551,7 @@ private:
     friend HWComposerTest;
 
     struct DisplayData {
-        std::unique_ptr<HWC2::Display> hwcDisplay;
+        std::shared_ptr<HWC2::Display> hwcDisplay;
         std::optional<uint8_t> port; // Set on hotplug for physical displays
 
         sp<Fence> lastPresentFence = Fence::NO_FENCE; // signals when the last set op retires
@@ -565,22 +566,23 @@ private:
 
         std::mutex vsyncEnabledLock;
         hal::Vsync vsyncEnabled GUARDED_BY(vsyncEnabledLock) = hal::Vsync::DISABLE;
+        std::optional<bool> getDisplayKnownVsyncSampleSupported;
     };
 
     std::optional<display::DisplayIdentificationInfo> onHotplugConnect(hal::HWDisplayId);
     std::optional<display::DisplayIdentificationInfo> onHotplugDisconnect(hal::HWDisplayId);
     std::optional<display::DisplayIdentificationInfo> onHotplugLinkTrainingFailure(
             hal::HWDisplayId);
+    bool shouldUseStableEdidIdsForHwcDisplay(hal::HWDisplayId hwcDisplayId) const;
     bool shouldIgnoreHotplugConnect(hal::HWDisplayId, uint8_t port,
                                     bool hasDisplayIdentificationData) const;
 
-    aidl::android::hardware::graphics::composer3::DisplayConfiguration::Dpi
-    getEstimatedDotsPerInchFromSize(uint64_t hwcDisplayId, const HWCDisplayMode& hwcMode) const;
+    composer3::DisplayConfiguration::Dpi getEstimatedDotsPerInchFromSize(
+            uint64_t hwcDisplayId, const HWCDisplayMode& hwcMode) const;
 
-    aidl::android::hardware::graphics::composer3::DisplayConfiguration::Dpi correctedDpiIfneeded(
-            aidl::android::hardware::graphics::composer3::DisplayConfiguration::Dpi dpi,
-            aidl::android::hardware::graphics::composer3::DisplayConfiguration::Dpi estimatedDpi)
-            const;
+    composer3::DisplayConfiguration::Dpi correctedDpiIfneeded(
+            composer3::DisplayConfiguration::Dpi dpi,
+            composer3::DisplayConfiguration::Dpi estimatedDpi) const;
     std::vector<HWCDisplayMode> getModesFromDisplayConfigurations(uint64_t hwcDisplayId,
                                                                   int32_t maxFrameIntervalNs) const;
     std::vector<HWCDisplayMode> getModesFromLegacyDisplayConfigs(uint64_t hwcDisplayId) const;
@@ -599,8 +601,8 @@ private:
     ui::PhysicalDisplaySet<uint8_t> mActivePorts;
 
     std::unique_ptr<android::Hwc2::Composer> mComposer;
-    std::unordered_set<aidl::android::hardware::graphics::composer3::Capability> mCapabilities;
-    aidl::android::hardware::graphics::composer3::OverlayProperties mOverlayProperties;
+    std::unordered_set<composer3::Capability> mCapabilities;
+    composer3::OverlayProperties mOverlayProperties;
     std::vector<aidl::android::hardware::graphics::common::HdrConversionCapability>
             mHdrConversionCapabilities = {};
 

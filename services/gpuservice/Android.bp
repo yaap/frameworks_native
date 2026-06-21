@@ -19,15 +19,9 @@ cc_defaults {
     ],
 }
 
-cc_aconfig_library {
-    name: "gpuservice_flags_c_lib",
-    aconfig_declarations: "graphicsenv_flags",
-}
-
 cc_defaults {
     name: "libgpuservice_defaults",
     defaults: [
-        "aconfig_lib_cc_static_link.defaults",
         "gpuservice_defaults",
         "libfeatureoverride_deps",
         "libgfxstats_deps",
@@ -47,10 +41,8 @@ cc_defaults {
         "libgraphicsenv",
         "liblog",
         "libutils",
-        "server_configurable_flags",
     ],
     static_libs: [
-        "gpuservice_flags_c_lib",
         "libfeatureoverride",
         "libgfxstats",
         "libgpumem",

@@ -174,6 +174,14 @@ static bool should_unload_system_driver(egl_connection_t* cnx) {
         return false;
     }
 
+    // The driver preloaded by the system should never be the driver in the ANGLE apk or updatable
+    // driver apk. If the existing driver is loaded from ANGLE apk or updatable graphics driver apk,
+    // it means it is the driver already loaded once by the current process, and the rest of the
+    // process should keep using the same process and not unloading it.
+    if (cnx->driverInUpdatableApkLoaded) {
+        return false;
+    }
+
     // Return true if ANGLE namespace is set.
     android_namespace_t* ns = android::GraphicsEnv::getInstance().getAngleNamespace();
     if (ns) {
@@ -256,6 +264,17 @@ void* Loader::open(egl_connection_t* cnx) {
 
     // If a driver has been loaded, return the driver directly.
     if (cnx->dso) {
+        // ANGLE feature overrides need to be configured for both system services and apps.
+        // However, updateAngleFeatureOverrides() issues Binder calls, which Zygote cannot do.
+        // Instead, take advantage of the fact that Zygote preloads the GLES driver so when
+        // cnx->dso is valid, then Zygote must have completed initialization and this is now
+        // executing as a fork of Zygote (and can issue Binder calls). This allows us to skip
+        // the expensive IsZygote() check on every app launch. Further, cnx->angleLoaded
+        // restricts this to only when ANGLE is the GLES driver for this process.
+        if (cnx->angleLoaded) {
+            android::GraphicsEnv::getInstance().updateAngleFeatureOverrides();
+        }
+
         return cnx->dso;
     }
 
@@ -264,6 +283,9 @@ void* Loader::open(egl_connection_t* cnx) {
     if (android::GraphicsEnv::getInstance().shouldUseAngle()) {
         hnd = attempt_to_load_angle(cnx);
         LOG_ALWAYS_FATAL_IF(!hnd, "Failed to load ANGLE.");
+        if (android::GraphicsEnv::getInstance().getAngleNamespace() != nullptr) {
+            cnx->driverInUpdatableApkLoaded = true;
+        }
     }
 
     if (!hnd) {
@@ -274,6 +296,9 @@ void* Loader::open(egl_connection_t* cnx) {
         LOG_ALWAYS_FATAL_IF(android::GraphicsEnv::getInstance().getDriverNamespace() && !hnd,
                             "couldn't find an OpenGL ES implementation from %s",
                             android::GraphicsEnv::getInstance().getDriverPath().c_str());
+        if (android::GraphicsEnv::getInstance().getDriverNamespace() != nullptr) {
+            cnx->driverInUpdatableApkLoaded = true;
+        }
     }
 
     // Attempt to load native GLES drivers specified by ro.hardware.egl if native is selected.
@@ -647,6 +672,16 @@ void Loader::attempt_to_init_angle_backend(void* dso, egl_connection_t* cnx) {
         ALOGV("ANGLE GLES library loaded");
         cnx->angleLoaded = true;
         android::GraphicsEnv::getInstance().setDriverToLoad(android::GpuStatsInfo::Driver::ANGLE);
+        // ANGLE feature overrides need to be configured for both system services and apps. This
+        // is normally done in Loader::open() because the Zygote preloads the GL driver.
+        // However, when GL preloading is disabled, it needs to be done on every driver load.
+        // Also, it needs to be done when the system driver is unloaded to (for example) load
+        // ANGLE from an APK, which is safe because the Zygote can never unload the system
+        // driver.
+        if (android::GraphicsEnv::getInstance().isZygoteDisableGlPreload() ||
+            cnx->systemDriverUnloaded) {
+            android::GraphicsEnv::getInstance().updateAngleFeatureOverrides();
+        }
     } else {
         ALOGV("Native GLES library loaded");
         cnx->angleLoaded = false;

@@ -25,6 +25,8 @@
 #include "LayerCreationArgs.h"
 #include "QueuedTransactionState.h"
 
+struct RenderCommandBuffer;
+
 namespace android::surfaceflinger::frontend {
 using namespace ftl::flag_operators;
 
@@ -58,6 +60,7 @@ struct RequestedLayerState : layer_state_t {
         BufferSize = 1u << 18,
         GameMode = 1u << 19,
         BufferUsageFlags = 1u << 20,
+        PostProcess = 1u << 21,
     };
 
     static constexpr ftl::Flags<Changes> kMustComposite = Changes::Created | Changes::Destroyed |
@@ -65,7 +68,7 @@ struct RequestedLayerState : layer_state_t {
             Changes::Z | Changes::Mirror | Changes::Parent | Changes::RelativeParent |
             Changes::Metadata | Changes::Visibility | Changes::VisibleRegion | Changes::Buffer |
             Changes::SidebandStream | Changes::Animation | Changes::BufferSize | Changes::GameMode |
-            Changes::BufferUsageFlags;
+            Changes::BufferUsageFlags | Changes::PostProcess;
     static Rect reduce(const Rect& win, const Region& exclude);
     RequestedLayerState(const LayerCreationArgs&);
     void merge(const ResolvedComposerState&);
@@ -74,6 +77,7 @@ struct RequestedLayerState : layer_state_t {
     // Currently we only care about the primary display
     ui::Transform getTransform(uint32_t displayRotationFlags) const;
     ui::Size getUnrotatedBufferSize(uint32_t displayRotationFlags) const;
+    void getBufferDimensions(uint32_t& outWidth, uint32_t& outHeight) const;
     bool canBeDestroyed() const;
     bool isRoot() const;
     bool isHiddenByPolicy() const;
@@ -113,6 +117,7 @@ struct RequestedLayerState : layer_state_t {
     // The owner pid of the layer. If created from a non system process, it will be the calling pid.
     // If created from a system process, the value can be passed in.
     const gui::Pid ownerPid;
+    const uint64_t ownerPermissions;
     bool dataspaceRequested;
     bool hasColorTransform;
     bool transformIsValid = true;
@@ -128,13 +133,16 @@ struct RequestedLayerState : layer_state_t {
     uint32_t relativeParentId = UNASSIGNED_LAYER_ID;
     uint32_t layerIdToMirror = UNASSIGNED_LAYER_ID;
     uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
+    uint32_t croppedByLayerId = UNASSIGNED_LAYER_ID;
     ui::LayerStack layerStackToMirror = ui::UNASSIGNED_LAYER_STACK;
+    std::optional<DisplayId> displayIdToMirror{};
     uint32_t touchCropId = UNASSIGNED_LAYER_ID;
     uint32_t bgColorLayerId = UNASSIGNED_LAYER_ID;
     uint64_t barrierFrameNumber = 0;
     uint32_t barrierProducerId = 0;
     std::string debugName;
     std::atomic<int32_t>* pendingBuffers = 0;
+    uintptr_t debugCookie = 0;
 
     // book keeping states
     bool handleAlive = true;
@@ -142,6 +150,8 @@ struct RequestedLayerState : layer_state_t {
     std::vector<uint32_t> mirrorIds{};
     ftl::Flags<RequestedLayerState::Changes> changes;
     bool bgColorLayer = false;
+    nsecs_t lastUpdateTime = 0;
+    std::shared_ptr<RenderCommandBuffer> renderCommandBuffer;
 };
 
 } // namespace android::surfaceflinger::frontend

@@ -20,6 +20,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "../../Utils/Dumper.h"
+
 #include "VirtualDisplayThread.h"
 
 namespace android {
@@ -36,6 +38,8 @@ public:
     static VirtualDisplayThreadManager& getInstance();
 
     VirtualDisplayThread::Client getOrCreateThread(uid_t uid);
+
+    void dump(utils::Dumper& dumper) const;
 
 private:
     friend VirtualDisplayThread::Client;
@@ -56,7 +60,7 @@ private:
 
     void releaseThread(uid_t uid);
 
-    std::mutex mMutex;
+    mutable std::mutex mMutex;
     std::unordered_map<uid_t, ThreadContext> mThreadsByUid GUARDED_BY(mMutex);
 };
 

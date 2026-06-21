@@ -159,15 +159,19 @@ std::unique_ptr<TouchVideoDevice> TouchVideoDevice::create(std::string devicePat
 }
 
 size_t TouchVideoDevice::readAndQueueFrames() {
-    std::vector<TouchVideoFrame> frames = readFrames();
-    const size_t numFrames = frames.size();
-    if (numFrames == 0) {
-        // Likely an error occurred
-        return 0;
+    size_t numFrames = mFrames.size();
+    while (true) {
+        std::optional<TouchVideoFrame> frame = readFrame();
+        if (!frame) {
+            break;
+        }
+        mFrames.push_back(std::move(*frame));
     }
-    // Concatenate the vectors, then clip up to maximum size allowed
-    mFrames.insert(mFrames.end(), std::make_move_iterator(frames.begin()),
-                   std::make_move_iterator(frames.end()));
+
+    // Update the number of frames after reading to determine how many new frames were read.
+    numFrames = mFrames.size() - numFrames;
+
+    // Clip up to maximum size allowed
     if (mFrames.size() > MAX_QUEUE_SIZE) {
         // A user-space grip suppression process may be processing the video frames, and holding
         // back the input events. This could result in video frames being produced without the
@@ -202,9 +206,8 @@ std::optional<TouchVideoFrame> TouchVideoDevice::readFrame() {
               static_cast<long long>(buf.timestamp.tv_sec),
               static_cast<long long>(buf.timestamp.tv_usec));
     }
-    std::vector<int16_t> data(mHeight * mWidth);
     const int16_t* readFrom = mReadLocations[buf.index];
-    std::copy(readFrom, readFrom + mHeight * mWidth, data.begin());
+    std::vector<int16_t> data(readFrom, readFrom + mHeight * mWidth);
     TouchVideoFrame frame(mHeight, mWidth, std::move(data), buf.timestamp);
 
     result = ioctl(mFd.get(), VIDIOC_QBUF, &buf);
@@ -212,23 +215,6 @@ std::optional<TouchVideoFrame> TouchVideoDevice::readFrame() {
         ALOGE("VIDIOC_QBUF failed: %s", strerror(errno));
     }
     return std::make_optional(std::move(frame));
-}
-
-/*
- * This function should not be called unless buffer is ready! This must be checked with
- * select, poll, epoll, or some other similar api first.
- * The oldest frame will be at the beginning of the array.
- */
-std::vector<TouchVideoFrame> TouchVideoDevice::readFrames() {
-    std::vector<TouchVideoFrame> frames;
-    while (true) {
-        std::optional<TouchVideoFrame> frame = readFrame();
-        if (!frame) {
-            break;
-        }
-        frames.push_back(std::move(*frame));
-    }
-    return frames;
 }
 
 TouchVideoDevice::~TouchVideoDevice() {

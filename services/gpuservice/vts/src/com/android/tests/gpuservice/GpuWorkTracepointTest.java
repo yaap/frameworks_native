@@ -18,6 +18,7 @@ package com.android.tests.gpuservice;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
+import static org.junit.Assume.assumeFalse;
 
 import android.platform.test.annotations.RequiresDevice;
 
@@ -46,6 +47,11 @@ public class GpuWorkTracepointTest extends BaseHostJUnit4Test {
     @RequiresDevice
     @Test
     public void testGpuWorkPeriodTracepointFormat() throws Exception {
+
+        // Exempt LAPTOP form factor from this requirement by skipping this test
+        assumeFalse("Skipping test for LAPTOP devices",
+                getDevice().hasFeature("android.hardware.type.pc"));
+
         CommandResult commandResult = getDevice().executeShellV2Command(
                 String.format("cat %s", GPU_WORK_PERIOD_TRACEPOINT_FORMAT_PATH));
 

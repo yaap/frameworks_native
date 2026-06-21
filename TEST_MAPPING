@@ -10,10 +10,10 @@
       ]
     },
     {
-      "name": "CtsGraphicsTestCases",
+      "name": "CtsGpuTestCases",
       "options": [
         {
-          "include-filter": "android.graphics.cts.VulkanPreTransformTest"
+          "include-filter": "android.gpu.vulkan.cts.VulkanPreTransformTest"
         }
       ]
     }

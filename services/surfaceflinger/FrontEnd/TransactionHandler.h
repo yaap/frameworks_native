@@ -22,11 +22,11 @@
 #include <string_view>
 #include <vector>
 
-#include <LocklessQueue.h>
 #include <QueuedTransactionState.h>
 #include <android-base/thread_annotations.h>
 #include <ftl/small_map.h>
 #include <ftl/small_vector.h>
+#include <gui/LocklessQueue.h>
 
 namespace android {
 

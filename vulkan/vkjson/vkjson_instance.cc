@@ -114,6 +114,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
                             .external_format_resolve_properties_android;
   }
 
+  if (HasExtension("VK_ARM_performance_counters_by_region",
+                   device.extensions)) {
+    device.arm_performance_counters_by_region.reported = true;
+    device.arm_performance_counters_by_region
+        .performance_counters_by_region_properties_arm.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_COUNTERS_BY_REGION_PROPERTIES_ARM;
+    device.arm_performance_counters_by_region
+        .performance_counters_by_region_properties_arm.pNext = properties.pNext;
+    properties.pNext = &device.arm_performance_counters_by_region
+                            .performance_counters_by_region_properties_arm;
+  }
+
   if (HasExtension("VK_ARM_render_pass_striped", device.extensions)) {
     device.arm_render_pass_striped.reported = true;
     device.arm_render_pass_striped.render_pass_striped_properties_arm.sType =
@@ -353,6 +365,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.ext_map_memory_placed.map_memory_placed_properties_ext;
   }
 
+  if (HasExtension("VK_EXT_memory_decompression", device.extensions)) {
+    device.ext_memory_decompression.reported = true;
+    device.ext_memory_decompression.memory_decompression_properties_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_PROPERTIES_EXT;
+    device.ext_memory_decompression.memory_decompression_properties_ext.pNext =
+        properties.pNext;
+    properties.pNext =
+        &device.ext_memory_decompression.memory_decompression_properties_ext;
+  }
+
   if (HasExtension("VK_EXT_mesh_shader", device.extensions)) {
     device.ext_mesh_shader.reported = true;
     device.ext_mesh_shader.mesh_shader_properties_ext.sType =
@@ -425,6 +447,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         properties.pNext;
     properties.pNext =
         &device.ext_provoking_vertex.provoking_vertex_properties_ext;
+  }
+
+  if (HasExtension("VK_EXT_ray_tracing_invocation_reorder",
+                   device.extensions)) {
+    device.ext_ray_tracing_invocation_reorder.reported = true;
+    device.ext_ray_tracing_invocation_reorder
+        .ray_tracing_invocation_reorder_properties_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT;
+    device.ext_ray_tracing_invocation_reorder
+        .ray_tracing_invocation_reorder_properties_ext.pNext = properties.pNext;
+    properties.pNext = &device.ext_ray_tracing_invocation_reorder
+                            .ray_tracing_invocation_reorder_properties_ext;
   }
 
   if (HasExtension("VK_EXT_robustness2", device.extensions)) {
@@ -582,6 +616,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.khr_cooperative_matrix.cooperative_matrix_properties_khr;
   }
 
+  if (HasExtension("VK_KHR_copy_memory_indirect", device.extensions)) {
+    device.khr_copy_memory_indirect.reported = true;
+    device.khr_copy_memory_indirect.copy_memory_indirect_properties_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_PROPERTIES_KHR;
+    device.khr_copy_memory_indirect.copy_memory_indirect_properties_khr.pNext =
+        properties.pNext;
+    properties.pNext =
+        &device.khr_copy_memory_indirect.copy_memory_indirect_properties_khr;
+  }
+
   if (HasExtension("VK_KHR_depth_stencil_resolve", device.extensions)) {
     device.khr_depth_stencil_resolve.reported = true;
     device.khr_depth_stencil_resolve.depth_stencil_resolve_properties_khr
@@ -662,6 +706,15 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         properties.pNext;
     properties.pNext =
         &device.khr_line_rasterization.line_rasterization_properties_khr;
+  }
+
+  if (HasExtension("VK_KHR_maintenance10", device.extensions)) {
+    device.khr_maintenance10.reported = true;
+    device.khr_maintenance10.maintenance10_properties_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_10_PROPERTIES_KHR;
+    device.khr_maintenance10.maintenance10_properties_khr.pNext =
+        properties.pNext;
+    properties.pNext = &device.khr_maintenance10.maintenance10_properties_khr;
   }
 
   if (HasExtension("VK_KHR_maintenance2", device.extensions)) {
@@ -906,7 +959,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
   if (HasExtension("VK_NV_copy_memory_indirect", device.extensions)) {
     device.nv_copy_memory_indirect.reported = true;
     device.nv_copy_memory_indirect.copy_memory_indirect_properties_nv.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_PROPERTIES_NV;
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_PROPERTIES_KHR;
     device.nv_copy_memory_indirect.copy_memory_indirect_properties_nv.pNext =
         properties.pNext;
     properties.pNext =
@@ -960,7 +1013,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
   if (HasExtension("VK_NV_memory_decompression", device.extensions)) {
     device.nv_memory_decompression.reported = true;
     device.nv_memory_decompression.memory_decompression_properties_nv.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_PROPERTIES_NV;
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_PROPERTIES_EXT;
     device.nv_memory_decompression.memory_decompression_properties_nv.pNext =
         properties.pNext;
     properties.pNext =
@@ -1085,6 +1138,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     properties.pNext = &device.qcom_tile_shading.tile_shading_properties_qcom;
   }
 
+  if (HasExtension("VK_VALVE_fragment_density_map_layered",
+                   device.extensions)) {
+    device.valve_fragment_density_map_layered.reported = true;
+    device.valve_fragment_density_map_layered
+        .fragment_density_map_layered_properties_valve.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE;
+    device.valve_fragment_density_map_layered
+        .fragment_density_map_layered_properties_valve.pNext = properties.pNext;
+    properties.pNext = &device.valve_fragment_density_map_layered
+                            .fragment_density_map_layered_properties_valve;
+  }
+
   vkGetPhysicalDeviceProperties2(physical_device, &properties);
 
   if (device.ext_host_image_copy.host_image_copy_properties_ext
@@ -1172,12 +1237,32 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
                           .external_format_resolve_features_android;
   }
 
+  if (HasExtension("VK_ARM_data_graph", device.extensions)) {
+    device.arm_data_graph.reported = true;
+    device.arm_data_graph.data_graph_features_arm.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM;
+    device.arm_data_graph.data_graph_features_arm.pNext = features.pNext;
+    features.pNext = &device.arm_data_graph.data_graph_features_arm;
+  }
+
   if (HasExtension("VK_ARM_format_pack", device.extensions)) {
     device.arm_format_pack.reported = true;
     device.arm_format_pack.format_pack_features_arm.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FORMAT_PACK_FEATURES_ARM;
     device.arm_format_pack.format_pack_features_arm.pNext = features.pNext;
     features.pNext = &device.arm_format_pack.format_pack_features_arm;
+  }
+
+  if (HasExtension("VK_ARM_performance_counters_by_region",
+                   device.extensions)) {
+    device.arm_performance_counters_by_region.reported = true;
+    device.arm_performance_counters_by_region
+        .performance_counters_by_region_features_arm.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_COUNTERS_BY_REGION_FEATURES_ARM;
+    device.arm_performance_counters_by_region
+        .performance_counters_by_region_features_arm.pNext = features.pNext;
+    features.pNext = &device.arm_performance_counters_by_region
+                          .performance_counters_by_region_features_arm;
   }
 
   if (HasExtension("VK_ARM_pipeline_opacity_micromap", device.extensions)) {
@@ -1353,6 +1438,15 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         features.pNext;
     features.pNext =
         &device.ext_custom_border_color.custom_border_color_features_ext;
+  }
+
+  if (HasExtension("VK_EXT_custom_resolve", device.extensions)) {
+    device.ext_custom_resolve.reported = true;
+    device.ext_custom_resolve.custom_resolve_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_RESOLVE_FEATURES_EXT;
+    device.ext_custom_resolve.custom_resolve_features_ext.pNext =
+        features.pNext;
+    features.pNext = &device.ext_custom_resolve.custom_resolve_features_ext;
   }
 
   if (HasExtension("VK_EXT_depth_bias_control", device.extensions)) {
@@ -1714,6 +1808,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.ext_map_memory_placed.map_memory_placed_features_ext;
   }
 
+  if (HasExtension("VK_EXT_memory_decompression", device.extensions)) {
+    device.ext_memory_decompression.reported = true;
+    device.ext_memory_decompression.memory_decompression_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_FEATURES_EXT;
+    device.ext_memory_decompression.memory_decompression_features_ext.pNext =
+        features.pNext;
+    features.pNext =
+        &device.ext_memory_decompression.memory_decompression_features_ext;
+  }
+
   if (HasExtension("VK_EXT_memory_priority", device.extensions)) {
     device.ext_memory_priority.reported = true;
     device.ext_memory_priority.memory_priority_features_ext.sType =
@@ -1858,16 +1962,13 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.ext_pipeline_robustness.pipeline_robustness_features_ext;
   }
 
-  if (HasExtension("VK_EXT_present_mode_fifo_latest_ready",
-                   device.extensions)) {
-    device.ext_present_mode_fifo_latest_ready.reported = true;
-    device.ext_present_mode_fifo_latest_ready
-        .present_mode_fifo_latest_ready_features_ext.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_EXT;
-    device.ext_present_mode_fifo_latest_ready
-        .present_mode_fifo_latest_ready_features_ext.pNext = features.pNext;
-    features.pNext = &device.ext_present_mode_fifo_latest_ready
-                          .present_mode_fifo_latest_ready_features_ext;
+  if (HasExtension("VK_EXT_present_timing", device.extensions)) {
+    device.ext_present_timing.reported = true;
+    device.ext_present_timing.present_timing_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_TIMING_FEATURES_EXT;
+    device.ext_present_timing.present_timing_features_ext.pNext =
+        features.pNext;
+    features.pNext = &device.ext_present_timing.present_timing_features_ext;
   }
 
   if (HasExtension("VK_EXT_primitive_topology_list_restart",
@@ -1923,6 +2024,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
                           .rasterization_order_attachment_access_features_ext;
   }
 
+  if (HasExtension("VK_EXT_ray_tracing_invocation_reorder",
+                   device.extensions)) {
+    device.ext_ray_tracing_invocation_reorder.reported = true;
+    device.ext_ray_tracing_invocation_reorder
+        .ray_tracing_invocation_reorder_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT;
+    device.ext_ray_tracing_invocation_reorder
+        .ray_tracing_invocation_reorder_features_ext.pNext = features.pNext;
+    features.pNext = &device.ext_ray_tracing_invocation_reorder
+                          .ray_tracing_invocation_reorder_features_ext;
+  }
+
   if (HasExtension("VK_EXT_rgba10x6_formats", device.extensions)) {
     device.ext_rgba10x6_formats.reported = true;
     device.ext_rgba10x6_formats.rgba10_x6_formats_features_ext.sType =
@@ -1949,6 +2062,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         features.pNext;
     features.pNext =
         &device.ext_scalar_block_layout.scalar_block_layout_features_ext;
+  }
+
+  if (HasExtension("VK_EXT_shader_64bit_indexing", device.extensions)) {
+    device.ext_shader_64bit_indexing.reported = true;
+    device.ext_shader_64bit_indexing.shaderbit64_indexing_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_64_BIT_INDEXING_FEATURES_EXT;
+    device.ext_shader_64bit_indexing.shaderbit64_indexing_features_ext.pNext =
+        features.pNext;
+    features.pNext =
+        &device.ext_shader_64bit_indexing.shaderbit64_indexing_features_ext;
   }
 
   if (HasExtension("VK_EXT_shader_atomic_float", device.extensions)) {
@@ -2042,6 +2165,19 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.ext_shader_tile_image.shader_tile_image_features_ext;
   }
 
+  if (HasExtension("VK_EXT_shader_uniform_buffer_unsized_array",
+                   device.extensions)) {
+    device.ext_shader_uniform_buffer_unsized_array.reported = true;
+    device.ext_shader_uniform_buffer_unsized_array
+        .shader_uniform_buffer_unsized_array_features_ext.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNIFORM_BUFFER_UNSIZED_ARRAY_FEATURES_EXT;
+    device.ext_shader_uniform_buffer_unsized_array
+        .shader_uniform_buffer_unsized_array_features_ext.pNext =
+        features.pNext;
+    features.pNext = &device.ext_shader_uniform_buffer_unsized_array
+                          .shader_uniform_buffer_unsized_array_features_ext;
+  }
+
   if (HasExtension("VK_EXT_subgroup_size_control", device.extensions)) {
     device.ext_subgroup_size_control.reported = true;
     device.ext_subgroup_size_control.subgroup_size_control_features_ext.sType =
@@ -2067,7 +2203,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.ext_swapchain_maintenance1.reported = true;
     device.ext_swapchain_maintenance1.swapchain_maintenance1_features_ext
         .sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
     device.ext_swapchain_maintenance1.swapchain_maintenance1_features_ext
         .pNext = features.pNext;
     features.pNext =
@@ -2290,6 +2426,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.khr_cooperative_matrix.cooperative_matrix_features_khr;
   }
 
+  if (HasExtension("VK_KHR_copy_memory_indirect", device.extensions)) {
+    device.khr_copy_memory_indirect.reported = true;
+    device.khr_copy_memory_indirect.copy_memory_indirect_features_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_FEATURES_KHR;
+    device.khr_copy_memory_indirect.copy_memory_indirect_features_khr.pNext =
+        features.pNext;
+    features.pNext =
+        &device.khr_copy_memory_indirect.copy_memory_indirect_features_khr;
+  }
+
   if (HasExtension("VK_KHR_depth_clamp_zero_one", device.extensions)) {
     device.khr_depth_clamp_zero_one.reported = true;
     device.khr_depth_clamp_zero_one.depth_clamp_zero_one_features_khr.sType =
@@ -2379,6 +2525,14 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         features.pNext;
     features.pNext =
         &device.khr_line_rasterization.line_rasterization_features_khr;
+  }
+
+  if (HasExtension("VK_KHR_maintenance10", device.extensions)) {
+    device.khr_maintenance10.reported = true;
+    device.khr_maintenance10.maintenance10_features_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_10_FEATURES_KHR;
+    device.khr_maintenance10.maintenance10_features_khr.pNext = features.pNext;
+    features.pNext = &device.khr_maintenance10.maintenance10_features_khr;
   }
 
   if (HasExtension("VK_KHR_maintenance4", device.extensions)) {
@@ -2482,6 +2636,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR;
     device.khr_present_id2.present_id2_features_khr.pNext = features.pNext;
     features.pNext = &device.khr_present_id2.present_id2_features_khr;
+  }
+
+  if (HasExtension("VK_KHR_present_mode_fifo_latest_ready",
+                   device.extensions)) {
+    device.khr_present_mode_fifo_latest_ready.reported = true;
+    device.khr_present_mode_fifo_latest_ready
+        .present_mode_fifo_latest_ready_features_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_KHR;
+    device.khr_present_mode_fifo_latest_ready
+        .present_mode_fifo_latest_ready_features_khr.pNext = features.pNext;
+    features.pNext = &device.khr_present_mode_fifo_latest_ready
+                          .present_mode_fifo_latest_ready_features_khr;
   }
 
   if (HasExtension("VK_KHR_present_wait", device.extensions)) {
@@ -2634,6 +2800,14 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.khr_shader_float_controls2.shader_float_controls2_features_khr;
   }
 
+  if (HasExtension("VK_KHR_shader_fma", device.extensions)) {
+    device.khr_shader_fma.reported = true;
+    device.khr_shader_fma.shader_fma_features_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR;
+    device.khr_shader_fma.shader_fma_features_khr.pNext = features.pNext;
+    features.pNext = &device.khr_shader_fma.shader_fma_features_khr;
+  }
+
   if (HasExtension("VK_KHR_shader_integer_dot_product", device.extensions)) {
     device.khr_shader_integer_dot_product.reported = true;
     device.khr_shader_integer_dot_product
@@ -2726,6 +2900,28 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
                           .shader_terminate_invocation_features_khr;
   }
 
+  if (HasExtension("VK_KHR_shader_untyped_pointers", device.extensions)) {
+    device.khr_shader_untyped_pointers.reported = true;
+    device.khr_shader_untyped_pointers.shader_untyped_pointers_features_khr
+        .sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR;
+    device.khr_shader_untyped_pointers.shader_untyped_pointers_features_khr
+        .pNext = features.pNext;
+    features.pNext = &device.khr_shader_untyped_pointers
+                          .shader_untyped_pointers_features_khr;
+  }
+
+  if (HasExtension("VK_KHR_swapchain_maintenance1", device.extensions)) {
+    device.khr_swapchain_maintenance1.reported = true;
+    device.khr_swapchain_maintenance1.swapchain_maintenance1_features_khr
+        .sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
+    device.khr_swapchain_maintenance1.swapchain_maintenance1_features_khr
+        .pNext = features.pNext;
+    features.pNext =
+        &device.khr_swapchain_maintenance1.swapchain_maintenance1_features_khr;
+  }
+
   if (HasExtension("VK_KHR_synchronization2", device.extensions)) {
     device.khr_synchronization2.reported = true;
     device.khr_synchronization2.synchronization2_features_khr.sType =
@@ -2810,6 +3006,17 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.khr_video_encode_av1.video_encode_av1_features_khr.pNext =
         features.pNext;
     features.pNext = &device.khr_video_encode_av1.video_encode_av1_features_khr;
+  }
+
+  if (HasExtension("VK_KHR_video_encode_intra_refresh", device.extensions)) {
+    device.khr_video_encode_intra_refresh.reported = true;
+    device.khr_video_encode_intra_refresh
+        .video_encode_intra_refresh_features_khr.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_INTRA_REFRESH_FEATURES_KHR;
+    device.khr_video_encode_intra_refresh
+        .video_encode_intra_refresh_features_khr.pNext = features.pNext;
+    features.pNext = &device.khr_video_encode_intra_refresh
+                          .video_encode_intra_refresh_features_khr;
   }
 
   if (HasExtension("VK_KHR_video_encode_quantization_map", device.extensions)) {
@@ -3095,7 +3302,7 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
   if (HasExtension("VK_NV_memory_decompression", device.extensions)) {
     device.nv_memory_decompression.reported = true;
     device.nv_memory_decompression.memory_decompression_features_nv.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_FEATURES_NV;
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_FEATURES_EXT;
     device.nv_memory_decompression.memory_decompression_features_nv.pNext =
         features.pNext;
     features.pNext =
@@ -3264,6 +3471,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         &device.nv_shading_rate_image.shading_rate_image_features_nv;
   }
 
+  if (HasExtension("VK_QCOM_data_graph_model", device.extensions)) {
+    device.qcom_data_graph_model.reported = true;
+    device.qcom_data_graph_model.data_graph_model_features_qcom.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_MODEL_FEATURES_QCOM;
+    device.qcom_data_graph_model.data_graph_model_features_qcom.pNext =
+        features.pNext;
+    features.pNext =
+        &device.qcom_data_graph_model.data_graph_model_features_qcom;
+  }
+
   if (HasExtension("VK_QCOM_filter_cubic_clamp", device.extensions)) {
     device.qcom_filter_cubic_clamp.reported = true;
     device.qcom_filter_cubic_clamp.cubic_clamp_features_qcom.sType =
@@ -3382,6 +3599,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     features.pNext = &device.sec_amigo_profiling.amigo_profiling_features_sec;
   }
 
+  if (HasExtension("VK_SEC_pipeline_cache_incremental_mode",
+                   device.extensions)) {
+    device.sec_pipeline_cache_incremental_mode.reported = true;
+    device.sec_pipeline_cache_incremental_mode
+        .pipeline_cache_incremental_mode_features_sec.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CACHE_INCREMENTAL_MODE_FEATURES_SEC;
+    device.sec_pipeline_cache_incremental_mode
+        .pipeline_cache_incremental_mode_features_sec.pNext = features.pNext;
+    features.pNext = &device.sec_pipeline_cache_incremental_mode
+                          .pipeline_cache_incremental_mode_features_sec;
+  }
+
   if (HasExtension("VK_VALVE_descriptor_set_host_mapping", device.extensions)) {
     device.valve_descriptor_set_host_mapping.reported = true;
     device.valve_descriptor_set_host_mapping
@@ -3393,6 +3622,18 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
                           .descriptor_set_host_mapping_features_valve;
   }
 
+  if (HasExtension("VK_VALVE_fragment_density_map_layered",
+                   device.extensions)) {
+    device.valve_fragment_density_map_layered.reported = true;
+    device.valve_fragment_density_map_layered
+        .fragment_density_map_layered_features_valve.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE;
+    device.valve_fragment_density_map_layered
+        .fragment_density_map_layered_features_valve.pNext = features.pNext;
+    features.pNext = &device.valve_fragment_density_map_layered
+                          .fragment_density_map_layered_features_valve;
+  }
+
   if (HasExtension("VK_VALVE_mutable_descriptor_type", device.extensions)) {
     device.valve_mutable_descriptor_type.reported = true;
     device.valve_mutable_descriptor_type.mutable_descriptor_type_features_valve
@@ -3402,6 +3643,17 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         .pNext = features.pNext;
     features.pNext = &device.valve_mutable_descriptor_type
                           .mutable_descriptor_type_features_valve;
+  }
+
+  if (HasExtension("VK_VALVE_video_encode_rgb_conversion", device.extensions)) {
+    device.valve_video_encode_rgb_conversion.reported = true;
+    device.valve_video_encode_rgb_conversion
+        .video_encode_rgb_conversion_features_valve.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_RGB_CONVERSION_FEATURES_VALVE;
+    device.valve_video_encode_rgb_conversion
+        .video_encode_rgb_conversion_features_valve.pNext = features.pNext;
+    features.pNext = &device.valve_video_encode_rgb_conversion
+                          .video_encode_rgb_conversion_features_valve;
   }
 
   vkGetPhysicalDeviceFeatures2(physical_device, &features);
@@ -3527,26 +3779,6 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
       device.formats.insert(std::make_pair(format, format_properties));
     }
 
-    device.subgroup_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    device.subgroup_properties.pNext = properties.pNext;
-    properties.pNext = &device.subgroup_properties;
-
-    device.point_clipping_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES;
-    device.point_clipping_properties.pNext = properties.pNext;
-    properties.pNext = &device.point_clipping_properties;
-
-    device.multiview_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES;
-    device.multiview_properties.pNext = properties.pNext;
-    properties.pNext = &device.multiview_properties;
-
-    device.protected_memory_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES;
-    device.protected_memory_properties.pNext = properties.pNext;
-    properties.pNext = &device.protected_memory_properties;
-
     device.id_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
     device.id_properties.pNext = properties.pNext;
@@ -3556,6 +3788,26 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
     device.maintenance3_properties.pNext = properties.pNext;
     properties.pNext = &device.maintenance3_properties;
+
+    device.multiview_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES;
+    device.multiview_properties.pNext = properties.pNext;
+    properties.pNext = &device.multiview_properties;
+
+    device.point_clipping_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES;
+    device.point_clipping_properties.pNext = properties.pNext;
+    properties.pNext = &device.point_clipping_properties;
+
+    device.protected_memory_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES;
+    device.protected_memory_properties.pNext = properties.pNext;
+    properties.pNext = &device.protected_memory_properties;
+
+    device.subgroup_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    device.subgroup_properties.pNext = properties.pNext;
+    properties.pNext = &device.subgroup_properties;
 
     vkGetPhysicalDeviceProperties2(physical_device, &properties);
 
@@ -3568,16 +3820,6 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
     device.multiview_features.pNext = features.pNext;
     features.pNext = &device.multiview_features;
-
-    device.variable_pointer_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
-    device.variable_pointer_features.pNext = features.pNext;
-    features.pNext = &device.variable_pointer_features;
-
-    device.variable_pointers_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
-    device.variable_pointers_features.pNext = features.pNext;
-    features.pNext = &device.variable_pointers_features;
 
     device.protected_memory_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES;
@@ -3598,6 +3840,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
     device.shader_draw_parameters_features.pNext = features.pNext;
     features.pNext = &device.shader_draw_parameters_features;
+
+    device.variable_pointer_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
+    device.variable_pointer_features.pNext = features.pNext;
+    features.pNext = &device.variable_pointer_features;
+
+    device.variable_pointers_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES;
+    device.variable_pointers_features.pNext = features.pNext;
+    features.pNext = &device.variable_pointers_features;
 
     vkGetPhysicalDeviceFeatures2(physical_device, &features);
 
@@ -3656,6 +3908,16 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.core12.properties.pNext = properties.pNext;
     properties.pNext = &device.core12.properties;
 
+    device.depth_stencil_resolve_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
+    device.depth_stencil_resolve_properties.pNext = properties.pNext;
+    properties.pNext = &device.depth_stencil_resolve_properties;
+
+    device.descriptor_indexing_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+    device.descriptor_indexing_properties.pNext = properties.pNext;
+    properties.pNext = &device.descriptor_indexing_properties;
+
     device.driver_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     device.driver_properties.pNext = properties.pNext;
@@ -3665,16 +3927,6 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     device.float_controls_properties.pNext = properties.pNext;
     properties.pNext = &device.float_controls_properties;
-
-    device.descriptor_indexing_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
-    device.descriptor_indexing_properties.pNext = properties.pNext;
-    properties.pNext = &device.descriptor_indexing_properties;
-
-    device.depth_stencil_resolve_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
-    device.depth_stencil_resolve_properties.pNext = properties.pNext;
-    properties.pNext = &device.depth_stencil_resolve_properties;
 
     device.sampler_filter_minmax_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES;
@@ -3703,6 +3955,36 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.bit8_storage_features.pNext = features.pNext;
     features.pNext = &device.bit8_storage_features;
 
+    device.buffer_device_address_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    device.buffer_device_address_features.pNext = features.pNext;
+    features.pNext = &device.buffer_device_address_features;
+
+    device.descriptor_indexing_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    device.descriptor_indexing_features.pNext = features.pNext;
+    features.pNext = &device.descriptor_indexing_features;
+
+    device.host_query_reset_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+    device.host_query_reset_features.pNext = features.pNext;
+    features.pNext = &device.host_query_reset_features;
+
+    device.imageless_framebuffer_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES;
+    device.imageless_framebuffer_features.pNext = features.pNext;
+    features.pNext = &device.imageless_framebuffer_features;
+
+    device.scalar_block_layout_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
+    device.scalar_block_layout_features.pNext = features.pNext;
+    features.pNext = &device.scalar_block_layout_features;
+
+    device.separate_depth_stencil_layouts_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES;
+    device.separate_depth_stencil_layouts_features.pNext = features.pNext;
+    features.pNext = &device.separate_depth_stencil_layouts_features;
+
     device.shader_atomic_int64_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
     device.shader_atomic_int64_features.pNext = features.pNext;
@@ -3713,55 +3995,26 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.shader_float16_int8_features.pNext = features.pNext;
     features.pNext = &device.shader_float16_int8_features;
 
-    device.descriptor_indexing_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    device.descriptor_indexing_features.pNext = features.pNext;
-    features.pNext = &device.descriptor_indexing_features;
-
-    device.scalar_block_layout_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
-    device.scalar_block_layout_features.pNext = features.pNext;
-    features.pNext = &device.scalar_block_layout_features;
-
-    device.vulkan_memory_model_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
-    device.vulkan_memory_model_features.pNext = features.pNext;
-    features.pNext = &device.vulkan_memory_model_features;
-
-    device.imageless_framebuffer_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES;
-    device.imageless_framebuffer_features.pNext = features.pNext;
-    features.pNext = &device.imageless_framebuffer_features;
-
-    device.uniform_buffer_standard_layout_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES;
-    device.uniform_buffer_standard_layout_features.pNext = features.pNext;
-    features.pNext = &device.uniform_buffer_standard_layout_features;
-
     device.shader_subgroup_extended_types_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES;
     device.shader_subgroup_extended_types_features.pNext = features.pNext;
     features.pNext = &device.shader_subgroup_extended_types_features;
-
-    device.separate_depth_stencil_layouts_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES;
-    device.separate_depth_stencil_layouts_features.pNext = features.pNext;
-    features.pNext = &device.separate_depth_stencil_layouts_features;
-
-    device.host_query_reset_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
-    device.host_query_reset_features.pNext = features.pNext;
-    features.pNext = &device.host_query_reset_features;
 
     device.timeline_semaphore_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
     device.timeline_semaphore_features.pNext = features.pNext;
     features.pNext = &device.timeline_semaphore_features;
 
-    device.buffer_device_address_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    device.buffer_device_address_features.pNext = features.pNext;
-    features.pNext = &device.buffer_device_address_features;
+    device.uniform_buffer_standard_layout_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES;
+    device.uniform_buffer_standard_layout_features.pNext = features.pNext;
+    features.pNext = &device.uniform_buffer_standard_layout_features;
+
+    device.vulkan_memory_model_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    device.vulkan_memory_model_features.pNext = features.pNext;
+    features.pNext = &device.vulkan_memory_model_features;
+
     vkGetPhysicalDeviceFeatures2(physical_device, &features);
   }
 
@@ -3790,35 +4043,35 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
       device.formats.insert(std::make_pair(format, format_properties));
     }
 
-    device.subgroup_size_control_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
-    device.subgroup_size_control_properties.pNext = properties.pNext;
-    properties.pNext = &device.subgroup_size_control_properties;
+    device.core13.properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+    device.core13.properties.pNext = properties.pNext;
+    properties.pNext = &device.core13.properties;
 
     device.inline_uniform_block_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES;
     device.inline_uniform_block_properties.pNext = properties.pNext;
     properties.pNext = &device.inline_uniform_block_properties;
 
-    device.shader_integer_dot_product_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
-    device.shader_integer_dot_product_properties.pNext = properties.pNext;
-    properties.pNext = &device.shader_integer_dot_product_properties;
-
-    device.texel_buffer_alignment_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES;
-    device.texel_buffer_alignment_properties.pNext = properties.pNext;
-    properties.pNext = &device.texel_buffer_alignment_properties;
-
     device.maintenance4_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES;
     device.maintenance4_properties.pNext = properties.pNext;
     properties.pNext = &device.maintenance4_properties;
 
-    device.core13.properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
-    device.core13.properties.pNext = properties.pNext;
-    properties.pNext = &device.core13.properties;
+    device.shader_integer_dot_product_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES;
+    device.shader_integer_dot_product_properties.pNext = properties.pNext;
+    properties.pNext = &device.shader_integer_dot_product_properties;
+
+    device.subgroup_size_control_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
+    device.subgroup_size_control_properties.pNext = properties.pNext;
+    properties.pNext = &device.subgroup_size_control_properties;
+
+    device.texel_buffer_alignment_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES;
+    device.texel_buffer_alignment_properties.pNext = properties.pNext;
+    properties.pNext = &device.texel_buffer_alignment_properties;
 
     vkGetPhysicalDeviceProperties2(physical_device, &properties);
 
@@ -3827,70 +4080,70 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.core13.features.pNext = features.pNext;
     features.pNext = &device.core13.features;
 
-    device.shader_terminate_invocation_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES;
-    device.shader_terminate_invocation_features.pNext = features.pNext;
-    features.pNext = &device.shader_terminate_invocation_features;
-
-    device.shader_demote_to_helper_invocation_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES;
-    device.shader_demote_to_helper_invocation_features.pNext = features.pNext;
-    features.pNext = &device.shader_demote_to_helper_invocation_features;
-
-    device.private_data_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
-    device.private_data_features.pNext = features.pNext;
-    features.pNext = &device.private_data_features;
-
-    device.pipeline_creation_cache_control_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
-    device.pipeline_creation_cache_control_features.pNext = features.pNext;
-    features.pNext = &device.pipeline_creation_cache_control_features;
-
-    device.synchronization2_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
-    device.synchronization2_features.pNext = features.pNext;
-    features.pNext = &device.synchronization2_features;
-
-    device.zero_initialize_workgroup_memory_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES;
-    device.zero_initialize_workgroup_memory_features.pNext = features.pNext;
-    features.pNext = &device.zero_initialize_workgroup_memory_features;
+    device.dynamic_rendering_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    device.dynamic_rendering_features.pNext = features.pNext;
+    features.pNext = &device.dynamic_rendering_features;
 
     device.image_robustness_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES;
     device.image_robustness_features.pNext = features.pNext;
     features.pNext = &device.image_robustness_features;
 
-    device.subgroup_size_control_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
-    device.subgroup_size_control_features.pNext = features.pNext;
-    features.pNext = &device.subgroup_size_control_features;
-
     device.inline_uniform_block_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES;
     device.inline_uniform_block_features.pNext = features.pNext;
     features.pNext = &device.inline_uniform_block_features;
 
-    device.texture_compression_astchdr_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
-    device.texture_compression_astchdr_features.pNext = features.pNext;
-    features.pNext = &device.texture_compression_astchdr_features;
+    device.maintenance4_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
+    device.maintenance4_features.pNext = features.pNext;
+    features.pNext = &device.maintenance4_features;
 
-    device.dynamic_rendering_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
-    device.dynamic_rendering_features.pNext = features.pNext;
-    features.pNext = &device.dynamic_rendering_features;
+    device.pipeline_creation_cache_control_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES;
+    device.pipeline_creation_cache_control_features.pNext = features.pNext;
+    features.pNext = &device.pipeline_creation_cache_control_features;
+
+    device.private_data_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES;
+    device.private_data_features.pNext = features.pNext;
+    features.pNext = &device.private_data_features;
+
+    device.shader_demote_to_helper_invocation_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES;
+    device.shader_demote_to_helper_invocation_features.pNext = features.pNext;
+    features.pNext = &device.shader_demote_to_helper_invocation_features;
 
     device.shader_integer_dot_product_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES;
     device.shader_integer_dot_product_features.pNext = features.pNext;
     features.pNext = &device.shader_integer_dot_product_features;
 
-    device.maintenance4_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
-    device.maintenance4_features.pNext = features.pNext;
-    features.pNext = &device.maintenance4_features;
+    device.shader_terminate_invocation_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES;
+    device.shader_terminate_invocation_features.pNext = features.pNext;
+    features.pNext = &device.shader_terminate_invocation_features;
+
+    device.subgroup_size_control_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    device.subgroup_size_control_features.pNext = features.pNext;
+    features.pNext = &device.subgroup_size_control_features;
+
+    device.synchronization2_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    device.synchronization2_features.pNext = features.pNext;
+    features.pNext = &device.synchronization2_features;
+
+    device.texture_compression_astchdr_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
+    device.texture_compression_astchdr_features.pNext = features.pNext;
+    features.pNext = &device.texture_compression_astchdr_features;
+
+    device.zero_initialize_workgroup_memory_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES;
+    device.zero_initialize_workgroup_memory_features.pNext = features.pNext;
+    features.pNext = &device.zero_initialize_workgroup_memory_features;
 
     vkGetPhysicalDeviceFeatures2(physical_device, &features);
   }
@@ -3904,25 +4157,25 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
       device.formats.insert(std::make_pair(format, format_properties));
     }
 
+    device.core14.properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES;
+    device.core14.properties.pNext = properties.pNext;
+    properties.pNext = &device.core14.properties;
+
+    device.host_image_copy_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES;
+    device.host_image_copy_properties.pNext = properties.pNext;
+    properties.pNext = &device.host_image_copy_properties;
+
     device.line_rasterization_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_PROPERTIES;
     device.line_rasterization_properties.pNext = properties.pNext;
     properties.pNext = &device.line_rasterization_properties;
 
-    device.vertex_attribute_divisor_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_PROPERTIES;
-    device.vertex_attribute_divisor_properties.pNext = properties.pNext;
-    properties.pNext = &device.vertex_attribute_divisor_properties;
-
     device.maintenance5_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_PROPERTIES;
     device.maintenance5_properties.pNext = properties.pNext;
     properties.pNext = &device.maintenance5_properties;
-
-    device.push_descriptor_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES;
-    device.push_descriptor_properties.pNext = properties.pNext;
-    properties.pNext = &device.push_descriptor_properties;
 
     device.maintenance6_properties.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_PROPERTIES;
@@ -3934,15 +4187,15 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.pipeline_robustness_properties.pNext = properties.pNext;
     properties.pNext = &device.pipeline_robustness_properties;
 
-    device.host_image_copy_properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_PROPERTIES;
-    device.host_image_copy_properties.pNext = properties.pNext;
-    properties.pNext = &device.host_image_copy_properties;
+    device.push_descriptor_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES;
+    device.push_descriptor_properties.pNext = properties.pNext;
+    properties.pNext = &device.push_descriptor_properties;
 
-    device.core14.properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES;
-    device.core14.properties.pNext = properties.pNext;
-    properties.pNext = &device.core14.properties;
+    device.vertex_attribute_divisor_properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_PROPERTIES;
+    device.vertex_attribute_divisor_properties.pNext = properties.pNext;
+    properties.pNext = &device.vertex_attribute_divisor_properties;
 
     vkGetPhysicalDeviceProperties2(physical_device, &properties);
 
@@ -3965,20 +4218,22 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
       vkGetPhysicalDeviceProperties2(physical_device, &properties);
     }
 
-    if (device.core14.properties.copySrcLayoutCount > 0 ||
-        device.core14.properties.copyDstLayoutCount > 0) {
-      if (device.core14.properties.copySrcLayoutCount > 0) {
-        device.core14.copy_src_layouts.resize(
-            device.core14.properties.copySrcLayoutCount);
-        device.core14.properties.pCopySrcLayouts =
-            device.core14.copy_src_layouts.data();
-      }
+    if (device.core14.properties.copyDstLayoutCount > 0 ||
+        device.core14.properties.copySrcLayoutCount > 0) {
       if (device.core14.properties.copyDstLayoutCount > 0) {
         device.core14.copy_dst_layouts.resize(
             device.core14.properties.copyDstLayoutCount);
         device.core14.properties.pCopyDstLayouts =
             device.core14.copy_dst_layouts.data();
       }
+
+      if (device.core14.properties.copySrcLayoutCount > 0) {
+        device.core14.copy_src_layouts.resize(
+            device.core14.properties.copySrcLayoutCount);
+        device.core14.properties.pCopySrcLayouts =
+            device.core14.copy_src_layouts.data();
+      }
+
       vkGetPhysicalDeviceProperties2(physical_device, &properties);
     }
 
@@ -3987,50 +4242,35 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.core14.features.pNext = features.pNext;
     features.pNext = &device.core14.features;
 
+    device.dynamic_rendering_local_read_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
+    device.dynamic_rendering_local_read_features.pNext = features.pNext;
+    features.pNext = &device.dynamic_rendering_local_read_features;
+
     device.global_priority_query_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES;
     device.global_priority_query_features.pNext = features.pNext;
     features.pNext = &device.global_priority_query_features;
 
-    device.shader_subgroup_rotate_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES;
-    device.shader_subgroup_rotate_features.pNext = features.pNext;
-    features.pNext = &device.shader_subgroup_rotate_features;
-
-    device.shader_float_controls2_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES;
-    device.shader_float_controls2_features.pNext = features.pNext;
-    features.pNext = &device.shader_float_controls2_features;
-
-    device.shader_expect_assume_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES;
-    device.shader_expect_assume_features.pNext = features.pNext;
-    features.pNext = &device.shader_expect_assume_features;
-
-    device.line_rasterization_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES;
-    device.line_rasterization_features.pNext = features.pNext;
-    features.pNext = &device.line_rasterization_features;
-
-    device.vertex_attribute_divisor_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES;
-    device.vertex_attribute_divisor_features.pNext = features.pNext;
-    features.pNext = &device.vertex_attribute_divisor_features;
+    device.host_image_copy_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES;
+    device.host_image_copy_features.pNext = features.pNext;
+    features.pNext = &device.host_image_copy_features;
 
     device.index_type_uint8_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES;
     device.index_type_uint8_features.pNext = features.pNext;
     features.pNext = &device.index_type_uint8_features;
 
+    device.line_rasterization_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES;
+    device.line_rasterization_features.pNext = features.pNext;
+    features.pNext = &device.line_rasterization_features;
+
     device.maintenance5_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
     device.maintenance5_features.pNext = features.pNext;
     features.pNext = &device.maintenance5_features;
-
-    device.dynamic_rendering_local_read_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
-    device.dynamic_rendering_local_read_features.pNext = features.pNext;
-    features.pNext = &device.dynamic_rendering_local_read_features;
 
     device.maintenance6_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES;
@@ -4047,10 +4287,25 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     device.pipeline_robustness_features.pNext = features.pNext;
     features.pNext = &device.pipeline_robustness_features;
 
-    device.host_image_copy_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES;
-    device.host_image_copy_features.pNext = features.pNext;
-    features.pNext = &device.host_image_copy_features;
+    device.shader_expect_assume_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES;
+    device.shader_expect_assume_features.pNext = features.pNext;
+    features.pNext = &device.shader_expect_assume_features;
+
+    device.shader_float_controls2_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES;
+    device.shader_float_controls2_features.pNext = features.pNext;
+    features.pNext = &device.shader_float_controls2_features;
+
+    device.shader_subgroup_rotate_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES;
+    device.shader_subgroup_rotate_features.pNext = features.pNext;
+    features.pNext = &device.shader_subgroup_rotate_features;
+
+    device.vertex_attribute_divisor_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES;
+    device.vertex_attribute_divisor_features.pNext = features.pNext;
+    features.pNext = &device.vertex_attribute_divisor_features;
 
     vkGetPhysicalDeviceFeatures2(physical_device, &features);
   }

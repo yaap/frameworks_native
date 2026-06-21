@@ -50,7 +50,7 @@ pub enum SourceClass {
 
 bitflags! {
     /// Source of the input device or input events.
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Source: u32 {
         // Constants from SourceClass, added here for compatibility reasons
         /// SourceClass::Button

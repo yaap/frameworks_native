@@ -70,7 +70,7 @@ enum class VSyncRequest {
 
 class EventThreadConnection : public gui::BnDisplayEventConnection {
 public:
-    EventThreadConnection(EventThread*, uid_t callingUid,
+    EventThreadConnection(EventThread*, uid_t callingUid, pid_t callingPid,
                           EventRegistrationFlags eventRegistration = {});
     virtual ~EventThreadConnection();
 
@@ -84,6 +84,7 @@ public:
 
     VSyncRequest vsyncRequest = VSyncRequest::None;
     const uid_t mOwnerUid;
+    const pid_t mOwnerPid;
     const EventRegistrationFlags mEventRegistration;
 
     /** The frame rate set to the attached choreographer. */

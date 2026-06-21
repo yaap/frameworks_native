@@ -91,7 +91,9 @@ android::base::Result<void> TouchState::addOrUpdateWindow(
         if (touchedWindow.windowHandle == windowHandle) {
             touchedWindow.dispatchMode = dispatchMode;
             touchedWindow.targetFlags |= targetFlags;
-            touchedWindow.forwardingWindowToken = forwardingWindowToken;
+            if (forwardingWindowToken != nullptr) {
+                touchedWindow.forwardingWindowToken = forwardingWindowToken;
+            }
             // For cases like hover enter/exit or DISPATCH_AS_OUTSIDE a touch window might not have
             // downTime set initially. Need to update existing window when a pointer is down for the
             // window.

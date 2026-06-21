@@ -93,12 +93,13 @@ sp<MediaSurfaceType> nativeWindowToSurfaceType(ANativeWindow* anw) {
 #endif
 }
 
-sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp) {
+sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp,
+                                       [[maybe_unused]] bool controlledByApp) {
     if (igbp == nullptr) {
         return nullptr;
     }
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
-    return sp<Surface>::make(igbp);
+    return sp<Surface>::make(igbp, controlledByApp);
 #else
     return igbp;
 #endif

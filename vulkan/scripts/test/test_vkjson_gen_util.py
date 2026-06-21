@@ -24,7 +24,7 @@ import unittest
 from dataclasses import dataclass
 from enum import Enum
 from typing import List
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 import base_test_helper as helper
 import vkjson_gen_util as src
@@ -207,6 +207,15 @@ class TestGetStructName(unittest.TestCase):
 
 
 class TestGenerateExtensionStructDefinition(helper.BaseMockCodeFileTest):
+    @dataclass
+    class MockPropertiesStructure:
+        count: int
+        list: List[bool]
+    @dataclass
+    class MockPropertiesStructureFixedListSize:
+        fixedCount: int
+        fixedList: List[bool]
+    MockPropertiesStructureExt = MockPropertiesStructure
 
     @patch('vkjson_gen_util.VK')
     def test_extension_with_single_struct(self, mock_vk):
@@ -358,6 +367,49 @@ class TestGenerateExtensionStructDefinition(helper.BaseMockCodeFileTest):
 
         self.assertEqual([], src.generate_extension_struct_definition(self.mock_file))
         self.assertCodeFileWrite("")
+
+    @patch('vkjson_gen_util.VK')
+    def test_extension_with_multiple_structs_and_list_variables(self, mock_vk):
+        mock_vk.VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING = {
+            "extensions": {
+                "VK_EXT_host_image_copy": [
+                    {"MockPropertiesStructureExt": "VK_STRUCT_VARIABLE"},
+                    {"MockPropertiesStructureFixedListSize": "VK_STRUCT_VARIABLE"},
+                ],
+            }
+        }
+        mock_vk.configure_mock(**{
+            "MockPropertiesStructureFixedListSize": self.MockPropertiesStructureFixedListSize,
+            "MockPropertiesStructure": self.MockPropertiesStructure,
+            "MockPropertiesStructureExt": self.MockPropertiesStructureExt,
+        })
+        mock_vk.LIST_TYPE_FIELD_AND_SIZE_MAPPING = {
+            "list": "count",
+            "fixedList": "fixedCount",
+        }
+        mock_vk.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING = {'MockPropertiesStructure': {'list'}}
+        extension_struct = src.get_vkjson_struct_name("VK_EXT_host_image_copy")
+        struct_1_name = src.get_struct_name("MockPropertiesStructureExt")
+        struct_2_name = src.get_struct_name("MockPropertiesStructureFixedListSize")
+        list_name = src.transform_list_member_name("list")
+        expected_lines = (
+            f"""struct {extension_struct} {{
+              {extension_struct}() {{
+                reported = false;
+                memset(&{struct_1_name}, 0, sizeof(MockPropertiesStructureExt));
+                memset(&{struct_2_name}, 0, sizeof(MockPropertiesStructureFixedListSize));
+              }}
+              bool reported;
+              MockPropertiesStructureExt {struct_1_name};
+              MockPropertiesStructureFixedListSize {struct_2_name};
+              std::vector<bool> {list_name};
+            }};"""
+        )
+        self.assertEqual(
+            [f"{extension_struct} {src.get_vkjson_struct_variable_name("VK_EXT_host_image_copy")}"],
+            src.generate_extension_struct_definition(self.mock_file),
+        )
+        self.assertCodeFileWrite(expected_lines)
 
 
 class TestGenerateVkCoreStructDefinition(helper.BaseMockCodeFileTest):
@@ -924,15 +976,15 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
 
         mock_vk = self.mock_vk_patcher.start()
         mock_vk.VULKAN_VERSIONS_AND_STRUCTS_MAPPING = {
-            "VK_VERSION_1_0": [
+            "1_0": [
                 {"VkPhysicalDeviceLineFeatures": ""}
             ],
-            "VK_VERSION_1_1": [
+            "1_1": [
                 {
                     "VkPhysicalDeviceSubgroupProperties": "VK_STRUCT_SUBGROUP"
                 }
             ],
-            "VK_VERSION_1_2": [
+            "1_2": [
                 {
                     "VkPhysicalDeviceMultiviewProperties": "VK_STRUCT_MULTIVIEW",
                     "VkPhysicalDeviceIDProperties": "VK_STRUCT_DEVICE_ID"
@@ -952,7 +1004,7 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
             'visitor->Visit("subgroupProperties", &device->subgroup_properties) &&'
         )
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_1")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_1")
         self.assertCodeFileWrite(expected_lines)
 
     def test_handles_multiple_matching_structs(self):
@@ -963,13 +1015,13 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
             """
         )
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_2")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_2")
         self.assertCodeFileWrite(expected_lines)
 
     def test_handles_empty_struct_type(self):
         expected_lines = 'visitor->Visit("lineFeatures", &device->line_features) &&'
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_0")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_0")
         self.assertCodeFileWrite(expected_lines)
 
     def test_handles_struct_var_with_single_word(self):
@@ -977,7 +1029,7 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
         self.mock_get_struct_name.return_value = "memory"
         expected_lines = 'visitor->Visit("memory", &device->memory) &&'
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_1")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_1")
         self.assertCodeFileWrite(expected_lines)
 
     def test_handles_struct_var_contains_number(self):
@@ -987,7 +1039,7 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
         # Considered acceptable
         expected_lines = 'visitor->Visit("image_2dViewOf_3dFeaturesExt", &device->image_2d_view_of_3d_features_ext) &&'
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_1")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_1")
         self.assertCodeFileWrite(expected_lines)
 
     def test_handles_struct_var_starts_with_underscore(self):
@@ -995,7 +1047,7 @@ class TestEmitStructVisitsByVkVersion(helper.BaseMockCodeFileTest):
         self.mock_get_struct_name.return_value = "_3d_features_ext"
         expected_lines = 'visitor->Visit("_3dFeaturesExt", &device->_3d_features_ext) &&'
 
-        src.emit_struct_visits_by_vk_version(self.mock_file, "VK_VERSION_1_1")
+        src.emit_struct_visits_by_vk_version(self.mock_file, "1_1")
         self.assertCodeFileWrite(expected_lines)
 
 
@@ -1023,6 +1075,9 @@ class TestGenerateVkCoreStructsInitCode(unittest.TestCase):
                     {"VkPhysicalDeviceVulkan12Features1": "VK_TYPE_12_FEATS_1"},
                     {"VkPhysicalDeviceVulkan12Properties2": "VK_TYPE_12_PROPS_2"},
                     {"VkPhysicalDeviceVulkan12Features2": "VK_TYPE_12_FEATS_2"}
+                ],
+                "CoreWithUnknown": [
+                    {"VkPhysicalDeviceUnknownStruct": "VK_TYPE_UNKNOWN"}
                 ]
             }
         }
@@ -1082,23 +1137,33 @@ class TestGenerateVkCoreStructsInitCode(unittest.TestCase):
         self.assertEqual("", actual_props)
         self.assertEqual("", actual_feats)
 
+    def test_raises_exception_for_unknown_struct(self):
+        with self.assertRaisesRegex(Exception, "Warning: Unknown Mapping: for struct 'VkPhysicalDeviceUnknownStruct'"):
+            src.generate_vk_core_structs_init_code("CoreWithUnknown")
 
 class TestGenerateVkExtensionStructsInitCode(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        cls.mapping = {
+    def setUp(self):
+        self.mock_vk_patcher = patch('vkjson_gen_util.VK')
+        self.mock_vk = self.mock_vk_patcher.start()
+
+        self.mock_vk.STRUCT_EXTENDS_MAPPING = {
+            "VkPhysicalDeviceDriverPropertiesKHR": "VkPhysicalDeviceProperties2",
+            "VkPhysicalDeviceVariablePointerFeaturesKHR": "VkPhysicalDeviceFeatures2",
+            "VkPhysicalDeviceVariablePointersFeaturesKHR": "VkPhysicalDeviceFeatures2",
+            "VkPhysicalDeviceVulkanMemoryModelFeaturesKHR": "VkPhysicalDeviceFeatures2",
+            "VkPhysicalDeviceVideoMaintenance1FeaturesKHR": "VkPhysicalDeviceFeatures2",
+        }
+
+    def tearDown(self):
+        self.mock_vk_patcher.stop()
+
+    def test_handles_single_extension_single_struct(self):
+        mapping = {
             "VK_KHR_driver_state": [
                 {"VkPhysicalDeviceDriverPropertiesKHR": "VK_STRUCT_DRIVER"}
             ],
-            "VK_KHR_variable_pointers": [
-                {"VkPhysicalDeviceVariablePointerFeaturesKHR": "VK_STRUCT_VARIABLE"},
-                {"VkPhysicalDeviceVariablePointersFeaturesKHR": "VK_STRUCT_VARIABLES"},
-                {"SomeThingElse": "SOME_OTHER_STRUCT"}
-            ]
         }
-
-    def test_handles_single_extension_single_struct(self):
         extension_var = src.get_vkjson_struct_variable_name("VK_KHR_driver_state")
         struct_name = src.get_struct_name("VkPhysicalDeviceDriverPropertiesKHR")
 
@@ -1111,10 +1176,16 @@ class TestGenerateVkExtensionStructsInitCode(unittest.TestCase):
                 f"    properties.pNext = &device.{extension_var}.{struct_name};\n"
                 '  }\n'
             ),
-            src.generate_vk_extension_structs_init_code(self.mapping, "Properties")
+            src.generate_vk_extension_structs_init_code(mapping, "Properties")
         )
 
     def test_handles_single_extension_multiple_structs(self):
+        mapping = {
+            "VK_KHR_variable_pointers": [
+                {"VkPhysicalDeviceVariablePointerFeaturesKHR": "VK_STRUCT_VARIABLE"},
+                {"VkPhysicalDeviceVariablePointersFeaturesKHR": "VK_STRUCT_VARIABLES"},
+            ]
+        }
         extension_var = src.get_vkjson_struct_variable_name("VK_KHR_variable_pointers")
         struct_name1 = src.get_struct_name("VkPhysicalDeviceVariablePointerFeaturesKHR")
         struct_name2 = src.get_struct_name("VkPhysicalDeviceVariablePointersFeaturesKHR")
@@ -1131,18 +1202,34 @@ class TestGenerateVkExtensionStructsInitCode(unittest.TestCase):
                 f"    features.pNext = &device.{extension_var}.{struct_name2};\n"
                 '  }\n'
             ),
-            src.generate_vk_extension_structs_init_code(self.mapping, "Features")
+            src.generate_vk_extension_structs_init_code(mapping, "Features")
         )
 
-    def test_handles_no_matching_struct(self):
-        self.assertRaises(
+    def test_raises_exception_for_unknown_struct(self):
+        mapping = {
+            "VK_KHR_variable_pointers": [
+                {"SomeThingElse": "SOME_OTHER_STRUCT"},
+            ]
+        }
+        with self.assertRaisesRegex(
             Exception,
-            src.generate_vk_extension_structs_init_code(self.mapping, "Extension")
-        )
+            "Warning: Unknown Mapping: for struct 'SomeThingElse'",
+        ):
+            src.generate_vk_extension_structs_init_code(mapping, "Extension")
+
+    def test_handles_struct_with_invalid_struct_category(self):
+        self.mock_vk.STRUCT_EXTENDS_MAPPING["VkInvalidDummyProperties"] = "SomeOtherThing"
+        mapping = {
+            "VK_FAKE_EXTENSION": [
+                {"VkInvalidDummyProperties": "VK_FAKE_STRUCT"}
+            ]
+        }
+        result = src.generate_vk_extension_structs_init_code(mapping, "Properties")
+        self.assertEqual("", result)
 
     def test_handles_multiple_extensions(self):
         # Resetting mapping as we only want extensions containing feature structs with valid structextends mapping
-        self.mapping = {
+        mapping = {
             "VK_KHR_vulkan_memory_model": [{"VkPhysicalDeviceVulkanMemoryModelFeaturesKHR": "VK_STRUCT_MEMORY"}],
             "VK_KHR_video_maintenance1": [{"VkPhysicalDeviceVideoMaintenance1FeaturesKHR": "VK_STRUCT_VIDEO"}],
         }
@@ -1166,7 +1253,7 @@ class TestGenerateVkExtensionStructsInitCode(unittest.TestCase):
                 f"    features.pNext = &device.{extension_var2}.{struct_name2};\n"
                 '  }\n'
             ),
-            src.generate_vk_extension_structs_init_code(self.mapping, "Features")
+            src.generate_vk_extension_structs_init_code(mapping, "Features")
         )
 
 
@@ -1216,3 +1303,145 @@ class TestGenerateVkVersionStructsInitialization(unittest.TestCase):
             "",
             src.generate_vk_version_structs_initialization(self.version_data, "Custom")
         )
+class TestGeneratePropertiesListResizing(helper.BaseCodeAssertTest):
+    @dataclass
+    class MockStructNoLists:
+        field1: str
+        field2: int
+    @dataclass
+    class MockPropertiesStruct:
+        list: List[str]
+        list2: List[int]
+        pList: List[str]
+    def test_transform_list_member_name(self):
+        self.assertEqual("copy_src_layouts", src.transform_list_member_name("pCopySrcLayouts"))
+        self.assertEqual("copy_dst_layout_count", src.transform_list_member_name("copyDstLayoutCount"))
+        self.assertEqual("p", src.transform_list_member_name("p"))  # Edge case: just 'p'
+        self.assertEqual("next", src.transform_list_member_name("PNext"))
+    @patch('vkjson_gen_util.VK')
+    def test_get_dataclass_list_members(self, mock_vk):
+        mock_vk.configure_mock(**{
+            "MockStructNoLists": self.MockStructNoLists,
+            "MockPropertiesStruct": self.MockPropertiesStruct,
+        })
+        # Class with no list members
+        self.assertEqual([], src.get_dataclass_list_members("MockStructNoLists"))
+        # Class with list members
+        expected_members = [
+            ("list", "str"),
+            ("list2", "int"),
+            ('pList', 'str'),
+        ]
+        self.assertEqual(expected_members, src.get_dataclass_list_members("MockPropertiesStruct"))
+        # Non-existent class
+        self.assertEqual([], src.get_dataclass_list_members("NonExistentStruct"))
+    @patch('vkjson_gen_util.generate_list_resizing_logic')
+    @patch('vkjson_gen_util.VK')
+    def test_generate_vk_extension_dependent_structs_list_resizing_logic(self, mock_vk,
+                                                                         mock_generate_list_resizing_logic):
+        mocked_output = "mocked_output_string"
+        mock_vk.VULKAN_EXTENSIONS_AND_STRUCTS_MAPPING = {
+            "extensions": {
+                "VK_EXT_mock1": [
+                    {'MockPropertiesStruct': 'Type'},
+                ],
+                "VK_EXT_mock2": [
+                    {'MockPropertiesStruct1': 'Type'},
+                    {'MockPropertiesStruct2': 'Type'},
+                ]
+            }
+        }
+        mock_generate_list_resizing_logic.return_value = mocked_output
+        prop_set_line = "setMock(prop);"
+        result = src.generate_ext_dependent_structs_list_resizing_logic(prop_set_line)
+        expected_result_string = f"{mocked_output}\n{mocked_output}"
+        self.assertCodeEqual(expected_result_string, result)
+        # Verify that all of these calls were made, in any order.
+        expected_calls = [
+            call(['MockPropertiesStruct'], prop_set_line, 'ext_mock1'),
+            call(['MockPropertiesStruct1', 'MockPropertiesStruct2'], prop_set_line,
+                 'ext_mock2'),
+        ]
+        mock_generate_list_resizing_logic.assert_has_calls(expected_calls, any_order=True)
+        # Check the call count.
+        self.assertEqual(mock_generate_list_resizing_logic.call_count, 2)
+    @patch('vkjson_gen_util.generate_list_resizing_logic')
+    @patch('vkjson_gen_util.VK')
+    def test_generate_vk_extension_independent_structs_list_resizing_logic(self, mock_vk,
+                                                                           mock_generate_list_resizing_logic):
+        mocked_output = "mocked_output_string"
+        mock_vk.EXTENSION_INDEPENDENT_STRUCTS = {
+            'MockPropertiesStruct'
+        }
+        struct_mapping = [
+            {'MockPropertiesStruct': 'MOCK_PROPERTIES_STRUCT'},
+            {'SomeOtherStruct': 'SOME_OTHER_STRUCT'},
+        ]
+        vk_properties_setter_line = "setMock(prop);"
+        mock_generate_list_resizing_logic.return_value = mocked_output
+        result = src.generate_ext_independent_structs_list_resizing_logic(
+            struct_mapping,
+            vk_properties_setter_line,
+        )
+        # Assert that the function returned the value from our mock
+        self.assertCodeEqual(mocked_output, result)
+        # And verify it was called with the arguments we calculated and expected
+        mock_generate_list_resizing_logic.assert_called_once_with(
+
+
+            ['MockPropertiesStruct'], vk_properties_setter_line
+        )
+    @patch('vkjson_gen_util.VK')
+    def test_generate_single_list_resizing_logic(self, mock_vk):
+        vk_properties_setter_line = "setMock(prop);"
+        structure_name = 'MockPropertiesStruct'
+        list_name = 'pList'
+        cpp_list_name = src.transform_list_member_name(list_name)
+        mock_vk.STRUCT_EXTENDS_MAPPING = { f'{structure_name}':'VkPhysicalDeviceProperties2'}
+        mock_vk.configure_mock(**{
+            'MockPropertiesStruct': self.MockPropertiesStruct
+        })
+        mock_vk.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING = {'MockPropertiesStruct': {list_name}}
+        mock_vk.LIST_TYPE_FIELD_AND_SIZE_MAPPING = {list_name: 'count'}
+        result = src.generate_list_resizing_logic(['MockPropertiesStruct'], vk_properties_setter_line)
+        cpp_struct_name = src.get_struct_name(structure_name)
+        expected_output = f"""
+        if(device.{cpp_struct_name}.count > 0) {{
+            device.{cpp_list_name}.resize(device.{cpp_struct_name}.count);
+            device.{cpp_struct_name}.{list_name} = device.{cpp_list_name}.data();
+            {vk_properties_setter_line}
+        }}"""
+        self.assertCodeEqual(expected_output, result)
+    @patch('vkjson_gen_util.VK')
+    def test_generate_multi_list_resizing_logic(self, mock_vk):
+        vk_properties_setter_line = "setMock(prop);"
+        structure_name = 'MockPropertiesStruct'
+        list_name1 = 'list'
+        count1 = 'count'
+        list_name2 = 'pList'
+        count2 = 'count2'
+        cpp_list_name1 = src.transform_list_member_name(list_name1)
+        cpp_list_name2 = src.transform_list_member_name(list_name2)
+        mock_vk.STRUCT_EXTENDS_MAPPING = { f'{structure_name}':'VkPhysicalDeviceProperties2'}
+        mock_vk.configure_mock(**{
+            'MockPropertiesStruct': self.MockPropertiesStruct
+        })
+        mock_vk.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING = {'MockPropertiesStruct': {list_name1, list_name2}}
+        mock_vk.LIST_TYPE_FIELD_AND_SIZE_MAPPING = {
+            list_name1: count1,
+            list_name2: count2,
+        }
+        result = src.generate_list_resizing_logic(['MockPropertiesStruct'], vk_properties_setter_line)
+        cpp_struct_name = src.get_struct_name(structure_name)
+        expected_output = f"""if(device.{cpp_struct_name}.{count1} > 0 || device.{cpp_struct_name}.{count2} > 0) {{
+            if(device.{cpp_struct_name}.{count1} > 0) {{
+                    device.{cpp_list_name1}.resize(device.{cpp_struct_name}.{count1});
+                    device.{cpp_struct_name}.{list_name1} = device.{cpp_list_name1}.data();
+            }}
+            if(device.{cpp_struct_name}.{count2} > 0) {{
+                device.{cpp_list_name2}.resize(device.{cpp_struct_name}.{count2});
+                device.{cpp_struct_name}.{list_name2} = device.{cpp_list_name2}.data();
+            }}
+            {vk_properties_setter_line}
+        }}"""
+        self.assertCodeEqual(expected_output, result)

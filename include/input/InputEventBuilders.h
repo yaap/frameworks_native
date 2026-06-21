@@ -72,107 +72,226 @@ public:
     InputMessageBuilder(InputMessage::Type type, uint32_t seq) : mType{type}, mSeq{seq} {}
 
     InputMessageBuilder& eventId(int32_t eventId) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY &&
+                                    mType != InputMessage::Type::MOTION &&
+                                    mType != InputMessage::Type::FOCUS &&
+                                    mType != InputMessage::Type::CAPTURE &&
+                                    mType != InputMessage::Type::DRAG &&
+                                    mType != InputMessage::Type::TIMELINE &&
+                                    mType != InputMessage::Type::TOUCH_MODE,
+                            "Mismatched message type: %d, expected KEY, MOTION, FOCUS, CAPTURE, "
+                            "DRAG, TIMELINE, or TOUCH_MODE",
+                            mType);
         mEventId = eventId;
         return *this;
     }
 
     InputMessageBuilder& eventTime(nsecs_t eventTime) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mEventTime = eventTime;
         return *this;
     }
 
     InputMessageBuilder& deviceId(DeviceId deviceId) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mDeviceId = deviceId;
         return *this;
     }
 
     InputMessageBuilder& source(int32_t source) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mSource = source;
         return *this;
     }
 
     InputMessageBuilder& displayId(ui::LogicalDisplayId displayId) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mDisplayId = displayId;
         return *this;
     }
 
     InputMessageBuilder& hmac(const std::array<uint8_t, 32>& hmac) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mHmac = hmac;
         return *this;
     }
 
     InputMessageBuilder& action(int32_t action) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mAction = action;
         return *this;
     }
 
-    InputMessageBuilder& actionButton(int32_t actionButton) {
-        mActionButton = actionButton;
-        return *this;
-    }
-
     InputMessageBuilder& flags(int32_t flags) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mFlags = flags;
         return *this;
     }
 
     InputMessageBuilder& metaState(int32_t metaState) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mMetaState = metaState;
         return *this;
     }
 
-    InputMessageBuilder& buttonState(int32_t buttonState) {
-        mButtonState = buttonState;
-        return *this;
-    }
-
-    InputMessageBuilder& classification(MotionClassification classification) {
-        mClassification = classification;
-        return *this;
-    }
-
-    InputMessageBuilder& edgeFlags(int32_t edgeFlags) {
-        mEdgeFlags = edgeFlags;
-        return *this;
-    }
-
     InputMessageBuilder& downTime(nsecs_t downTime) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY && mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected KEY or MOTION", mType);
         mDownTime = downTime;
         return *this;
     }
 
+    // Builder methods for Key
+    InputMessageBuilder& keyCode(int32_t keyCode) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY,
+                            "Mismatched message type: %d, expected KEY", mType);
+        mKeyCode = keyCode;
+        return *this;
+    }
+    InputMessageBuilder& scanCode(int32_t scanCode) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY,
+                            "Mismatched message type: %d, expected KEY", mType);
+        mScanCode = scanCode;
+        return *this;
+    }
+    InputMessageBuilder& repeatCount(int32_t repeatCount) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::KEY,
+                            "Mismatched message type: %d, expected KEY", mType);
+        mRepeatCount = repeatCount;
+        return *this;
+    }
+
+    // Builder methods for Motion
+    InputMessageBuilder& actionButton(int32_t actionButton) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
+        mActionButton = actionButton;
+        return *this;
+    }
+    InputMessageBuilder& buttonState(int32_t buttonState) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
+        mButtonState = buttonState;
+        return *this;
+    }
+    InputMessageBuilder& classification(MotionClassification classification) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
+        mClassification = classification;
+        return *this;
+    }
+    InputMessageBuilder& edgeFlags(int32_t edgeFlags) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
+        mEdgeFlags = edgeFlags;
+        return *this;
+    }
     InputMessageBuilder& transform(const ui::Transform& transform) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mTransform = transform;
         return *this;
     }
-
     InputMessageBuilder& xPrecision(float xPrecision) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mXPrecision = xPrecision;
         return *this;
     }
-
     InputMessageBuilder& yPrecision(float yPrecision) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mYPrecision = yPrecision;
         return *this;
     }
-
     InputMessageBuilder& xCursorPosition(float xCursorPosition) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mXCursorPosition = xCursorPosition;
         return *this;
     }
-
     InputMessageBuilder& yCursorPosition(float yCursorPosition) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mYCursorPosition = yCursorPosition;
         return *this;
     }
-
     InputMessageBuilder& rawTransform(const ui::Transform& rawTransform) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mRawTransform = rawTransform;
         return *this;
     }
-
     InputMessageBuilder& pointer(PointerBuilder pointerBuilder) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::MOTION,
+                            "Mismatched message type: %d, expected MOTION", mType);
         mPointers.push_back(pointerBuilder);
+        return *this;
+    }
+
+    // Builder methods for Finished
+    InputMessageBuilder& handled(bool handled) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::FINISHED,
+                            "Mismatched message type: %d, expected FINISHED", mType);
+        mHandled = handled;
+        return *this;
+    }
+    InputMessageBuilder& consumeTime(nsecs_t consumeTime) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::FINISHED,
+                            "Mismatched message type: %d, expected FINISHED", mType);
+        mConsumeTime = consumeTime;
+        return *this;
+    }
+
+    // Builder methods for Focus
+    InputMessageBuilder& hasFocus(bool hasFocus) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::FOCUS,
+                            "Mismatched message type: %d, expected FOCUS", mType);
+        mHasFocus = hasFocus;
+        return *this;
+    }
+
+    // Builder methods for Capture
+    InputMessageBuilder& pointerCaptureEnabled(bool enabled) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::CAPTURE,
+                            "Mismatched message type: %d, expected CAPTURE", mType);
+        mPointerCaptureEnabled = enabled;
+        return *this;
+    }
+
+    // Builder methods for Drag
+    InputMessageBuilder& x(float x) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::DRAG,
+                            "Mismatched message type: %d, expected DRAG", mType);
+        mX = x;
+        return *this;
+    }
+    InputMessageBuilder& y(float y) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::DRAG,
+                            "Mismatched message type: %d, expected DRAG", mType);
+        mY = y;
+        return *this;
+    }
+    InputMessageBuilder& isExiting(bool isExiting) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::DRAG,
+                            "Mismatched message type: %d, expected DRAG", mType);
+        mIsExiting = isExiting;
+        return *this;
+    }
+
+    // Builder methods for TouchMode
+    InputMessageBuilder& inTouchMode(bool inTouchMode) {
+        LOG_ALWAYS_FATAL_IF(mType != InputMessage::Type::TOUCH_MODE,
+                            "Mismatched message type: %d, expected TOUCH_MODE", mType);
+        mInTouchMode = inTouchMode;
         return *this;
     }
 
@@ -181,41 +300,99 @@ public:
         // Header
         message.header.type = mType;
         message.header.seq = mSeq;
-        // Body
-        message.body.motion.eventId = mEventId;
-        message.body.motion.pointerCount = mPointers.size();
-        message.body.motion.eventTime = mEventTime;
-        message.body.motion.deviceId = mDeviceId;
-        message.body.motion.source = mSource;
-        message.body.motion.displayId = mDisplayId.val();
-        message.body.motion.hmac = std::move(mHmac);
-        message.body.motion.action = mAction;
-        message.body.motion.actionButton = mActionButton;
-        message.body.motion.flags = mFlags;
-        message.body.motion.metaState = mMetaState;
-        message.body.motion.buttonState = mButtonState;
-        message.body.motion.edgeFlags = mEdgeFlags;
-        message.body.motion.downTime = mDownTime;
-        message.body.motion.dsdx = mTransform.dsdx();
-        message.body.motion.dtdx = mTransform.dtdx();
-        message.body.motion.dtdy = mTransform.dtdy();
-        message.body.motion.dsdy = mTransform.dsdy();
-        message.body.motion.tx = mTransform.ty();
-        message.body.motion.ty = mTransform.tx();
-        message.body.motion.xPrecision = mXPrecision;
-        message.body.motion.yPrecision = mYPrecision;
-        message.body.motion.xCursorPosition = mXCursorPosition;
-        message.body.motion.yCursorPosition = mYCursorPosition;
-        message.body.motion.dsdxRaw = mRawTransform.dsdx();
-        message.body.motion.dtdxRaw = mRawTransform.dtdx();
-        message.body.motion.dtdyRaw = mRawTransform.dtdy();
-        message.body.motion.dsdyRaw = mRawTransform.dsdy();
-        message.body.motion.txRaw = mRawTransform.ty();
-        message.body.motion.tyRaw = mRawTransform.tx();
 
-        for (size_t i = 0; i < mPointers.size(); ++i) {
-            message.body.motion.pointers[i].properties = mPointers[i].buildProperties();
-            message.body.motion.pointers[i].coords = mPointers[i].buildCoords();
+        // Body
+        switch (mType) {
+            case InputMessage::Type::KEY: {
+                message.body.key.eventId = mEventId;
+                message.body.key.eventTime = mEventTime;
+                message.body.key.deviceId = mDeviceId;
+                message.body.key.source = mSource;
+                message.body.key.displayId = mDisplayId.val();
+                message.body.key.hmac = std::move(mHmac);
+                message.body.key.action = mAction;
+                message.body.key.flags = mFlags;
+                message.body.key.keyCode = mKeyCode;
+                message.body.key.scanCode = mScanCode;
+                message.body.key.metaState = mMetaState;
+                message.body.key.repeatCount = mRepeatCount;
+                message.body.key.downTime = mDownTime;
+                break;
+            }
+            case InputMessage::Type::MOTION: {
+                message.body.motion.eventId = mEventId;
+                message.body.motion.pointerCount = mPointers.size();
+                message.body.motion.eventTime = mEventTime;
+                message.body.motion.deviceId = mDeviceId;
+                message.body.motion.source = mSource;
+                message.body.motion.displayId = mDisplayId.val();
+                message.body.motion.hmac = std::move(mHmac);
+                message.body.motion.action = mAction;
+                message.body.motion.actionButton = mActionButton;
+                message.body.motion.flags = mFlags;
+                message.body.motion.metaState = mMetaState;
+                message.body.motion.buttonState = mButtonState;
+                message.body.motion.classification = mClassification;
+                message.body.motion.edgeFlags = mEdgeFlags;
+                message.body.motion.downTime = mDownTime;
+                message.body.motion.dsdx = mTransform.dsdx();
+                message.body.motion.dtdx = mTransform.dtdx();
+                message.body.motion.dtdy = mTransform.dtdy();
+                message.body.motion.dsdy = mTransform.dsdy();
+                message.body.motion.tx = mTransform.tx();
+                message.body.motion.ty = mTransform.ty();
+                message.body.motion.xPrecision = mXPrecision;
+                message.body.motion.yPrecision = mYPrecision;
+                message.body.motion.xCursorPosition = mXCursorPosition;
+                message.body.motion.yCursorPosition = mYCursorPosition;
+                message.body.motion.dsdxRaw = mRawTransform.dsdx();
+                message.body.motion.dtdxRaw = mRawTransform.dtdx();
+                message.body.motion.dtdyRaw = mRawTransform.dtdy();
+                message.body.motion.dsdyRaw = mRawTransform.dsdy();
+                message.body.motion.txRaw = mRawTransform.tx();
+                message.body.motion.tyRaw = mRawTransform.ty();
+
+                for (size_t i = 0; i < mPointers.size(); ++i) {
+                    message.body.motion.pointers[i].properties = mPointers[i].buildProperties();
+                    message.body.motion.pointers[i].coords = mPointers[i].buildCoords();
+                }
+                break;
+            }
+            case InputMessage::Type::FINISHED: {
+                message.body.finished.handled = mHandled;
+                message.body.finished.consumeTime = mConsumeTime;
+                break;
+            }
+            case InputMessage::Type::FOCUS: {
+                message.body.focus.eventId = mEventId;
+                message.body.focus.hasFocus = mHasFocus;
+                break;
+            }
+            case InputMessage::Type::CAPTURE: {
+                message.body.capture.eventId = mEventId;
+                message.body.capture.pointerCaptureEnabled = mPointerCaptureEnabled;
+                break;
+            }
+            case InputMessage::Type::DRAG: {
+                message.body.drag.eventId = mEventId;
+                message.body.drag.x = mX;
+                message.body.drag.y = mY;
+                message.body.drag.isExiting = mIsExiting;
+                break;
+            }
+            case InputMessage::Type::TIMELINE: {
+                message.body.timeline.eventId = mEventId;
+                message.body.timeline.graphicsTimeline = mGraphicsTimeline;
+                break;
+            }
+            case InputMessage::Type::TOUCH_MODE: {
+                message.body.touchMode.eventId = mEventId;
+                message.body.touchMode.isInTouchMode = mInTouchMode;
+                break;
+            }
+            default: {
+                LOG_ALWAYS_FATAL("Unknown message type: %d", mType);
+            }
         }
         return message;
     }
@@ -224,6 +401,7 @@ private:
     const InputMessage::Type mType;
     const uint32_t mSeq;
 
+    // Common fields
     int32_t mEventId{InputEvent::nextId()};
     nsecs_t mEventTime{systemTime(SYSTEM_TIME_MONOTONIC)};
     DeviceId mDeviceId{DEFAULT_DEVICE_ID};
@@ -231,13 +409,20 @@ private:
     ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     std::array<uint8_t, 32> mHmac{INVALID_HMAC};
     int32_t mAction{AMOTION_EVENT_ACTION_MOVE};
-    int32_t mActionButton{0};
     int32_t mFlags{0};
     int32_t mMetaState{AMETA_NONE};
+    nsecs_t mDownTime{mEventTime};
+
+    // Key fields
+    int32_t mKeyCode{0};
+    int32_t mScanCode{0};
+    int32_t mRepeatCount{0};
+
+    // Motion fields
+    int32_t mActionButton{0};
     int32_t mButtonState{0};
     MotionClassification mClassification{MotionClassification::NONE};
     int32_t mEdgeFlags{0};
-    nsecs_t mDownTime{mEventTime};
     ui::Transform mTransform{};
     float mXPrecision{1.0f};
     float mYPrecision{1.0f};
@@ -245,6 +430,27 @@ private:
     float mYCursorPosition{AMOTION_EVENT_INVALID_CURSOR_POSITION};
     ui::Transform mRawTransform{};
     std::vector<PointerBuilder> mPointers;
+
+    // Finished fields
+    bool mHandled{true};
+    nsecs_t mConsumeTime{systemTime(SYSTEM_TIME_MONOTONIC)};
+
+    // Focus fields
+    bool mHasFocus{false};
+
+    // Capture fields
+    bool mPointerCaptureEnabled{false};
+
+    // Drag fields
+    float mX{0.0f};
+    float mY{0.0f};
+    bool mIsExiting{false};
+
+    // Timeline fields
+    std::array<nsecs_t, GraphicsTimeline::SIZE> mGraphicsTimeline;
+
+    // TouchMode fields
+    bool mInTouchMode{false};
 };
 
 class MotionEventBuilder {

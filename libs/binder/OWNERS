@@ -1,6 +1,7 @@
 # Bug component: 32456
 
-smoreland@google.com
+set noparent
+
 devinmoore@google.com
 fmayle@google.com
 

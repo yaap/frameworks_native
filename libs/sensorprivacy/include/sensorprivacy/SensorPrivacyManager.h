@@ -71,7 +71,22 @@ private:
     sp<hardware::ISensorPrivacyManager> mService;
     sp<hardware::ISensorPrivacyManager> getService();
 
-    std::unordered_map<int, bool> mSupportedCache;
+    struct ToggleCacheKey {
+        int toggleType;
+        int sensor;
+
+        bool operator==(const ToggleCacheKey& other) const {
+            return toggleType == other.toggleType && sensor == other.sensor;
+        }
+    };
+
+    struct ToggleCacheKeyHash {
+        std::size_t operator()(const ToggleCacheKey& k) const {
+            return std::hash<int>()(k.toggleType) ^ (std::hash<int>()(k.sensor) << 8);
+        }
+    };
+
+    std::unordered_map<ToggleCacheKey, bool, ToggleCacheKeyHash> mSupportedCache;
 };
 
 

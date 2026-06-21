@@ -18,11 +18,14 @@
 
 #include "InputTracingThreadedBackend.h"
 
-#include "InputTracingPerfettoBackend.h"
-
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <input/Input.h>
+#include <jni.h>
+
 #include <memory>
+
+#include "InputTracingPerfettoBackend.h"
 
 namespace android::input_trace::impl {
 
@@ -37,23 +40,23 @@ struct Visitor : V... {
 } // namespace
 
 std::shared_ptr<input_trace::InputTracingBackendInterface> createInputTracingBackendIfEnabled(
-        JNIEnv* env) {
+        JavaVM* vm) {
     static const bool isDebuggable = base::GetBoolProperty("ro.debuggable", false);
     if (!isDebuggable) {
         return nullptr;
     }
     return std::make_shared<input_trace::impl::ThreadedBackend<
-            input_trace::impl::PerfettoBackend>>(input_trace::impl::PerfettoBackend(), env);
+            input_trace::impl::PerfettoBackend>>(input_trace::impl::PerfettoBackend(), vm);
 }
 
 // --- ThreadedBackend ---
 
 template <typename Backend>
-ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend, JNIEnv* env)
+ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend, JavaVM* vm)
       : mBackend(std::move(innerBackend)),
         mTracerThread(
                 "InputTracer", [this]() { threadLoop(); },
-                [this]() { mThreadWakeCondition.notify_all(); }, /*isInCriticalPath=*/false, env) {}
+                [this]() { mThreadWakeCondition.notify_all(); }, /*isInCriticalPath=*/false, vm) {}
 
 template <typename Backend>
 ThreadedBackend<Backend>::~ThreadedBackend() {
@@ -92,11 +95,28 @@ void ThreadedBackend<Backend>::traceWindowDispatch(const WindowDispatchArgs& dis
 }
 
 template <typename Backend>
-void ThreadedBackend<Backend>::traceRawEvent(const RawEvent& event) {
+void ThreadedBackend<Backend>::traceRawEvent(const RawEvent& event,
+                                             const TracedEventMetadata& metadata) {
     std::scoped_lock lock(mLock);
-    // TODO(b/394861376): populate metadata for determining trace level.
-    TracedEventMetadata metadata = {};
     mQueue.emplace_back(event, metadata);
+    setIdleStatus(false);
+    mThreadWakeCondition.notify_all();
+}
+
+template <typename Backend>
+void ThreadedBackend<Backend>::traceEvdevDeviceAddition(const TracedEvdevDevice& device,
+                                                        const TracedEventMetadata& metadata) {
+    std::scoped_lock lock(mLock);
+    mQueue.emplace_back(device, metadata);
+    setIdleStatus(false);
+    mThreadWakeCondition.notify_all();
+}
+
+template <typename Backend>
+void ThreadedBackend<Backend>::traceEvdevDeviceRemoval(RawDeviceId deviceId,
+                                                       const TracedEventMetadata& metadata) {
+    std::scoped_lock lock(mLock);
+    mQueue.emplace_back(deviceId, metadata);
     setIdleStatus(false);
     mThreadWakeCondition.notify_all();
 }
@@ -134,7 +154,13 @@ void ThreadedBackend<Backend>::threadLoop() {
                            [&](const WindowDispatchArgs& args) {
                                mBackend.traceWindowDispatch(args, traceArgs);
                            },
-                           [&](const RawEvent& e) { mBackend.traceRawEvent(e); }},
+                           [&](const RawEvent& e) { mBackend.traceRawEvent(e, traceArgs); },
+                           [&](const TracedEvdevDevice& device) {
+                               mBackend.traceEvdevDeviceAddition(device, traceArgs);
+                           },
+                           [&](RawDeviceId deviceId) {
+                               mBackend.traceEvdevDeviceRemoval(deviceId, traceArgs);
+                           }},
                    entry);
     }
     entries.clear();

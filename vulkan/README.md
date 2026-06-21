@@ -21,6 +21,27 @@ We generate several parts of the loader and tools directly from the Vulkan Regis
 Install Python3 (if not already installed) and execute below:
 `$ ./scripts/code_generator.py`
 
+### `VKJson*` Files Code Generator Guide
+
+## `vk_parser.py`
+
+This script parses the Vulkan XML registry (`vk.xml`) and generates `vk.py`, which contains Python representations of Vulkan structures and mappings. Key functions include:
+- Parsing `vk.xml` to extract Vulkan API constants, enums, handles, structs, and extensions.
+- Generating Python `dataclasses` for Vulkan structs and handles.
+- Creating mappings for features, extensions, and core versions to their corresponding structs.
+- Handling C to Python type conversions and aliases.
+- The main function is `gen_vk()`.
+
+## `vkjson_generator.py`
+
+This script generates the C++ code for serializing Vulkan device capabilities into a JSON format. It uses `vk.py` as its source of truth for Vulkan API information.
+-   **`gen_h()`**: Generates `vkjson.h`, which defines the C++ structs (`VkJsonInstance`, `VkJsonDevice`, etc.) for storing Vulkan properties.
+-   **`gen_cc()`**: Generates `vkjson.cc`, providing the JSON serialization and deserialization logic for the C++ structs.
+-   **`gen_instance_cc()`**: Generates `vkjson_instance.cc`, which implements functions to query a physical device and populate the C++ structs with its capabilities.
+
+## `vkjson_codegen.py`
+
+This script serves as the primary entry point for regenerating all Vulkan JSON-related files. It performs the code generation process by calling the necessary functions from `vk_parser.py` and `vkjson_generator.py` in the correct order. Running this single script ensures that `vk.py`, `vkjson.h`, `vkjson.cc`, and `vkjson_instance.cc` are all updated based on the Vulkan XML registry.
 
 ### Vulkan EDI Pipeline Update Guide
 

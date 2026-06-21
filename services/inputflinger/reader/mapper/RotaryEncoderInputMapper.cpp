@@ -75,19 +75,17 @@ void RotaryEncoderInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
         info.addMotionRange(AMOTION_EVENT_AXIS_SCROLL, mSource, -1.0f, 1.0f, 0.0f, 0.0f,
                             mResolution * mScalingFactor);
 
-        if (com::android::input::flags::rotary_input_telemetry()) {
-            mMinRotationsToLog = config.getInt("rotary_encoder.min_rotations_to_log");
-            if (!mMinRotationsToLog.has_value()) {
-                ALOGI("Rotary Encoder device configuration file didn't specify min log rotation.");
-            } else if (*mMinRotationsToLog <= 0) {
-                ALOGE("Rotary Encoder device configuration specified non-positive min log rotation "
-                      ": %d. Telemetry logging of rotations disabled.",
-                      *mMinRotationsToLog);
-                mMinRotationsToLog = {};
-            } else {
-                ALOGD("Rotary Encoder telemetry enabled. mMinRotationsToLog=%d",
-                      *mMinRotationsToLog);
-            }
+        mMinRotationsToLog = config.getFloat("rotary_encoder.min_rotations_to_log");
+        if (!mMinRotationsToLog.has_value()) {
+            ALOGI("Rotary Encoder device configuration file didn't specify min log rotation.");
+        } else if (*mMinRotationsToLog <= 0) {
+            ALOGE("Rotary Encoder device configuration specified non-positive min log rotation "
+                  ": %f. Telemetry logging of rotations disabled.",
+                  *mMinRotationsToLog);
+            mMinRotationsToLog = {};
+        } else {
+            ALOGD("Rotary Encoder telemetry enabled. mMinRotationsToLog=%f",
+                  *mMinRotationsToLog);
         }
     }
 }

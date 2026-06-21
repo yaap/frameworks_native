@@ -143,7 +143,7 @@ impl ThreadState {
     /// kernel is too old to support this feature.
     pub fn with_calling_sid<T, F>(check_permission: F) -> T
     where
-        for<'a> F: FnOnce(Option<&'a std::ffi::CStr>) -> T,
+        for<'a> F: FnOnce(Option<&'a core::ffi::CStr>) -> T,
     {
         // Safety: AIBinder_getCallingSid returns a c-string pointer
         // that is valid for a transaction. Also, the string returned
@@ -157,7 +157,7 @@ impl ThreadState {
             if sid.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(sid))
+                Some(core::ffi::CStr::from_ptr(sid))
             }
         })
     }

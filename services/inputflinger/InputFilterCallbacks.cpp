@@ -19,11 +19,11 @@
 #include "InputFilterCallbacks.h"
 #include <aidl/com/android/server/inputflinger/BnInputThread.h>
 #include <android/binder_auto_utils.h>
+#include <jni.h>
 #include <utils/Looper.h>
 #include <utils/StrongPointer.h>
 #include <functional>
 #include "InputThread.h"
-#include "jni.h"
 
 namespace android {
 
@@ -42,12 +42,12 @@ using namespace aidl::com::android::server::inputflinger;
 
 class InputFilterThread : public BnInputThread {
 public:
-    InputFilterThread(std::shared_ptr<IInputThreadCallback> callback, JNIEnv* env)
+    InputFilterThread(std::shared_ptr<IInputThreadCallback> callback, JavaVM* vm)
           : mCallback(callback) {
         mLooper = sp<Looper>::make(/*allowNonCallbacks=*/false);
         mThread = std::make_unique<InputThread>(
                 "InputFilter", [this]() { loopOnce(); }, [this]() { mLooper->wake(); },
-                /*isInCriticalPath=*/false, env);
+                /*isInCriticalPath=*/false, vm);
     }
 
     ndk::ScopedAStatus finish() override {
@@ -81,8 +81,8 @@ private:
 } // namespace
 
 InputFilterCallbacks::InputFilterCallbacks(InputListenerInterface& listener,
-                                           InputFilterPolicyInterface& policy, JNIEnv* env)
-      : mNextListener(listener), mPolicy(policy), mJniEnv(env) {}
+                                           InputFilterPolicyInterface& policy, JavaVM* vm)
+      : mNextListener(listener), mPolicy(policy), mVm(vm) {}
 
 ndk::ScopedAStatus InputFilterCallbacks::sendKeyEvent(const AidlKeyEvent& event) {
     mNextListener.notifyKey(keyEventToNotifyKeyArgs(event));
@@ -103,7 +103,7 @@ ndk::ScopedAStatus InputFilterCallbacks::onModifierStateChanged(int32_t modifier
 ndk::ScopedAStatus InputFilterCallbacks::createInputFilterThread(
         const std::shared_ptr<IInputThreadCallback>& callback,
         std::shared_ptr<IInputThread>* aidl_return) {
-    *aidl_return = ndk::SharedRefBase::make<InputFilterThread>(callback, mJniEnv);
+    *aidl_return = ndk::SharedRefBase::make<InputFilterThread>(callback, mVm);
     return ndk::ScopedAStatus::ok();
 }
 

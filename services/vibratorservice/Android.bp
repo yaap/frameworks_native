@@ -42,7 +42,7 @@ cc_library_shared {
     },
 
     shared_libs: [
-        "android.hardware.vibrator-V3-ndk",
+        "android.hardware.vibrator-V4-ndk",
         "libbinder_ndk",
         "liblog",
         "libutils",

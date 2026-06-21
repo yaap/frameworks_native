@@ -135,6 +135,17 @@ int main(int argc, char* const argv[])
                                 break;
                             }
                             data.writeInt32(atoi(argv[optind++]));
+                        } else if (strcmp(argv[optind], "u32") == 0) {
+                            optind++;
+                            if (optind >= argc) {
+                                aerr << prog_name
+                                     << ": no unsigned integer supplied for 'u32'"
+                                     << endl;
+                                wantsUsage = true;
+                                result = 10;
+                                break;
+                            }
+                            data.writeUint32(strtoul(argv[optind++], nullptr, 10));
                         } else if (strcmp(argv[optind], "i64") == 0) {
                             optind++;
                             if (optind >= argc) {
@@ -144,6 +155,17 @@ int main(int argc, char* const argv[])
                                 break;
                             }
                             data.writeInt64(atoll(argv[optind++]));
+                        } else if (strcmp(argv[optind], "u64") == 0) {
+                            optind++;
+                            if (optind >= argc) {
+                                aerr << prog_name
+                                     << ": no unsigned integer supplied for 'u64'"
+                                     << endl;
+                                wantsUsage = true;
+                                result = 10;
+                                break;
+                            }
+                            data.writeUint64(strtoull(argv[optind++], nullptr, 10));
                         } else if (strcmp(argv[optind], "s16") == 0) {
                             optind++;
                             if (optind >= argc) {
@@ -344,7 +366,9 @@ int main(int argc, char* const argv[])
                 " | null | fd f | nfd n | afd f ] ...\n"
                 "Options:\n"
                 "   i32: Write the 32-bit integer N into the send parcel.\n"
+                "   u32: Write the unsigned 32-bit integer N (decimal) into the send parcel.\n"
                 "   i64: Write the 64-bit integer N into the send parcel.\n"
+                "   u64: Write the unsigned 64-bit integer N (decimal) into the send parcel.\n"
                 "     f: Write the 32-bit single-precision number N into the send parcel.\n"
                 "     d: Write the 64-bit double-precision number N into the send parcel.\n"
                 "   s16: Write the UTF-16 string STR into the send parcel.\n"

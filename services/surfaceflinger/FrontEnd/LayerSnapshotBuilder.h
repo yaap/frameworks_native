@@ -16,14 +16,27 @@
 
 #pragma once
 
-#include "FrontEnd/Caching/MergeableHierarchyManager.h"
+#include <cstdint>
+
 #include "FrontEnd/DisplayInfo.h"
 #include "FrontEnd/LayerLifecycleManager.h"
 #include "LayerHierarchy.h"
 #include "LayerSnapshot.h"
 #include "RequestedLayerState.h"
 
+namespace android::surfaceflinger {
+class RenderResourceCache;
+class ShaderRegistry;
+}
+
 namespace android::surfaceflinger::frontend {
+
+namespace caching {
+
+class MergeableHierarchyManager;
+class MergeableHierarchy;
+
+} // namespace caching
 
 // Walks through the layer hierarchy to build an ordered list
 // of LayerSnapshots that can be passed on to CompositionEngine.
@@ -61,6 +74,9 @@ public:
         bool skipRoundCornersWhenProtected = false;
         LayerSnapshot rootSnapshot = getRootSnapshot();
         caching::MergeableHierarchyManager* mergeableHierarchyManager = nullptr;
+        RenderResourceCache* renderResourceCache = nullptr;
+        uint32_t exclusionMask = 0;
+        ShaderRegistry* shaderRegistry = nullptr;
     };
     LayerSnapshotBuilder();
 
@@ -96,6 +112,10 @@ public:
     // Visit each snapshot
     void forEachSnapshot(const ConstVisitor& visitor) const;
 
+    void forEachMergedSnapshot(const ConstVisitor& visitor) const;
+
+    bool hasMergedSnapshots() const { return !mMergedSnapshots.empty(); }
+
     // Visit each snapshot interesting to input reverse z-order
     void forEachInputSnapshot(const ConstVisitor& visitor) const;
 
@@ -104,6 +124,9 @@ public:
 
 private:
     friend class LayerSnapshotTest;
+
+    // For updateSnapshot
+    friend class caching::MergeableHierarchy;
 
     // return true if we were able to successfully update the snapshots via
     // the fast path.
@@ -114,15 +137,23 @@ private:
     const LayerSnapshot& updateSnapshotsInHierarchy(
             const Args&, const LayerHierarchy& hierarchy,
             const LayerHierarchy::TraversalPath& traversalPath, const LayerSnapshot& parentSnapshot,
-            int depth, std::optional<caching::MergeableHierarchy::Accumulator>& accumulator);
+            int depth);
     void updateSnapshot(LayerSnapshot&, const Args&, const RequestedLayerState&,
-                        const LayerSnapshot& parentSnapshot, const LayerHierarchy::TraversalPath&);
+                        const LayerSnapshot& parentSnapshot, const LayerHierarchy::TraversalPath&,
+                        bool forMergedSnapshot = false);
     static void updateRelativeState(LayerSnapshot& snapshot, const LayerSnapshot& parentSnapshot,
                                     bool parentIsRelative, const Args& args);
     static void resetRelativeState(LayerSnapshot& snapshot);
     static void updateRoundedCorner(LayerSnapshot& snapshot, const RequestedLayerState& layerState,
                                     const LayerSnapshot& parentSnapshot, const Args& args);
     static void scaleRadii(gui::CornerRadii& radii, float scaleX, float scaleY);
+
+    static bool shouldDisableCornerRounding(LayerSnapshot& snapshot,
+                                            const RequestedLayerState& requested);
+    static RoundedCornerState calculateLayerRoundedCornerSettings(
+            LayerSnapshot& snapshot, const RequestedLayerState& requested);
+    static RoundedCornerState calculateParentRoundedCornerSettings(
+            const LayerSnapshot& parentSnapshot, const LayerSnapshot& snapshot);
     static gui::CornerRadii getClippedClientRadii(const gui::CornerRadii& requestedRadii,
                                                   const FloatRect& layerCropRect,
                                                   const FloatRect& layerBounds);
@@ -136,7 +167,7 @@ private:
                               const ShadowSettings& globalShadowSettings);
     void updateInput(LayerSnapshot& snapshot, const RequestedLayerState& requested,
                      const LayerSnapshot& parentSnapshot, const LayerHierarchy::TraversalPath& path,
-                     const Args& args);
+                     const Args& args, bool forMergedSnapshot = false);
     // Return true if there are unreachable snapshots
     bool sortSnapshotsByZ(const Args& args);
     LayerSnapshot* createSnapshot(const LayerHierarchy::TraversalPath& id,
@@ -147,6 +178,7 @@ private:
                                           const RequestedLayerState& requestedCHildState,
                                           const Args& args, bool* outChildHasValidFrameRate);
     void updateTouchableRegionCrop(const Args& args);
+    bool updateMirrorLayerCrops(const Args& args);
 
     void applyStopLayers(const LayerHierarchy&, const LayerHierarchy::TraversalPath&);
     void applyStopLayersInternal(const LayerHierarchy&, const LayerHierarchy::TraversalPath&,
@@ -162,8 +194,11 @@ private:
     std::unordered_set<LayerHierarchy::TraversalPath, LayerHierarchy::TraversalPathHash>
             mNeedsTouchableRegionCrop;
     std::vector<std::unique_ptr<LayerSnapshot>> mSnapshots;
+    std::vector<std::unique_ptr<LayerSnapshot>> mMergedSnapshots;
     bool mResortSnapshots = false;
     int mNumInterestingSnapshots = 0;
+    bool mHasMirrorRequests = false;
+    bool mSnapshotsHaveMirrorCrop = false;
 };
 
 } // namespace android::surfaceflinger::frontend

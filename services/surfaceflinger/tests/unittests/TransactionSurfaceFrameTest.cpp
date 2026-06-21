@@ -72,8 +72,9 @@ public:
         FrameTimelineInfo ftInfo;
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
-        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10,
-                                                             gui::GameMode::Unsupported);
+        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10, gui::GameMode::Unsupported,
+                                                             gui::ISystemContentPriorityConstants::
+                                                                     Unset);
         EXPECT_EQ(1u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_TRUE(layer->mDrawingState.bufferSurfaceFrameTX == nullptr);
         const auto surfaceFrame = layer->mDrawingState.bufferlessSurfaceFramesTX.at(/*token*/ 1);
@@ -101,7 +102,7 @@ public:
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
         layer->setBuffer(externalTexture, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         acquireFence->signalForTest(12);
 
         commitTransaction(layer.get());
@@ -111,7 +112,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, surfaceFrame->getPresentState());
 
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, surfaceFrame->getToken());
         EXPECT_EQ(true, surfaceFrame->getIsBuffer());
@@ -137,7 +138,7 @@ public:
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
         layer->setBuffer(externalTexture1, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
         const auto droppedSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
@@ -155,7 +156,7 @@ public:
                                                          HAL_PIXEL_FORMAT_RGBA_8888,
                                                          0ULL /*usage*/);
         layer->setBuffer(externalTexture2, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         nsecs_t end = systemTime();
         acquireFence2->signalForTest(12);
 
@@ -164,7 +165,7 @@ public:
         const auto presentedSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
 
         commitTransaction(layer.get());
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, droppedSurfaceFrame->getToken());
         EXPECT_EQ(true, droppedSurfaceFrame->getIsBuffer());
@@ -184,8 +185,9 @@ public:
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
 
-        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10,
-                                                             gui::GameMode::Unsupported);
+        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10, gui::GameMode::Unsupported,
+                                                             gui::ISystemContentPriorityConstants::
+                                                                     Unset);
 
         EXPECT_EQ(1u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_EQ(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
@@ -203,7 +205,7 @@ public:
                                                          HAL_PIXEL_FORMAT_RGBA_8888,
                                                          0ULL /*usage*/);
         layer->setBuffer(externalTexture, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         acquireFence->signalForTest(12);
 
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
@@ -216,7 +218,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, surfaceFrame->getPresentState());
 
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(PresentState::Presented, surfaceFrame->getPresentState());
     }
@@ -239,12 +241,13 @@ public:
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
         layer->setBuffer(externalTexture, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
 
-        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10,
-                                                             gui::GameMode::Unsupported);
+        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10, gui::GameMode::Unsupported,
+                                                             gui::ISystemContentPriorityConstants::
+                                                                     Unset);
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
     }
@@ -254,8 +257,9 @@ public:
         FrameTimelineInfo ftInfo;
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
-        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10,
-                                                             gui::GameMode::Unsupported);
+        layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo, 10, gui::GameMode::Unsupported,
+                                                             gui::ISystemContentPriorityConstants::
+                                                                     Unset);
         EXPECT_EQ(1u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_EQ(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
         const auto bufferlessSurfaceFrame1 =
@@ -265,7 +269,9 @@ public:
         ftInfo2.vsyncId = 4;
         ftInfo2.inputEventId = 0;
         layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo2, 10,
-                                                             gui::GameMode::Unsupported);
+                                                             gui::GameMode::Unsupported,
+                                                             gui::ISystemContentPriorityConstants::
+                                                                     Unset);
         EXPECT_EQ(2u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_EQ(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
         const auto bufferlessSurfaceFrame2 = layer->mDrawingState.bufferlessSurfaceFramesTX[4];
@@ -286,7 +292,7 @@ public:
         ftInfo3.vsyncId = 3;
         ftInfo3.inputEventId = 0;
         layer->setBuffer(externalTexture, bufferData, 10, 20, false, ftInfo3,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         EXPECT_EQ(2u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
         const auto bufferSurfaceFrameTX = layer->mDrawingState.bufferSurfaceFrameTX;
@@ -308,7 +314,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, bufferSurfaceFrameTX->getPresentState());
 
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(PresentState::Presented, bufferSurfaceFrameTX->getPresentState());
     }
@@ -332,7 +338,7 @@ public:
         ftInfo.vsyncId = 1;
         ftInfo.inputEventId = 0;
         layer->setBuffer(externalTexture1, bufferData, 10, 20, false, ftInfo,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
         const auto droppedSurfaceFrame1 = layer->mDrawingState.bufferSurfaceFrameTX;
@@ -353,7 +359,7 @@ public:
         ftInfoInv.vsyncId = FrameTimelineInfo::INVALID_VSYNC_ID;
         ftInfoInv.inputEventId = 0;
         layer->setBuffer(externalTexture2, bufferData, 10, 20, false, ftInfoInv,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         auto dropEndTime1 = systemTime();
         EXPECT_EQ(0u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
         ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
@@ -375,7 +381,7 @@ public:
         ftInfo2.vsyncId = 2;
         ftInfo2.inputEventId = 0;
         layer->setBuffer(externalTexture3, bufferData, 10, 20, false, ftInfo2,
-                         gui::GameMode::Unsupported);
+                         gui::GameMode::Unsupported, gui::ISystemContentPriorityConstants::Unset);
         auto dropEndTime2 = systemTime();
         acquireFence3->signalForTest(12);
 
@@ -384,7 +390,7 @@ public:
         const auto presentedSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
 
         commitTransaction(layer.get());
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, droppedSurfaceFrame1->getToken());
         EXPECT_EQ(true, droppedSurfaceFrame1->getIsBuffer());
@@ -424,12 +430,14 @@ public:
             ftInfo.vsyncId = 1;
             ftInfo.inputEventId = 0;
             layer->setBuffer(externalTexture, bufferData, 10, 20, false, ftInfo,
-                             gui::GameMode::Unsupported);
+                             gui::GameMode::Unsupported,
+                             gui::ISystemContentPriorityConstants::Unset);
             FrameTimelineInfo ftInfo2;
             ftInfo2.vsyncId = 2;
             ftInfo2.inputEventId = 0;
-            layer->setFrameTimelineVsyncForBufferlessTransaction(ftInfo2, 10,
-                                                                 gui::GameMode::Unsupported);
+            layer->setFrameTimelineVsyncForBufferlessTransaction(
+                    ftInfo2, 10, gui::GameMode::Unsupported,
+                    gui::ISystemContentPriorityConstants::Unset);
             ASSERT_NE(nullptr, layer->mDrawingState.bufferSurfaceFrameTX);
             EXPECT_EQ(1u, layer->mDrawingState.bufferlessSurfaceFramesTX.size());
 
@@ -441,15 +449,15 @@ public:
         }
 
         auto presentedBufferSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
-        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
+        layer->latchBufferStatsAndHandles(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
         // BufferlessSurfaceFrames are immediately set to presented and added to the DisplayFrame.
         // Since we don't have access to DisplayFrame here, trigger an onPresent directly.
         // The odd indices are the bufferless frames.
         for (uint32_t i = 1; i < 10; i += 2) {
-            surfaceFrames[i]->onPresent(20, JankType::None, 90_Hz, 90_Hz,
+            surfaceFrames[i]->onPresent(20, JankType::None, JankType::None, 90_Hz, 90_Hz,
                                         /*displayDeadlineDelta*/ 0, /*displayPresentDelta*/ 0);
         }
-        presentedBufferSurfaceFrame->onPresent(20, JankType::None, 90_Hz, 90_Hz,
+        presentedBufferSurfaceFrame->onPresent(20, JankType::None, JankType::None, 90_Hz, 90_Hz,
                                                /*displayDeadlineDelta*/ 0,
                                                /*displayPresentDelta*/ 0);
 

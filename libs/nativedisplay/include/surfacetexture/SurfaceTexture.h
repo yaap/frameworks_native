@@ -17,16 +17,19 @@
 #pragma once
 
 #include <android/hardware_buffer.h>
+#include <ftl/small_vector.h>
+#include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/ConsumerBase.h>
-
-#include <gui/IGraphicBufferProducer.h>
+#include <gui/Surface.h>
 #include <sys/cdefs.h>
 #include <system/graphics.h>
 #include <ui/FenceTime.h>
 #include <ui/GraphicBuffer.h>
-#include <utils/Mutex.h>
+#include <utils/RefBase.h>
 #include <utils/String8.h>
+
+#include <mutex>
 
 #include "EGLConsumer.h"
 #include "ImageConsumer.h"
@@ -50,7 +53,8 @@ namespace android {
  * When attached to HWUI render thread, SurfaceTexture is compatible to
  * both Vulkan and GL drawing pipelines.
  */
-class ANDROID_API SurfaceTexture : public ConsumerBase {
+class ANDROID_API SurfaceTexture final : public BufferItemConsumer::BufferFreedListener,
+                                         public BufferItemConsumer::FrameAvailableListener {
 public:
     /**
      * Callback function needed by dequeueBuffer. It creates a fence,
@@ -68,7 +72,6 @@ public:
     typedef status_t (*SurfaceTexture_fenceWait)(int fence, void* passThroughHandle);
 
     enum { TEXTURE_EXTERNAL = 0x8D65 }; // GL_TEXTURE_EXTERNAL_OES
-    typedef ConsumerBase::FrameAvailableListener FrameAvailableListener;
 
     /**
      * SurfaceTexture constructs a new SurfaceTexture object. If the constructor
@@ -102,13 +105,7 @@ public:
 
     SurfaceTexture(uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
 
-    SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t textureTarget,
-                   bool useFenceSync, bool isControlledByApp)
-            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-
-    SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
-                   bool isControlledByApp)
-            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+    void onFirstRef() override;
 
     /**
      * updateTexImage acquires the most recently queued buffer, and sets the
@@ -129,6 +126,15 @@ public:
      * target texture belongs is bound to the calling thread.
      */
     status_t releaseTexImage();
+
+    sp<Surface> getSurface() { return mSurface; }
+
+    status_t setMaxBufferCount(int bufferCount);
+
+    void setName(String8 name);
+
+    void abandon();
+    bool isAbandoned() const;
 
     /**
      * getTransformMatrix retrieves the 4x4 texture coordinate transform matrix
@@ -207,6 +213,11 @@ public:
      * for use with bilinear filtering.
      */
     void setFilteringEnabled(bool enabled);
+
+    /**
+     * setConsumerIsProtected
+     */
+    status_t setConsumerIsProtected(bool isProtected);
 
     /**
      * getCurrentTextureTarget returns the texture target of the current
@@ -311,48 +322,29 @@ public:
      */
     void setSurfaceTextureListener(const sp<SurfaceTextureListener>&);
 
-    void onFirstRef() override;
+    void dumpState(String8& result, const char* prefix);
 
 protected:
     /**
-     * abandonLocked overrides the ConsumerBase method to clear
-     * mCurrentTextureImage in addition to the ConsumerBase behavior.
+     * Acquire a buffer from the consumer owned by this SurfaceTexture.
      */
-    virtual void abandonLocked();
+    status_t acquireBufferLocked(BufferItem* item, nsecs_t presentWhen,
+                                 uint64_t maxFrameNumber = 0);
 
     /**
-     * dumpLocked overrides the ConsumerBase method to dump SurfaceTexture-
-     * specific info in addition to the ConsumerBase behavior.
+     * Release a buffer to the consumer owned by this SurfaceTexture.
      */
-    virtual void dumpLocked(String8& result, const char* prefix) const override;
+    status_t releaseBufferLocked(const sp<GraphicBuffer>& graphicBuffer);
 
-    /**
-     * acquireBufferLocked overrides the ConsumerBase method to update the
-     * mEglSlots array in addition to the ConsumerBase behavior.
-     */
-    virtual status_t acquireBufferLocked(BufferItem* item, nsecs_t presentWhen,
-                                         uint64_t maxFrameNumber = 0) override;
+    // BufferItemConsumer::BufferFreedListener:
+    virtual void onBufferFreed(const sp<GraphicBuffer>& graphicBuffer) override;
+    void onBufferFreedLocked(const sp<GraphicBuffer>& graphicBuffer);
+    void clearPendingFreedBuffersLocked();
 
-    /**
-     * releaseBufferLocked overrides the ConsumerBase method to update the
-     * mEglSlots array in addition to the ConsumerBase.
-     */
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-    virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer) override;
-#else
-    virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer,
-                                         EGLDisplay display = EGL_NO_DISPLAY,
-                                         EGLSyncKHR eglFence = EGL_NO_SYNC_KHR) override;
-#endif
-
-    /**
-     * freeBufferLocked frees up the given buffer slot. If the slot has been
-     * initialized this will release the reference to the GraphicBuffer in that
-     * slot and destroy the EGLImage in that slot.  Otherwise it has no effect.
-     *
-     * This method must be called with mMutex locked.
-     */
-    virtual void freeBufferLocked(int slotIndex);
+    // BufferItemConsumer::FrameAvailableListener:
+    virtual void onFrameAvailable(const BufferItem& item) override;
+    virtual void onSetFrameRate(float frameRate, int8_t compatibility,
+                                int8_t changeFrameRateStrategy) override;
 
     /**
      * computeCurrentTransformMatrixLocked computes the transform matrix for the
@@ -363,18 +355,27 @@ protected:
     void computeCurrentTransformMatrixLocked();
 
     /**
-     * onSetFrameRate Notifies the consumer of a setFrameRate call from the producer side.
-     */
-    void onSetFrameRate(float frameRate, int8_t compatibility,
-                        int8_t changeFrameRateStrategy) override;
-
-    /**
      * The default consumer usage flags that SurfaceTexture always sets on its
      * BufferQueue instance; these will be OR:d with any additional flags passed
      * from the SurfaceTexture user. In particular, SurfaceTexture will always
      * consume buffers as hardware textures.
      */
     static const uint64_t DEFAULT_USAGE_FLAGS = GraphicBuffer::USAGE_HW_TEXTURE;
+
+    mutable std::mutex mPendingFreedBuffersLock;
+    typedef ftl::SmallVector<sp<GraphicBuffer>, 8> PendingFreedBuffers;
+    PendingFreedBuffers mPendingFreedBuffers GUARDED_BY(mPendingFreedBuffersLock);
+
+    mutable std::mutex mMutex;
+
+    sp<Surface> mSurface;
+    sp<BufferItemConsumer> mConsumer;
+
+    BufferItem mCurrentBufferItem;
+
+    bool mAbandoned = false;
+
+    String8 mName;
 
     /**
      * mCurrentCrop is the crop rectangle that applies to the current texture.
@@ -465,14 +466,13 @@ protected:
     const uint32_t mTexTarget;
 
     /**
-     * mCurrentTexture is the buffer slot index of the buffer that is currently
-     * bound to the OpenGL texture. It is initialized to INVALID_BUFFER_SLOT,
+     * mCurrentTexture is the buffer that is currently
+     * bound to the OpenGL texture. It is initialized to nullptr,
      * indicating that no buffer slot is currently bound to the texture. Note,
-     * however, that a value of INVALID_BUFFER_SLOT does not necessarily mean
-     * that no buffer is bound to the texture. A call to setBufferCount will
-     * reset mCurrentTexture to INVALID_BUFFER_SLOT.
+     * however, that a value of nullptr does not necessarily mean
+     * that no buffer is bound to the texture.
      */
-    int mCurrentTexture;
+    sp<GraphicBuffer> mCurrentTexture;
 
     enum class OpMode { detached, attachedToConsumer, attachedToGL };
     /**
@@ -499,32 +499,16 @@ protected:
      */
     ImageConsumer mImageConsumer;
 
+    mutable std::mutex mListenerMutex;
     /**
      * mSurfaceTextureListener holds the registered SurfaceTextureListener.
      * Note that SurfaceTexture holds the lister with an sp<>, which means that the listener
      * must only hold a wp<> to SurfaceTexture and not an sp<>.
      */
-    sp<SurfaceTextureListener> mSurfaceTextureListener;
+    sp<SurfaceTextureListener> mSurfaceTextureListener GUARDED_BY(mListenerMutex);
 
     friend class ImageConsumer;
     friend class EGLConsumer;
-
-private:
-    void initialize();
-
-    // Proxy listener to avoid having SurfaceTexture directly implement FrameAvailableListener as it
-    // is extending ConsumerBase which also implements FrameAvailableListener.
-    class FrameAvailableListenerProxy : public ConsumerBase::FrameAvailableListener {
-    public:
-        FrameAvailableListenerProxy(const wp<SurfaceTextureListener>& listener)
-              : mSurfaceTextureListener(listener) {}
-
-    private:
-        void onFrameAvailable(const BufferItem& item) override;
-
-        const wp<SurfaceTextureListener> mSurfaceTextureListener;
-    };
-    sp<FrameAvailableListenerProxy> mFrameAvailableListenerProxy;
 };
 
 // ----------------------------------------------------------------------------

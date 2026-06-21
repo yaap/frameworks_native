@@ -23,6 +23,7 @@
 #include <android/binder_libbinder.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <android/binder_stability.h>
 #include <gtest/gtest.h>
 #include <iface/iface.h>
 #include <selinux/selinux.h>
@@ -55,6 +56,7 @@ constexpr char kLazyBinderNdkUnitTestService[] = "LazyBinderNdkUnitTest";
 constexpr char kForcePersistNdkUnitTestService[] = "ForcePersistNdkUnitTestService";
 constexpr char kActiveServicesNdkUnitTestService[] = "ActiveServicesNdkUnitTestService";
 constexpr char kBinderNdkUnitTestServiceFlagged[] = "BinderNdkUnitTestFlagged";
+constexpr char kLazyHighPriorityService[] = "LazyHighPriorityService";
 
 constexpr auto kShutdownWaitTime = 30s;
 constexpr uint64_t kContextTestValue = 0xb4e42fb4d9a1d715;
@@ -233,7 +235,9 @@ int manualThreadPoolService(const char* instance) {
     return 1;
 }
 
-int lazyService(const char* instance) {
+int lazyService(const char* instance,
+                AServiceManager_AddServiceFlag flags =
+                        AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT) {
     ABinderProcess_setThreadPoolMaxThreadCount(0);
     // Wait to register this service to make sure the main test process will
     // actually wait for the service to be available. Tested with sleep(60),
@@ -244,7 +248,8 @@ int lazyService(const char* instance) {
     auto service = ndk::SharedRefBase::make<MyBinderNdkUnitTest>();
     auto binder = service->asBinder();
 
-    binder_status_t status = AServiceManager_registerLazyService(binder.get(), instance);
+    binder_status_t status =
+            AServiceManager_registerLazyServiceWithFlags(binder.get(), instance, flags);
     if (status != STATUS_OK) {
         LOG(FATAL) << "Could not register: " << status << " " << instance;
     }
@@ -464,6 +469,52 @@ TEST(NdkBinder, CheckLazyServiceShutDown) {
     // Make sure the service is dead after some time of no use
     ASSERT_TRUE(isServiceShutdownWithWait(kLazyBinderNdkUnitTestService))
             << "Service failed to shut down";
+}
+
+TEST(NdkBinder, GetLazyServiceWithFlags) {
+    ndk::SpAIBinder binder(AServiceManager_waitForService(kLazyHighPriorityService));
+    std::shared_ptr<aidl::IBinderNdkUnitTest> service =
+            aidl::IBinderNdkUnitTest::fromBinder(binder);
+    ASSERT_NE(service, nullptr);
+
+    EXPECT_EQ(STATUS_OK, AIBinder_ping(binder.get()));
+}
+
+TEST(NdkBinder, LazyServiceRegisteredWithFlags) {
+    // listServices will only find this lazy service if it's up and running so
+    // we need to get it first.
+    ndk::SpAIBinder binder(AServiceManager_waitForService(kLazyHighPriorityService));
+    std::shared_ptr<aidl::IBinderNdkUnitTest> service =
+            aidl::IBinderNdkUnitTest::fromBinder(binder);
+    ASSERT_NE(service, nullptr);
+    static const sp<android::IServiceManager> sm(android::defaultServiceManager());
+    // Check to make sure we service manager knows we set the high priority flag
+    // when registering as a lazy service.
+    const Vector<String16> services =
+            sm->listServices(android::IServiceManager::DUMP_FLAG_PRIORITY_HIGH);
+    bool registeredWithFlags = false;
+    for (const auto& service : services) {
+        if (service == String16(kLazyHighPriorityService)) registeredWithFlags = true;
+    }
+    EXPECT_TRUE(registeredWithFlags)
+            << "Failed to register the lazy service with DUMP_FLAG_PRIORITY_HIGH flag set";
+}
+
+TEST(NdkBinder, LazyServiceRegisteredWithFlagsBadArgs) {
+    EXPECT_EQ(STATUS_UNEXPECTED_NULL,
+              AServiceManager_registerLazyServiceWithFlags(
+                      nullptr, nullptr,
+                      AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT));
+    EXPECT_EQ(STATUS_UNEXPECTED_NULL,
+              AServiceManager_registerLazyServiceWithFlags(
+                      nullptr, "service.name",
+                      AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT));
+    auto service = ndk::SharedRefBase::make<MyBinderNdkUnitTest>();
+    auto binder = service->asBinder();
+    EXPECT_EQ(STATUS_UNEXPECTED_NULL,
+              AServiceManager_registerLazyServiceWithFlags(
+                      binder.get(), nullptr,
+                      AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT));
 }
 
 TEST(NdkBinder, ForcedPersistenceTest) {
@@ -789,6 +840,67 @@ TEST(NdkBinder, LinkToDeath) {
     AIBinder_decStrong(binder);
 }
 
+void OnFrozenStateChanged(void* cookie, bool frozen) {
+    LOG(ERROR) << "FROZEN STATE CHANGED. COOKIE: " << cookie << " FROZEN: " << frozen;
+}
+void OnUnlinked(void* /*cookie*/) {
+    // No-op for testing.
+}
+
+TEST(NdkBinder, AddFrozenStateChangeCallback) {
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
+    AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
+    LIBBINDER_IGNORE_END()
+    ASSERT_NE(nullptr, binder);
+
+    AIBinder_FrozenStateChangeCallback* callback =
+            AIBinder_FrozenStateChangeCallback_new(OnFrozenStateChanged, OnUnlinked);
+    ASSERT_NE(nullptr, callback);
+
+    binder_status_t status = AIBinder_addFrozenStateChangeCallback(binder, callback, nullptr);
+    if (status == STATUS_INVALID_OPERATION) {
+        AIBinder_FrozenStateChangeCallback_delete(callback);
+        AIBinder_decStrong(binder);
+        return;
+    }
+    EXPECT_EQ(STATUS_OK, status);
+
+    EXPECT_EQ(STATUS_OK, AIBinder_addFrozenStateChangeCallback(binder, callback, nullptr));
+    EXPECT_EQ(STATUS_OK, AIBinder_removeFrozenStateChangeCallback(binder, callback, nullptr));
+    EXPECT_EQ(STATUS_OK, AIBinder_removeFrozenStateChangeCallback(binder, callback, nullptr));
+    EXPECT_EQ(STATUS_NAME_NOT_FOUND,
+              AIBinder_removeFrozenStateChangeCallback(binder, callback, nullptr));
+
+    AIBinder_FrozenStateChangeCallback_delete(callback);
+    AIBinder_decStrong(binder);
+}
+
+TEST(NdkBinder, ScopedFrozenStateChangeCallback) {
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
+    AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
+    LIBBINDER_IGNORE_END()
+    ASSERT_NE(nullptr, binder);
+
+    ndk::ScopedAIBinder_FrozenStateChangeCallback callback(
+            AIBinder_FrozenStateChangeCallback_new(OnFrozenStateChanged, OnUnlinked));
+    ASSERT_NE(nullptr, callback.get());
+
+    binder_status_t status = AIBinder_addFrozenStateChangeCallback(binder, callback.get(), nullptr);
+    if (status == STATUS_INVALID_OPERATION) {
+        AIBinder_decStrong(binder);
+        return;
+    }
+    EXPECT_EQ(STATUS_OK, status);
+
+    EXPECT_EQ(STATUS_OK, AIBinder_addFrozenStateChangeCallback(binder, callback.get(), nullptr));
+    EXPECT_EQ(STATUS_OK, AIBinder_removeFrozenStateChangeCallback(binder, callback.get(), nullptr));
+    EXPECT_EQ(STATUS_OK, AIBinder_removeFrozenStateChangeCallback(binder, callback.get(), nullptr));
+    EXPECT_EQ(STATUS_NAME_NOT_FOUND,
+              AIBinder_removeFrozenStateChangeCallback(binder, callback.get(), nullptr));
+
+    AIBinder_decStrong(binder);
+}
+
 TEST(NdkBinder, SetInheritRt) {
     // functional test in binderLibTest
     sp<IFoo> foo = sp<MyTestFoo>::make();
@@ -814,6 +926,12 @@ TEST(NdkBinder, SetInheritRtNonLocal) {
     EXPECT_DEATH(AIBinder_setInheritRt(binder, false), "");
 
     AIBinder_decStrong(binder);
+}
+
+TEST(NdkBinder, DisableBackgroundScheduling) {
+    // does not abort, functional testing in binderLibTest
+    ABinderProcess_disableBackgroundScheduling(true);
+    ABinderProcess_disableBackgroundScheduling(false);
 }
 
 TEST(NdkBinder, AddNullService) {
@@ -1133,6 +1251,17 @@ TEST(NdkBinder, SetMinThreadsZero) {
     EXPECT_EQ(STATUS_BAD_VALUE, AIBinder_setMinRpcThreads(nullptr, 0));
 }
 
+TEST(NdkBinder, GetStability) {
+    ndk::SpAIBinder binder(AServiceManager_waitForService(kBinderNdkUnitTestService));
+    std::shared_ptr<aidl::IBinderNdkUnitTest> service =
+            aidl::IBinderNdkUnitTest::fromBinder(binder);
+    ASSERT_NE(service, nullptr);
+
+    EXPECT_TRUE(AIBinder_isSystemStable(binder.get()));
+    EXPECT_FALSE(AIBinder_isVendorStable(binder.get()));
+    EXPECT_FALSE(AIBinder_requiresVintfDeclaration(binder.get()));
+}
+
 static void addOne(int* to) {
     if (!to) return;
     ++(*to);
@@ -1213,6 +1342,11 @@ int main(int argc, char* argv[]) {
     if (fork() == 0) {
         prctl(PR_SET_PDEATHSIG, SIGHUP);
         return lazyService(kActiveServicesNdkUnitTestService);
+    }
+    if (fork() == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGHUP);
+        return lazyService(kLazyHighPriorityService,
+                           AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_HIGH);
     }
     if (fork() == 0) {
         prctl(PR_SET_PDEATHSIG, SIGHUP);

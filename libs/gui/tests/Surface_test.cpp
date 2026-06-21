@@ -20,12 +20,10 @@
 #include <android/gui/IActivePictureListener.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/ISurfaceComposer.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <binder/ProcessState.h>
 #include <com_android_graphics_libgui_flags.h>
-#include <configstore/Utils.h>
 #include <gui/AidlUtil.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>
@@ -70,9 +68,6 @@
 namespace android {
 
 using namespace std::chrono_literals;
-// retrieve wide-color and hdr settings from configstore
-using namespace android::hardware::configstore;
-using namespace android::hardware::configstore::V1_0;
 using aidl::android::hardware::graphics::common::DisplayDecorationSupport;
 using gui::IDisplayEventConnection;
 using gui::IRegionSamplingListener;
@@ -104,7 +99,7 @@ public:
     virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& buffers) {
         mDiscardedBuffers.insert(mDiscardedBuffers.end(), buffers.begin(), buffers.end());
     }
-    virtual void onBufferDetached(int /*slot*/) {}
+    virtual void onBufferDetached(uint64_t /*bufferId*/) {}
     int getReleaseNotifyCount() const {
         return mBuffersReleased;
     }
@@ -358,6 +353,57 @@ TEST_F(SurfaceTest, SettingGenerationNumber) {
     ASSERT_EQ(NO_ERROR, window->dequeueBuffer(window.get(), &buffer, &fenceFd));
     graphicBuffer = static_cast<GraphicBuffer*>(buffer);
     ASSERT_EQ(1U, graphicBuffer->getGenerationNumber());
+}
+
+TEST_F(SurfaceTest, AutoGenerationUpdate) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    // Allocate a buffer.
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(NO_ERROR, surface->connect(NATIVE_WINDOW_API_CPU, nullptr));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+
+    // Detach the buffer and check its generation number.
+    sp<GraphicBuffer> graphicBuffer;
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(0U, graphicBuffer->getGenerationNumber());
+
+    // Auto-generation is on by default. Attaching should update the generation number.
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(1));
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(1U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(1U, graphicBuffer->getGenerationNumber());
+
+    // Turn auto-generation off. Attaching should not update the generation number. And,
+    // importantly, attaching should fail for generation number mismatch.
+    surface->setAutoGenerationUpdate(false);
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(2));
+    ASSERT_EQ(BAD_VALUE, surface->attachBuffer(graphicBuffer));
+
+    graphicBuffer->setGenerationNumber(2);
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(2U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->detachNextBuffer(&graphicBuffer, &fence));
+    ASSERT_EQ(2U, graphicBuffer->getGenerationNumber());
+
+    // Turn auto-generation back on. Attaching should update the generation number again.
+    surface->setAutoGenerationUpdate(true);
+    ASSERT_EQ(NO_ERROR, surface->setGenerationNumber(3));
+    ASSERT_EQ(NO_ERROR, surface->attachBuffer(graphicBuffer));
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(graphicBuffer, fence));
+    ASSERT_EQ(NO_ERROR, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(3U, buffer->getGenerationNumber());
+    ASSERT_EQ(NO_ERROR, surface->cancelBuffer(buffer, fence));
 }
 
 TEST_F(SurfaceTest, GetConsumerName) {
@@ -683,6 +729,14 @@ public:
         return NO_ERROR;
     }
 
+    status_t registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo&) override {
+        return NO_ERROR;
+    }
+
+    status_t unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo&) override {
+        return NO_ERROR;
+    }
+
 protected:
     IBinder* onAsBinder() override { return nullptr; }
 
@@ -697,9 +751,8 @@ public:
     void setSupportsPresent(bool supportsPresent) { mSupportsPresent = supportsPresent; }
 
     binder::Status bootFinished() override { return binder::Status::ok(); }
-
     binder::Status createDisplayEventConnection(
-            VsyncSource /*vsyncSource*/, EventRegistration /*eventRegistration*/,
+            gui::ISurfaceComposer::EventRegistration /*eventRegistration*/,
             const sp<IBinder>& /*layerHandle*/,
             sp<gui::IDisplayEventConnection>* outConnection) override {
         *outConnection = nullptr;
@@ -714,7 +767,7 @@ public:
     binder::Status createVirtualDisplay(
             const std::string& /*displayName*/, bool /*isSecure*/,
             gui::ISurfaceComposer::OptimizationPolicy /*optimizationPolicy*/,
-            const std::string& /*uniqueId*/, float /*requestedRefreshRate*/,
+            const std::string& /*uniqueId*/, int32_t /*ownerUid*/, float /*requestedRefreshRate*/,
             sp<IBinder>* /*outDisplay*/) override {
         return binder::Status::ok();
     }
@@ -926,8 +979,9 @@ public:
         return binder::Status::ok();
     }
 
-    binder::Status setDesiredDisplayModeSpecs(const sp<IBinder>& /*displayToken*/,
-                                              const gui::DisplayModeSpecs&) override {
+    binder::Status setDesiredDisplayModeSpecs(
+            const sp<IBinder>& /*applyToken*/,
+            const std::vector<gui::DisplayModeSpecs>&) override {
         return binder::Status::ok();
     }
 
@@ -1066,6 +1120,15 @@ public:
     binder::Status forcePacesetter(int64_t) { return binder::Status::ok(); }
 
     binder::Status resetForcedPacesetter() { return binder::Status::ok(); }
+
+    binder::Status registerShader(const sp<IBinder>& shaderToken, const std::string& debugName,
+                                  const std::string& shaderString) override {
+        return binder::Status::ok();
+    }
+
+    binder::Status unregisterShader(const sp<IBinder>& shader) override {
+        return binder::Status::ok();
+    }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }
@@ -2371,7 +2434,7 @@ TEST_F(SurfaceTest, QueueAcquireReleaseDequeue_CalledInStack_DoesNotDeadlock) {
 
         virtual bool needsReleaseNotify() override { return true; }
         virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>&) override {}
-        virtual void onBufferDetached(int) override {}
+        virtual void onBufferDetached(uint64_t) override {}
 
         sp<GraphicBuffer> mBuffer;
         sp<Fence> mFence;
@@ -2585,7 +2648,53 @@ TEST_F(SurfaceTest, QueueBufferOutput_TracksReplacements_Plural) {
     EXPECT_TRUE(outputs[1].bufferReplaced);
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+TEST_F(SurfaceTest, QueueBufferInputOutput) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    ASSERT_EQ(OK, consumer->setDefaultBufferSize(20, 20));
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    SurfaceQueueBufferInput input;
+    input.fence = fence;
+    input.crop = Rect(0, 0, 10, 10);
+    input.transform = NATIVE_WINDOW_TRANSFORM_ROT_90;
+    input.timestamp = 12345;
+
+    SurfaceQueueBufferOutput output;
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, input, &output));
+
+    EXPECT_GE(output.nextFrameNumber, 1u);
+}
+
+TEST_F(SurfaceTest, CancelBuffer_GraphicBuffer_Fence) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    ASSERT_EQ(OK, surface->cancelBuffer(buffer, fence));
+}
+
+TEST_F(SurfaceTest, AttachBuffer_GraphicBuffer) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false);
+
+    // We need a detached buffer.
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->detachBuffer(buffer));
+
+    ASSERT_EQ(OK, surface->attachBuffer(buffer));
+    // Can cancel/queue after attach
+    ASSERT_EQ(OK, surface->cancelBuffer(buffer, fence));
+}
+
 TEST_F(SurfaceTest, UnlimitedSlots_FailsOnIncompatibleConsumer) {
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
@@ -2708,7 +2817,61 @@ TEST_F(SurfaceTest, UnlimitedSlots_BatchOperations) {
     EXPECT_EQ(OK, surface->queueBuffers(queuedBuffers, &outputs));
     EXPECT_EQ(128u, outputs.size());
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+
+TEST_F(SurfaceTest, UnlimitedSlots_SetMaxDequeuedBufferCount_EdgeCase) {
+    auto [consumer, surface] = BufferItemConsumer::create(TEST_PRODUCER_USAGE_BITS);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+
+    // We carefully configure the BufferQueue so that it's bigger than the old max of 64, but the
+    // max dequeued count is smaller than it. Previously, this would lead to us not extending the BQ
+    // before setting the max.
+    const int kDequeableBufferCount = 60;
+    const int kAcquireableBufferCount = 10;
+    ASSERT_EQ(OK, consumer->setMaxAcquiredBufferCount(kAcquireableBufferCount));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(kDequeableBufferCount));
+
+    // Do a single round of operations so that the BQ will actually check max dequeued:
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    BufferItem item;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+
+    // Verify that we can actually dequeue all kDequeableBufferCount at once:
+    for (int i = 0; i < kDequeableBufferCount; i++) {
+        ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence)) << "Failed to dequeue buffer #" << i;
+    }
+}
+
+TEST_F(SurfaceTest, UnlimitedSlots_SecondSurface_UnderstandsExtraSlots) {
+    auto [consumer, surface] = BufferItemConsumer::create(TEST_PRODUCER_USAGE_BITS);
+    ASSERT_NE(nullptr, surface.get());
+
+    // We can set the max dequeued count before connecting.
+    ASSERT_EQ(NO_ERROR, surface->setMaxDequeuedBufferCount(32));
+
+    // 100 is more than the default 64
+    ASSERT_EQ(NO_ERROR, surface->setMaxDequeuedBufferCount(100));
+
+    sp<Surface> surface2 = sp<Surface>::make(surface->getIGraphicBufferProducer());
+    ASSERT_EQ(NO_ERROR, surface2->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make()));
+
+    sp<GraphicBuffer> buffers[100];
+    for (int i = 0; i < 100; i++) {
+        sp<Fence> fence;
+        ASSERT_EQ(NO_ERROR, surface2->dequeueBuffer(&buffers[i], &fence));
+    }
+
+    for (int i = 0; i < 100; i++) {
+        ASSERT_EQ(NO_ERROR, surface2->cancelBuffer(buffers[i], Fence::NO_FENCE));
+    }
+
+    ASSERT_EQ(NO_ERROR, surface2->disconnect(NATIVE_WINDOW_API_CPU));
+}
 
 TEST_F(SurfaceTest, isBufferOwned) {
     const int TEST_USAGE_FLAGS = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_HW_RENDER;
@@ -2939,6 +3102,20 @@ TEST_F(SurfaceTest, DisconnectWhileDequeued_ReconnectDoesNotAffectLeakedBuffers)
     ASSERT_EQ(nullptr, wpBufferA.promote());
 }
 
+TEST_F(SurfaceTest, Detach_BufferIsNotLeaked) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make(), false));
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+
+    wp<GraphicBuffer> weakBuffer = buffer;
+    buffer = nullptr;
+    ASSERT_EQ(OK, surface->detachBuffer(weakBuffer.promote()));
+    ASSERT_EQ(nullptr, weakBuffer.promote());
+}
+
 TEST_F(SurfaceTest, DiscardDetach_DoesNotDeadlock) {
     constexpr size_t kLotsOfBuffers = 512;
     auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
@@ -3112,4 +3289,371 @@ TEST_F(SurfaceTest, DisconnectWithBadApi) {
     ASSERT_EQ(IGraphicBufferConsumer::STALE_BUFFER_SLOT, consumer->releaseBuffer(item));
     ASSERT_EQ(1u, surfaceListener->mReleasedCount);
 }
+
+enum class LegacyBufferDropMode : uint8_t {
+    Disabled = 0,
+    Enabled = 1,
+};
+
+void CheckLegacyBufferDropMode(sp<BufferItemConsumer> consumer, sp<Surface> surface,
+                               LegacyBufferDropMode mode) {
+    // Clear all the buffers for a fresh queue.
+    for (;;) {
+        BufferItem item;
+        status_t ret = consumer->acquireBuffer(&item, 0);
+        if (ret == BufferItemConsumer::NO_BUFFER_AVAILABLE) {
+            break;
+        }
+        EXPECT_EQ(OK, consumer->releaseBuffer(item));
+    }
+
+    sp<GraphicBuffer> bufferA, bufferB, bufferC, bufferD;
+    sp<Fence> fenceA, fenceB, fenceC, fenceD;
+    EXPECT_EQ(OK, surface->dequeueBuffer(&bufferA, &fenceA));
+    EXPECT_EQ(OK, surface->queueBuffer(bufferA, fenceA));
+    EXPECT_EQ(OK, surface->dequeueBuffer(&bufferB, &fenceB));
+    EXPECT_EQ(OK, surface->queueBuffer(bufferB, fenceB));
+    EXPECT_EQ(OK, surface->dequeueBuffer(&bufferC, &fenceC));
+    EXPECT_EQ(OK, surface->queueBuffer(bufferC, fenceC));
+    EXPECT_EQ(OK, surface->dequeueBuffer(&bufferD, &fenceD));
+    EXPECT_EQ(OK, surface->queueBuffer(bufferD, fenceD));
+
+    switch (mode) {
+        case LegacyBufferDropMode::Enabled: {
+            // The queue will replace the last buffer.
+            EXPECT_NE(bufferA, bufferB);
+            EXPECT_EQ(bufferA, bufferC);
+            EXPECT_EQ(bufferB, bufferD);
+            break;
+        }
+        case LegacyBufferDropMode::Disabled: {
+            EXPECT_NE(bufferA, bufferB);
+            EXPECT_NE(bufferA, bufferC);
+            EXPECT_NE(bufferA, bufferD);
+            EXPECT_NE(bufferB, bufferC);
+            EXPECT_NE(bufferB, bufferD);
+            EXPECT_NE(bufferC, bufferD);
+            break;
+        }
+        default: {
+            FAIL() << "Unknown LegacyBufferDropMode: " << static_cast<uint8_t>(mode);
+            break;
+        }
+    }
+}
+
+TEST_F(SurfaceTest, LegacyBufferDrop_AppOwned) {
+    auto [consumer, surface] =
+            BufferItemConsumer::create(TEST_PRODUCER_USAGE_BITS, 10, /* controlledByApp */ true);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+
+    // Legacy buffer drop starts out true.
+    CheckLegacyBufferDropMode(consumer, surface, LegacyBufferDropMode::Enabled);
+
+    ASSERT_EQ(OK, surface->setLegacyBufferDrop(false));
+
+    CheckLegacyBufferDropMode(consumer, surface, LegacyBufferDropMode::Disabled);
+}
+
+TEST_F(SurfaceTest, LegacyBufferDrop_PresentMode) {
+    auto [consumer, surface] =
+            BufferItemConsumer::create(TEST_PRODUCER_USAGE_BITS, 10, /* controlledByApp */ true);
+    sp<ANativeWindow> window(surface);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+
+    // In default mode, legacy buffer mode should be enabled
+    ASSERT_EQ(NO_ERROR,
+              native_window_set_present_mode(window.get(), ANATIVEWINDOW_PRESENT_DEFAULT));
+    CheckLegacyBufferDropMode(consumer, surface, LegacyBufferDropMode::Enabled);
+
+    // With fifo latest ready, legacy buffer mode should be disabled
+    ASSERT_EQ(NO_ERROR,
+              native_window_set_present_mode(window.get(),
+                                             ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY));
+    CheckLegacyBufferDropMode(consumer, surface, LegacyBufferDropMode::Disabled);
+}
+
+// Test for native_window_get_last_replaced_frame_id, which is used by Vulkan's
+// vkWaitForPresent2KHR to know when a frame has been replaced in the queue.
+TEST_F(SurfaceTest, PresentWaitANWGetLastReplacedFrameIdIsCorrect) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    sp<ANativeWindow> window(surface);
+
+    // Async mode is required for buffers to be dropped.
+    ASSERT_EQ(OK, surface->setAsyncMode(true));
+
+    // We don't need a listener for this test.
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false));
+
+    uint64_t lastReplacedFrameId = 0;
+    // Before any buffers are queued, the last replaced frame ID should be NOT_ENOUGH_DATA
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(0u, lastReplacedFrameId);
+
+    sp<GraphicBuffer> buffer1;
+    sp<Fence> fence1;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer1, &fence1));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer1, fence1)); // frame 1
+
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(0u, lastReplacedFrameId);
+
+    sp<GraphicBuffer> buffer2;
+    sp<Fence> fence2;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer2, &fence2));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer2, fence2)); // frame 2, replaces frame 1
+
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(1u, lastReplacedFrameId);
+
+    sp<GraphicBuffer> buffer3;
+    sp<Fence> fence3;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer3, &fence3));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer3, fence3)); // frame 3, replaces frame 2
+
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(2u, lastReplacedFrameId);
+
+    // Acquire the buffer to make sure the queue is not empty.
+    BufferItem item;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    // The acquired buffer should be buffer3, with frame number 3.
+    ASSERT_EQ(item.mFrameNumber, 3u);
+
+    // The last replaced frame ID should not change after acquiring a buffer.
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(2u, lastReplacedFrameId);
+
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+}
+
+TEST_F(SurfaceTest, FrameNumberIsResetAfterReconnect) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    sp<ANativeWindow> window(surface);
+
+    // Async mode is required for buffers to be dropped.
+    ASSERT_EQ(OK, surface->setAsyncMode(true));
+
+    // We don't need a listener for this test.
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false));
+
+    uint64_t lastReplacedFrameId = 0;
+    // Before any buffers are queued, the last replaced frame ID should be 0.
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(0u, lastReplacedFrameId);
+
+    sp<GraphicBuffer> buffer1;
+    sp<Fence> fence1;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer1, &fence1));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer1, fence1)); // frame 1
+
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(0u, lastReplacedFrameId);
+
+    sp<GraphicBuffer> buffer2;
+    sp<Fence> fence2;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer2, &fence2));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer2, fence2)); // frame 2, replaces frame 1
+
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(1u, lastReplacedFrameId);
+
+    // Disconnect and reconnect
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false));
+
+    // Check value resets
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(1u, lastReplacedFrameId);
+}
+
+// Test for native_window_get_last_replaced_frame_id, which is used by Vulkan's
+// vkWaitForPresent2KHR to know when a frame has been replaced in the queue.
+TEST_F(SurfaceTest, PresentWaitANWGetLastReplacedFrameIdIsCorrect_Plural) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    sp<ANativeWindow> window(surface);
+
+    // Async mode is required for buffers to be dropped.
+    ASSERT_EQ(OK, surface->setAsyncMode(true));
+
+    // We don't need a listener for this test.
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, nullptr, false));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(2));
+
+    uint64_t lastReplacedFrameId = 0;
+    // Before any buffers are queued, the last replaced frame ID should be NOT_ENOUGH_DATA
+    ASSERT_EQ(NOT_ENOUGH_DATA,
+              native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(0u, lastReplacedFrameId);
+
+    std::vector<Surface::BatchBuffer> buffers(2);
+    std::vector<Surface::BatchQueuedBuffer> queuedBuffers;
+
+    ASSERT_EQ(OK, surface->dequeueBuffers(&buffers));
+    for (const auto& b : buffers) {
+        queuedBuffers.push_back({b.buffer, b.fenceFd, NATIVE_WINDOW_TIMESTAMP_AUTO});
+    }
+    ASSERT_EQ(OK, surface->queueBuffers(queuedBuffers)); // frames 1 and 2. frame 2 replaces 1.
+
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(1u, lastReplacedFrameId);
+
+    queuedBuffers.clear();
+    ASSERT_EQ(OK, surface->dequeueBuffers(&buffers));
+    for (const auto& b : buffers) {
+        queuedBuffers.push_back({b.buffer, b.fenceFd, NATIVE_WINDOW_TIMESTAMP_AUTO});
+    }
+    // frames 3 and 4. frame 3 replaces 2, frame 4 replaces 3.
+    ASSERT_EQ(OK, surface->queueBuffers(queuedBuffers));
+
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(3u, lastReplacedFrameId);
+
+    // Acquire the buffer to make sure the queue is not empty.
+    BufferItem item;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    // The acquired buffer should be buffer with frame number 4.
+    ASSERT_EQ(4u, item.mFrameNumber);
+
+    // The last replaced frame ID should not change after acquiring a buffer.
+    ASSERT_EQ(OK, native_window_get_last_replaced_frame_id(window.get(), &lastReplacedFrameId));
+    ASSERT_EQ(3u, lastReplacedFrameId);
+
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+}
+
+namespace {
+
+struct OnAcquiredCallbackState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool called = false;
+    uint64_t bufferId = 0;
+    uint64_t frameId = 0;
+};
+
+void onAcquiredCallback(uint64_t bufferId, uint64_t frameId, void* data) {
+    OnAcquiredCallbackState* state = static_cast<OnAcquiredCallbackState*>(data);
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->called = true;
+    state->bufferId = bufferId;
+    state->frameId = frameId;
+    state->cv.notify_one();
+}
+
+} // namespace
+
+class OnAcquiredListener : public StubSurfaceListener {};
+
+//  Test for ANativeWindow_OnAcquiredCallback, which is used by Vulkan's
+//  vkWaitForPresent2KHR to know when a frame has been presented.
+TEST_F(SurfaceTest, PresentWaitANWOnBufferAcquiredCallbackIsCalled) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    sp<ANativeWindow> window(surface);
+
+    sp<OnAcquiredListener> listener = sp<OnAcquiredListener>::make();
+    native_window_api_connect_with_listener(window.get(), NATIVE_WINDOW_API_CPU, false, true, true);
+
+    OnAcquiredCallbackState state;
+    native_window_set_on_acquired_callback(window.get(), onAcquiredCallback, &state);
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+
+    BufferItem item;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+
+    // Wait for callback
+    {
+        using namespace std::chrono_literals;
+        std::unique_lock<std::mutex> lock(state.mutex);
+        ASSERT_TRUE(state.cv.wait_for(lock, 1s, [&state] { return state.called; }));
+        ASSERT_TRUE(state.called);
+        ASSERT_EQ(state.bufferId, buffer->getId());
+        // frame number should be 1 for the first buffer
+        ASSERT_EQ(state.frameId, 1u);
+    }
+
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+}
+
+namespace {
+
+struct OnDroppedCallbackState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool called = false;
+    uint64_t bufferId = 0;
+    uint64_t frameId = 0;
+};
+
+void onDroppedCallback(uint64_t bufferId, uint64_t frameId, void* data) {
+    OnDroppedCallbackState* state = static_cast<OnDroppedCallbackState*>(data);
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->called = true;
+    state->bufferId = bufferId;
+    state->frameId = frameId;
+    state->cv.notify_one();
+}
+
+} // namespace
+
+class OnDroppedListener : public StubSurfaceListener {};
+
+// Test for ANativeWindow_OnDroppedCallback, which is used by Vulkan's
+// vkWaitForPresent2KHR to know when a frame has been dropped.
+TEST_F(SurfaceTest, PresentWaitANWOnBufferDroppedCallbackIsCalled) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+    sp<ANativeWindow> window(surface);
+
+    sp<OnDroppedListener> listener = sp<OnDroppedListener>::make();
+    native_window_api_connect_with_listener(window.get(), NATIVE_WINDOW_API_CPU, false, true, true);
+
+    OnDroppedCallbackState state;
+    native_window_set_on_dropped_callback(window.get(), onDroppedCallback, &state);
+    native_window_set_present_mode(window.get(), ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY);
+    sp<GraphicBuffer> bufferToDrop;
+    sp<Fence> fenceToDrop;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&bufferToDrop, &fenceToDrop));
+    ASSERT_EQ(OK, surface->queueBuffer(bufferToDrop, fenceToDrop));
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    ASSERT_EQ(OK, surface->queueBuffer(buffer, fence));
+
+    BufferItem item;
+    // The dropped buffer is gone, so acquire should get the second buffer.
+    ASSERT_EQ(OK, consumer->acquireBuffer(&item, 0));
+    ASSERT_EQ(item.mGraphicBuffer->getId(), buffer->getId());
+
+    // Wait for callback
+    {
+        using namespace std::chrono_literals;
+        std::unique_lock<std::mutex> lock(state.mutex);
+        ASSERT_TRUE(state.cv.wait_for(lock, 1s, [&state] { return state.called; }));
+        ASSERT_TRUE(state.called);
+        ASSERT_EQ(state.bufferId, bufferToDrop->getId());
+        // frame number should be 1 for the first buffer
+        ASSERT_EQ(state.frameId, 1u);
+    }
+
+    ASSERT_EQ(OK, consumer->releaseBuffer(item));
+    ASSERT_EQ(OK, surface->disconnect(NATIVE_WINDOW_API_CPU));
+}
+
 } // namespace android

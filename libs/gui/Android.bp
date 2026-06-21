@@ -130,6 +130,7 @@ filegroup {
     srcs: [
         "android/gui/BorderSettings.aidl",
         "android/gui/BoxShadowSettings.aidl",
+        "android/gui/CompositionFilterFlag.aidl",
         "android/gui/CornerRadiiData.aidl",
         "android/gui/DropInputMode.aidl",
         "android/gui/EarlyWakeupInfo.aidl",
@@ -228,6 +229,8 @@ filegroup {
         "android/gui/InputApplicationInfo.aidl",
         "android/gui/WindowInfo.aidl",
         "android/gui/WindowInfosUpdate.aidl",
+        "aidl/android/gui/GraphicBuffersRegisterInfo.aidl",
+        "aidl/android/gui/GraphicBuffersUnregisterInfo.aidl",
     ],
 }
 
@@ -296,7 +299,8 @@ filegroup {
         ":framework_native_aidl_gui",
         ":inputconstants_aidl",
         ":libgui_bufferqueue_sources",
-
+        ":rendercommandbuffer_sources",
+        "AsyncWorker.cpp",
         "BitTube.cpp",
         "BLASTBufferQueue.cpp",
         "BufferItemConsumer.cpp",
@@ -311,6 +315,8 @@ filegroup {
         "FenceMonitor.cpp",
         "Flags.cpp",
         "GLConsumer.cpp",
+        "GraphicBuffersRegisterInfo.cpp",
+        "GraphicBuffersUnregisterInfo.cpp",
         "IGraphicBufferProducer.cpp",
         "IProducerListener.cpp",
         "ISurfaceComposer.cpp",
@@ -334,6 +340,17 @@ filegroup {
         "bufferqueue/1.0/H2BGraphicBufferProducer.cpp",
         "bufferqueue/2.0/B2HProducerListener.cpp",
         "bufferqueue/2.0/H2BGraphicBufferProducer.cpp",
+        "bufferqueue/2.0/Surface2HGraphicBufferProducer.cpp",
+        "bufferqueue/1.0/Surface2HGraphicBufferProducer.cpp",
+    ],
+}
+
+filegroup {
+    name: "rendercommandbuffer_sources",
+    srcs: [
+        "RenderCommandBuffer.cpp",
+        "RenderCommandBufferProducer.cpp",
+        "RenderCommandBufferConsumer.cpp",
     ],
 }
 
@@ -345,6 +362,46 @@ cc_defaults {
         // Only check our headers
         "--header-filter=^.*frameworks/native/libs/gui/.*.h$",
     ],
+    tidy_checks: [
+        "-android-cloexec-dup",
+        "-bugprone-argument-comment",
+        "-bugprone-branch-clone",
+        "-bugprone-forward-declaration-namespace",
+        "-bugprone-macro-parentheses",
+        "-bugprone-nondeterministic-pointer-iteration-order",
+        "-bugprone-switch-missing-default-case",
+        "-cert-dcl50-cpp",
+        "-cert-int09-c",
+        "-cert-oop54-cpp",
+        "-clang-analyzer-cplusplus.Move",
+        "-clang-analyzer-cplusplus.NewDeleteLeaks",
+        "-clang-analyzer-deadcode.DeadStores",
+        "-clang-analyzer-optin.cplusplus.VirtualCall",
+        "-clang-analyzer-optin.performance.Padding",
+        "-clang-analyzer-security.ArrayBound",
+        "-clang-analyzer-unix.StdCLibraryFunctions",
+        "-clang-diagnostic-deprecated-declarations",
+        "-misc-header-include-cycle",
+        "-misc-include-cleaner",
+        "-misc-unconventional-assign-operator",
+        "-misc-unused-using-decls",
+        "-misc-use-internal-linkage",
+        "-performance-enum-size", // triggered by AIDL-generated files
+        "-performance-unnecessary-value-param", // false positives for small structs.
+        "-portability-template-virtual-member-function",
+    ],
+    tidy_checks_as_errors: [
+        "abseil-*",
+        "android-*",
+        "bugprone-*",
+        "cert-*",
+        "clang-*",
+        "google-*",
+        "misc-*",
+        "performance*",
+        "portability*",
+    ],
+
     static_libs: [
         "libgui_aidl_static",
         "libgui_window_info_static",
@@ -409,6 +466,7 @@ cc_defaults {
 
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+        "-DFMT_CPP_LIB_FILESYSTEM=0", // b/455625875
         "-Wthread-safety",
     ],
 }
@@ -452,6 +510,7 @@ filegroup {
         "BufferQueue.cpp",
         "BufferQueueConsumer.cpp",
         "BufferQueueCore.cpp",
+        "BufferQueueHelpers.cpp",
         "BufferQueueProducer.cpp",
         "BufferQueueThreadState.cpp",
         "BufferSlot.cpp",
@@ -584,3 +643,9 @@ cc_library_shared {
 }
 
 subdirs = ["tests"]
+
+cc_library_headers {
+    name: "liblocklessqueue_headers",
+    host_supported: true,
+    export_include_dirs: ["include"],
+}

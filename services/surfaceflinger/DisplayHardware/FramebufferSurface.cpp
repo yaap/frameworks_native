@@ -26,22 +26,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <utils/String8.h>
-#include <log/log.h>
-
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
+#include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>
 #include <gui/Surface.h>
 #include <hardware/hardware.h>
-
+#include <log/log.h>
 #include <ui/DebugUtils.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/Rect.h>
+#include <utils/Mutex.h>
+#include <utils/String8.h>
 
+#include "../SurfaceFlinger.h"
 #include "FramebufferSurface.h"
 #include "HWComposer.h"
-#include "../SurfaceFlinger.h"
+#include "HwcSlotTracker.h"
+#include "MutexUtils.h"
 
 namespace android {
 
@@ -49,43 +51,34 @@ using ui::Dataspace;
 
 FramebufferSurface::FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
                                        const ui::Size& size, const ui::Size& maxSize)
-      : ConsumerBase(),
-        mDisplayId(displayId),
-        mMaxSize(maxSize),
-        mLimitedSize(limitSize(size)),
-        mCurrentBufferSlot(-1),
-        mCurrentBuffer(),
-        mCurrentFence(Fence::NO_FENCE),
-        mHwc(hwc),
-        mHasPendingRelease(false),
-        mPreviousBufferSlot(BufferQueue::INVALID_BUFFER_SLOT),
-        mPreviousBuffer() {
+      : mDisplayId(displayId), mMaxSize(maxSize), mLimitedSize(limitSize(size)), mHwc(hwc) {
     ALOGV("Creating for display %s", to_string(displayId).c_str());
 
-    for (size_t i = 0; i < sizeof(mHwcBufferIds) / sizeof(mHwcBufferIds[0]); ++i) {
-        mHwcBufferIds[i] = UINT64_MAX;
-    }
-}
+    std::tie(mRendererConsumer, mRendererSurface) = BufferItemConsumer::create(
+            GRALLOC_USAGE_HW_FB | GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_COMPOSER);
 
-void FramebufferSurface::initializeConsumer() {
-    mName = "FramebufferSurface";
-    mConsumer->setConsumerName(mName);
-    mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_FB |
-                                       GRALLOC_USAGE_HW_RENDER |
-                                       GRALLOC_USAGE_HW_COMPOSER);
-    mConsumer->setDefaultBufferSize(mLimitedSize.width, mLimitedSize.height);
-    mConsumer->setMaxAcquiredBufferCount(
-            SurfaceFlinger::maxFrameBufferAcquiredBuffers - 1);
+    mRendererConsumer->setName(String8("FramebufferSurface"));
+    mRendererConsumer->setDefaultBufferSize(mLimitedSize.width, mLimitedSize.height);
+    mRendererConsumer->setMaxAcquiredBufferCount(SurfaceFlinger::maxFrameBufferAcquiredBuffers - 1);
 }
 
 void FramebufferSurface::onFirstRef() {
-    ConsumerBase::onFirstRef();
-    initializeConsumer();
+    mRendererConsumer->setBufferFreedListener(
+            wp<BufferItemConsumer::BufferFreedListener>::fromExisting(this));
+}
+
+void FramebufferSurface::onBufferFreed(const sp<GraphicBuffer>& graphicBuffer) {
+    Mutex::Autolock lock(mMutex);
+    onBufferFreedLocked(graphicBuffer);
+}
+
+void FramebufferSurface::onBufferFreedLocked(const sp<GraphicBuffer>& graphicBuffer) {
+    mHwcSlotTracker.remove(graphicBuffer);
 }
 
 void FramebufferSurface::resizeBuffers(const ui::Size& newSize) {
     const auto limitedSize = limitSize(newSize);
-    mConsumer->setDefaultBufferSize(limitedSize.width, limitedSize.height);
+    mRendererConsumer->setDefaultBufferSize(limitedSize.width, limitedSize.height);
 }
 
 status_t FramebufferSurface::beginFrame(bool /*mustRecompose*/) {
@@ -98,9 +91,12 @@ status_t FramebufferSurface::prepareFrame(CompositionType /*compositionType*/) {
 
 status_t FramebufferSurface::advanceFrame(float hdrSdrRatio) {
     Mutex::Autolock lock(mMutex);
-
     BufferItem item;
-    status_t err = acquireBufferLocked(&item, 0);
+    status_t err = mRendererConsumer->acquireBuffer(&item, 0, /*waitForFence*/ false,
+                                                    [&](const sp<GraphicBuffer>& buffer) {
+                                                        ASSERT_MUTEX(mMutex);
+                                                        onBufferFreedLocked(buffer);
+                                                    });
     if (err == BufferQueue::NO_BUFFER_AVAILABLE) {
         mDataspace = Dataspace::UNKNOWN;
         return NO_ERROR;
@@ -110,32 +106,18 @@ status_t FramebufferSurface::advanceFrame(float hdrSdrRatio) {
         return err;
     }
 
-    // If the BufferQueue has freed and reallocated a buffer in mCurrentSlot
-    // then we may have acquired the slot we already own.  If we had released
-    // our current buffer before we call acquireBuffer then that release call
-    // would have returned STALE_BUFFER_SLOT, and we would have called
-    // freeBufferLocked on that slot.  Because the buffer slot has already
-    // been overwritten with the new buffer all we have to do is skip the
-    // releaseBuffer call and we should be in the same state we'd be in if we
-    // had released the old buffer first.
-    if (mCurrentBufferSlot != BufferQueue::INVALID_BUFFER_SLOT &&
-        item.mSlot != mCurrentBufferSlot) {
-        mHasPendingRelease = true;
-        mPreviousBufferSlot = mCurrentBufferSlot;
-        mPreviousBuffer = mCurrentBuffer;
+    if (mFrameData && mFrameData->mBuffer != item.mGraphicBuffer) {
+        mPreviousFrameData.swap(mFrameData);
     }
-    mCurrentBufferSlot = item.mSlot;
-    mCurrentBuffer = mSlots[mCurrentBufferSlot].mGraphicBuffer;
-    mCurrentFence = item.mFence;
+    mFrameData = {item.mGraphicBuffer, item.mFence};
     mDataspace = static_cast<Dataspace>(item.mDataSpace);
 
-    // assume HWC has previously seen the buffer in this slot
-    sp<GraphicBuffer> hwcBuffer = sp<GraphicBuffer>(nullptr);
-    if (mCurrentBuffer->getId() != mHwcBufferIds[mCurrentBufferSlot]) {
-        mHwcBufferIds[mCurrentBufferSlot] = mCurrentBuffer->getId();
-        hwcBuffer = mCurrentBuffer; // HWC hasn't previously seen this buffer in this slot
-    }
-    status_t result = mHwc.setClientTarget(mDisplayId, mCurrentBufferSlot, mCurrentFence, hwcBuffer,
+    // If HWC hasn't seen the buffer before, or the buffer has changed, send it to HWC. Otherwise,
+    // all we need is the slot itself.
+    auto [requiresRefresh, hwcSlot] = mHwcSlotTracker.getSlot(mFrameData->mBuffer);
+    sp<GraphicBuffer> hwcBuffer = requiresRefresh ? mFrameData->mBuffer : nullptr;
+
+    status_t result = mHwc.setClientTarget(mDisplayId, hwcSlot, mFrameData->mFence, hwcBuffer,
                                            mDataspace, hdrSdrRatio);
     if (result != NO_ERROR) {
         ALOGE("error posting framebuffer: %s (%d)", strerror(-result), result);
@@ -145,28 +127,25 @@ status_t FramebufferSurface::advanceFrame(float hdrSdrRatio) {
     return NO_ERROR;
 }
 
-void FramebufferSurface::freeBufferLocked(int slotIndex) {
-    ConsumerBase::freeBufferLocked(slotIndex);
-    if (slotIndex == mCurrentBufferSlot) {
-        mCurrentBufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
-    }
-}
-
 void FramebufferSurface::onFrameCommitted() {
-    if (mHasPendingRelease) {
-        sp<Fence> fence = mHwc.getPresentFence(mDisplayId);
-        if (fence->isValid()) {
-            status_t result = addReleaseFence(mPreviousBufferSlot,
-                    mPreviousBuffer, fence);
-            ALOGE_IF(result != NO_ERROR, "onFrameCommitted: failed to add the"
-                    " fence: %s (%d)", strerror(-result), result);
-        }
-        status_t result = releaseBufferLocked(mPreviousBufferSlot, mPreviousBuffer);
-        ALOGE_IF(result != NO_ERROR, "onFrameCommitted: error releasing buffer:"
-                " %s (%d)", strerror(-result), result);
+    Mutex::Autolock lock(mMutex);
+    // We only release the frame once an entire new frame has replaced it. This is because the frame
+    // will be alive in the display hardware for panel refreshes until another has replaced it.
+    if (mPreviousFrameData) {
+        sp<Fence> fence =
+                Fence::merge("FramebufferSurface-Acquire+Present", mPreviousFrameData->mFence,
+                             mHwc.getPresentFence(mDisplayId));
+        status_t result = mRendererConsumer->releaseBuffer(mPreviousFrameData->mBuffer, fence,
+                                                           [&](const sp<GraphicBuffer>& buffer) {
+                                                               ASSERT_MUTEX(mMutex);
+                                                               onBufferFreedLocked(buffer);
+                                                           });
+        ALOGE_IF(result != NO_ERROR,
+                 "onFrameCommitted: error releasing buffer:"
+                 " %s (%d)",
+                 strerror(-result), result);
 
-        mPreviousBuffer.clear();
-        mHasPendingRelease = false;
+        mPreviousFrameData.reset();
     }
 }
 
@@ -200,15 +179,11 @@ void FramebufferSurface::dumpAsString(String8& result) const {
     result.appendFormat("      mDataspace=%s (%d)\n",
                         dataspaceDetails(static_cast<android_dataspace>(mDataspace)).c_str(),
                         mDataspace);
-    ConsumerBase::dumpLocked(result, "      ");
-}
-
-void FramebufferSurface::dumpLocked(String8& result, const char* prefix) const {
-    ConsumerBase::dumpLocked(result, prefix);
+    mRendererConsumer->dumpState(result);
 }
 
 const sp<Fence>& FramebufferSurface::getClientTargetAcquireFence() const {
-    return mCurrentFence;
+    return mFrameData ? mFrameData->mFence : Fence::NO_FENCE;
 }
 
 } // namespace android

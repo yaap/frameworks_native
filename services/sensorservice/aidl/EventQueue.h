@@ -39,6 +39,9 @@ private:
     friend class EventQueueLooperCallback;
     sp<::android::Looper> mLooper;
     sp<::android::SensorEventQueue> mInternalQueue;
+
+    std::mutex mActiveSensorsLock;
+    std::set<int32_t> mActiveSensors;
 };
 
 } // namespace implementation

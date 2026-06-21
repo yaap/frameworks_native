@@ -19,11 +19,9 @@
 #include <SurfaceFlingerProperties.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/ISurfaceComposer.h>
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware_buffer.h>
 #include <binder/ProcessState.h>
 #include <com_android_graphics_libgui_flags.h>
-#include <configstore/Utils.h>
 #include <gui/AidlUtil.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>

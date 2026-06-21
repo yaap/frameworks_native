@@ -33,7 +33,6 @@ cc_test {
         "-Werror",
     ],
     shared_libs: [
-        "android.os.flags-aconfig-cc-host",
         "libbase",
         "libperfetto_c",
         "libprotobuf-cpp-lite",

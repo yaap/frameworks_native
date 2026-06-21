@@ -94,6 +94,9 @@ constexpr int ODEX_IS_PRIVATE = 2;
 constexpr userid_t USER_NULL = -10000;
 constexpr userid_t USER_SYSTEM = 0;
 
+// NOTE: keep in sync with Process.java
+constexpr const char* kPccDataSuffix = "-pcc";
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
 
 }  // namespace installd

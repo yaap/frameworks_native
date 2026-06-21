@@ -16,6 +16,7 @@
 
 use binder::unstable_api::new_spibinder;
 use binder::{FromIBinder, SpIBinder, StatusCode, Strong};
+use binder_ndk_sys::uid_t;
 use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
 use std::os::fd::RawFd;
 use std::os::raw::{c_int, c_void};
@@ -53,6 +54,17 @@ impl Default for RpcSession {
 }
 
 impl RpcSessionRef {
+    /// Fetch the UID (if present) of the client process for this session.
+    pub fn get_client_uid(&self) -> Option<uid_t> {
+        let mut uid: uid_t = 0;
+        // SAFETY: The session object is guaranteed to be valid for the lifetime
+        // of the RpcSessionRef. `uid` is a valid mutable reference.
+        unsafe {
+            binder_rpc_unstable_bindgen::ARpcSession_getClientUid(self.as_ptr(), &mut uid)
+                .then_some(uid)
+        }
+    }
+
     /// Sets the file descriptor transport mode for this session.
     pub fn set_file_descriptor_transport_mode(&self, mode: FileDescriptorTransportMode) {
         // SAFETY: Only passes the 'self' pointer as an opaque handle.

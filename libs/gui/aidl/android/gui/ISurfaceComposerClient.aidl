@@ -36,6 +36,7 @@ interface ISurfaceComposerClient {
     const int eProtectedByDRM = 0x00001000;
     const int eCursorWindow = 0x00002000;
     const int eNoColorFill = 0x00004000;
+    const int eNotAddToRoot = 0x00008000;
 
     const int eFXSurfaceBufferQueue = 0x00000000;
     const int eFXSurfaceEffect = 0x00020000;
@@ -58,7 +59,9 @@ interface ISurfaceComposerClient {
      */
     FrameStats getLayerFrameStats(IBinder handle);
 
-    CreateSurfaceResult mirrorSurface(IBinder mirrorFromHandle, @nullable IBinder stopAtHandle);
+    CreateSurfaceResult mirrorSurface(IBinder mirrorFromHandle, @nullable IBinder stopAtHandle, @nullable IBinder cropByHandle);
+
+    CreateSurfaceResult mirrorLayerStack(long displayId);
 
     CreateSurfaceResult mirrorDisplay(long displayId);
 

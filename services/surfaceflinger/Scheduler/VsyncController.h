@@ -49,15 +49,18 @@ public:
      * Adds a hw sync timestamp to the model. The controller will use the timestamp
      * time as a vsync signal.
      *
-     * \param [in] timestamp       The HW Vsync timestamp
-     * \param [in] hwcVsyncPeriod  The Vsync period reported by composer, if available
-     * \param [out] periodFlushed  True if the vsync period changed is completed
+     * \param [in] timestamp       The HW Vsync timestamp.
+     * \param [in] hwcVsyncPeriod  The Vsync period reported by composer, if available.
+     * \param [out] periodFlushed  True if the vsync period changed is completed.
+     * \param [in] source          The origin of the timestamp, as defined by the `VsyncTimeSource`
+     * enum.
      * \return                     True if the model needs more vsync signals to make
      *                             an accurate prediction,
-     *                             False otherwise
+     *                             False otherwise.
      */
     virtual bool addHwVsyncTimestamp(nsecs_t timestamp, std::optional<nsecs_t> hwcVsyncPeriod,
-                                     bool* periodFlushed) = 0;
+                                     bool* periodFlushed,
+                                     scheduler::VSyncTracker::VsyncTimeSource source) = 0;
 
     /*
      * Inform the controller that the display mode is changing and the controller needs to
@@ -82,6 +85,11 @@ public:
      * \param [in] powerMode
      */
     virtual void setDisplayPowerMode(hal::PowerMode powerMode) = 0;
+
+    /*
+     * Returns whether a display mode change is in progress.
+     */
+    virtual bool isModeChangeInProgress() const = 0;
 
     /*
      * Resets the vsync model

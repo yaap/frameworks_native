@@ -48,7 +48,27 @@ enum JankType {
     SurfaceFlingerStuffing = 0x100,
     // Frame was dropped, as a newer frame was ready and replaced this frame.
     Dropped = 0x200,
+    // Frame was not presented on time, but it is not causing a percivable jank as it is not
+    // part of an animation (e.g. a cursor blinking).
+    NonAnimating = 0x400,
+    // Frame vsync time was modified by the app.
+    AppResyncedJitter = 0x800,
+    // Display is not on (off or doze).
+    DisplayNotOn = 0x1000,
+    // Display mode change is in progress.
+    DisplayModeChangeInProgress = 0x2000,
+    // Display power mode change is in progress.
+    DisplayPowerModeChangeInProgress = 0x4000,
 };
+
+// IMPORTANT: update this whenever a new value is added to JankType.
+constexpr int kJankTypeAll = JankType::None | JankType::DisplayHAL |
+        JankType::SurfaceFlingerCpuDeadlineMissed | JankType::SurfaceFlingerGpuDeadlineMissed |
+        JankType::AppDeadlineMissed | JankType::PredictionError |
+        JankType::SurfaceFlingerScheduling | JankType::BufferStuffing | JankType::Unknown |
+        JankType::SurfaceFlingerStuffing | JankType::Dropped | JankType::NonAnimating |
+        JankType::AppResyncedJitter | JankType::DisplayNotOn |
+        JankType::DisplayModeChangeInProgress | JankType::DisplayPowerModeChangeInProgress;
 
 // Jank severity type tracked by SurfaceFlinger(SF) for Perfetto tracing and telemetry.
 enum class JankSeverityType {

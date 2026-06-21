@@ -383,7 +383,7 @@ ServiceManager::~ServiceManager() {
     for (const auto& [name, callbacks] : mNameToRegistrationCallback) {
         CHECK(!callbacks.empty()) << name;
         for (const auto& callback : callbacks) {
-            CHECK(callback != nullptr) << name;
+            CHECK(callback.callback != nullptr) << name;
         }
     }
 
@@ -596,10 +596,7 @@ Status ServiceManager::addService(const std::string& name, const sp<IBinder>& bi
         CHECK(handleServiceClientCallback(2 /* sm + transaction */, name, false));
         mNameToService[name].guaranteeClient = true;
 
-        for (const sp<IServiceCallback>& cb : it->second) {
-            // permission checked in registerForNotifications
-            cb->onRegistration(name, binder);
-        }
+        dispatchRegistrationCallbacks(name, binder, allowIsolated, /*callbacks=*/it->second);
     }
 
     return Status::ok();
@@ -647,16 +644,6 @@ Status ServiceManager::registerForNotifications(
         return status;
     }
 
-    // note - we could allow isolated apps to get notifications if we
-    // keep track of isolated callbacks and non-isolated callbacks, but
-    // this is done since isolated apps shouldn't access lazy services
-    // so we should be able to use different APIs to keep things simple.
-    // Here, we disallow everything, because the service might not be
-    // registered yet.
-    if (is_multiuser_uid_isolated(ctx.uid)) {
-        return Status::fromExceptionCode(Status::EX_SECURITY, "isolated app");
-    }
-
     if (!isValidServiceName(name)) {
         ALOGE("%s Invalid service name: %s", ctx.toDebugString().c_str(), name.c_str());
         return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT, "Invalid service name.");
@@ -673,14 +660,19 @@ Status ServiceManager::registerForNotifications(
         return Status::fromExceptionCode(Status::EX_ILLEGAL_STATE, "Couldn't link to death.");
     }
 
-    mNameToRegistrationCallback[name].push_back(callback);
+    RegistrationCallback registrationCallback = {
+            .callback = callback,
+            .ctx = ctx,
+    };
+    mNameToRegistrationCallback[name].push_back(registrationCallback);
 
     if (auto it = mNameToService.find(name); it != mNameToService.end()) {
         const sp<IBinder>& binder = it->second.binder;
 
         // never null if an entry exists
         CHECK(binder != nullptr) << name;
-        callback->onRegistration(name, binder);
+        dispatchRegistrationCallbacks(name, binder, it->second.allowIsolated,
+                                      {registrationCallback});
     }
 
     return Status::ok();
@@ -832,10 +824,10 @@ void ServiceManager::removeRegistrationCallback(const wp<IBinder>& who,
                                     bool* found) {
     SM_PERFETTO_TRACE_FUNC();
 
-    std::vector<sp<IServiceCallback>>& listeners = (*it)->second;
+    std::vector<RegistrationCallback>& listeners = (*it)->second;
 
     for (auto lit = listeners.begin(); lit != listeners.end();) {
-        if (IInterface::asBinder(*lit) == who) {
+        if (IInterface::asBinder(lit->callback) == who) {
             if(found) *found = true;
             lit = listeners.erase(lit);
         } else {
@@ -1029,6 +1021,18 @@ bool ServiceManager::handleServiceClientCallback(size_t knownClients,
     // May be different than 'hasKernelReportedClients'. We intentionally delay
     // information about clients going away to reduce thrashing.
     return service.hasClients;
+}
+
+void ServiceManager::dispatchRegistrationCallbacks(
+        const std::string& serviceName, const sp<IBinder>& binder, bool allowIsolated,
+        const std::vector<RegistrationCallback>& callbacks) {
+    for (const auto& cb : callbacks) {
+        if (is_multiuser_uid_isolated(cb.ctx.uid) && !allowIsolated) {
+            continue;
+        }
+
+        cb.callback->onRegistration(serviceName, binder);
+    }
 }
 
 void ServiceManager::sendClientCallbackNotifications(const std::string& serviceName,

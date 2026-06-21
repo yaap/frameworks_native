@@ -95,6 +95,11 @@ static const std::vector<std::function<
                      std::vector<bool> value;
                      p_bundle->putBooleanVector(*key, value);
                  },
+                 [](FuzzedDataProvider*, std::shared_ptr<os::PersistableBundle> const& p_bundle,
+                    String16* key) -> void {
+                     std::vector<uint8_t> value;
+                     p_bundle->putByteVector(*key, value);
+                 },
                  [](FuzzedDataProvider* fdp, std::shared_ptr<os::PersistableBundle> const& p_bundle,
                     String16* key) -> void {
                      String16 value(fdp->ConsumeRandomLengthString(fdp->remaining_bytes()).c_str());

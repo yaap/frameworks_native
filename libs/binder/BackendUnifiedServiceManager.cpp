@@ -35,24 +35,6 @@ namespace android {
 // known socket that we expect the Unix Domain Socket servicemanager to be listening on.
 const char kUdsServiceManagerName[] = ANDROID_SOCKET_DIR "/rpc_servicemanager";
 
-#ifdef LIBBINDER_CLIENT_CACHE
-constexpr bool kUseCache = true;
-#else
-constexpr bool kUseCache = false;
-#endif
-
-#ifdef LIBBINDER_ADDSERVICE_CACHE
-constexpr bool kUseCacheInAddService = true;
-#else
-constexpr bool kUseCacheInAddService = false;
-#endif
-
-#ifdef LIBBINDER_REMOVE_CACHE_STATIC_LIST
-constexpr bool kRemoveStaticList = true;
-#else
-constexpr bool kRemoveStaticList = false;
-#endif
-
 using AidlServiceManager = android::os::IServiceManager;
 using android::os::IAccessor;
 using binder::Status;
@@ -103,6 +85,7 @@ static const char* kStaticCachableList[] = {
         "notification",
         "package",
         "package_native",
+        "pcc_sandbox_native",
         "performance_hint",
         "permission",
         "permission_checker",
@@ -151,21 +134,11 @@ bool BinderCacheWithInvalidation::isClientSideCachingEnabled(const std::string& 
               serviceName.c_str());
         return false;
     }
-    if (kRemoveStaticList) return true;
-    for (const char* name : kStaticCachableList) {
-        if (name == serviceName) {
-            return true;
-        }
-    }
-    return false;
+    return true;
 }
 
 Status BackendUnifiedServiceManager::updateCache(const std::string& serviceName,
                                                  const os::Service& service) {
-    if (!kUseCache) {
-        return Status::ok();
-    }
-
     if (service.getTag() == os::Service::Tag::serviceWithMetadata) {
         auto serviceWithMetadata = service.get<os::Service::Tag::serviceWithMetadata>();
         return updateCache(serviceName, serviceWithMetadata.service,
@@ -178,7 +151,7 @@ Status BackendUnifiedServiceManager::updateCache(const std::string& serviceName,
                                                  const sp<IBinder>& binder, bool isServiceLazy) {
     std::string traceStr;
     // Don't cache if service is lazy
-    if (kRemoveStaticList && isServiceLazy) {
+    if (isServiceLazy) {
         return Status::ok();
     }
     if (atrace_is_tag_enabled(ATRACE_TAG_AIDL)) {
@@ -194,7 +167,7 @@ Status BackendUnifiedServiceManager::updateCache(const std::string& serviceName,
                                       "BinderCacheWithInvalidation::updateCache failed: "
                                       "isBinderAlive_false");
     }
-    // If we reach here with kRemoveStaticList=true then we know service isn't lazy
+    // If we reach here we know service isn't lazy
     else if (mCacheForGetService->isClientSideCachingEnabled(serviceName)) {
         binder::ScopedTrace aidlTrace(ATRACE_TAG_AIDL,
                                       "BinderCacheWithInvalidation::updateCache successful");
@@ -209,9 +182,6 @@ Status BackendUnifiedServiceManager::updateCache(const std::string& serviceName,
 
 bool BackendUnifiedServiceManager::returnIfCached(const std::string& serviceName,
                                                   os::Service* _out) {
-    if (!kUseCache) {
-        return false;
-    }
     sp<IBinder> item = mCacheForGetService->getItem(serviceName);
     // TODO(b/363177618): Enable caching for binders which are always null.
     if (item != nullptr && item->isBinderAlive()) {
@@ -371,7 +341,7 @@ Status BackendUnifiedServiceManager::addService(const ::std::string& name,
         Status status =
                 mTheRealServiceManager->addService(name, service, allowIsolated, dumpPriority);
         // mEnableAddServiceCache is true by default.
-        if (kUseCacheInAddService && mEnableAddServiceCache && status.isOk()) {
+        if (mEnableAddServiceCache && status.isOk()) {
             return updateCache(name, service,
                                dumpPriority & android::os::IServiceManager::FLAG_IS_LAZY_SERVICE);
         }

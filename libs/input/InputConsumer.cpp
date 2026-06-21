@@ -29,14 +29,16 @@
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <android-base/result.h>
 #include <android-base/stringprintf.h>
 #include <binder/Parcel.h>
+#include <com_android_input_flags.h>
 #include <cutils/properties.h>
 #include <ftl/enum.h>
 #include <log/log.h>
+#include <statslog_input.h>
 #include <utils/Trace.h>
 
-#include <com_android_input_flags.h>
 #include <input/InputConsumer.h>
 #include <input/PrintTools.h>
 #include <input/TraceTools.h>
@@ -55,12 +57,7 @@ namespace {
 const bool DEBUG_TRANSPORT_CONSUMER =
         __android_log_is_loggable(ANDROID_LOG_DEBUG, LOG_TAG "Consumer", ANDROID_LOG_INFO);
 
-const bool IS_DEBUGGABLE_BUILD =
-#if defined(__ANDROID__)
-        android::base::GetBoolProperty("ro.debuggable", false);
-#else
-        true;
-#endif
+const bool IS_DEBUGGABLE_BUILD = android::base::GetBoolProperty("ro.debuggable", false);
 
 /**
  * Log debug messages about touch event resampling.
@@ -231,14 +228,17 @@ bool InputConsumer::isTouchResamplingEnabled() {
     return property_get_bool(PROPERTY_RESAMPLING_ENABLED, true);
 }
 
-status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consumeBatches,
-                                nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent) {
+InputConsumer::ConsumeResult InputConsumer::consume(InputEventFactoryInterface* factory,
+                                                    bool consumeBatches, nsecs_t frameTime,
+                                                    uint32_t* outSeq, InputEvent** outEvent) {
     ALOGD_IF(DEBUG_TRANSPORT_CONSUMER,
              "channel '%s' consumer ~ consume: consumeBatches=%s, frameTime=%" PRId64,
              mChannel->getName().c_str(), toString(consumeBatches), frameTime);
 
     *outSeq = 0;
     *outEvent = nullptr;
+
+    std::vector<InputMessage> unfinishedInputMessages;
 
     // Fetch the next input message.
     // Loop until an event can be returned or no additional events are received.
@@ -271,14 +271,15 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
                         break;
                     }
                 }
-                return result.error().code();
+                return ConsumeResult{result.error(), unfinishedInputMessages};
             }
         }
 
         switch (mMsg.header.type) {
             case InputMessage::Type::KEY: {
                 KeyEvent* keyEvent = factory->createKeyEvent();
-                if (!keyEvent) return NO_MEMORY;
+                if (!keyEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 initializeKeyEvent(*keyEvent, mMsg);
                 *outSeq = mMsg.header.seq;
@@ -305,7 +306,17 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
                         const size_t count = batch.samples.size();
                         for (size_t i = 0; i < count; i++) {
                             const InputMessage& msg = batch.samples[i];
-                            sendFinishedSignal(msg.header.seq, false);
+                            status_t status = sendFinishedSignal(msg.header.seq, false);
+                            if (status != OK) {
+                                // Failed to finish the input message, so adding to
+                                // unfinishedInputMessages vector to be retried by the caller.
+                                unfinishedInputMessages.push_back(msg);
+                                android::input::
+                                        stats_write(android::input::
+                                                            INPUT_UNFINISHED_MOTION_EVENT_REPORTED,
+                                                    mMsg.body.motion.source,
+                                                    mMsg.body.motion.action, status);
+                            }
                         }
                         batch.samples.erase(batch.samples.begin(), batch.samples.begin() + count);
                         mBatches.erase(mBatches.begin() + batchIndex);
@@ -317,7 +328,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
                                                          outSeq, outEvent);
                         mBatches.erase(mBatches.begin() + batchIndex);
                         if (result) {
-                            return result;
+                            return ConsumeResult{android::base::Error(result),
+                                                 unfinishedInputMessages};
                         }
                         ALOGD_IF(DEBUG_TRANSPORT_CONSUMER,
                                  "channel '%s' consumer ~ consumed batch event and "
@@ -340,7 +352,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
                 }
 
                 MotionEvent* motionEvent = factory->createMotionEvent();
-                if (!motionEvent) return NO_MEMORY;
+                if (!motionEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 updateTouchState(mMsg);
                 initializeMotionEvent(*motionEvent, mMsg);
@@ -364,7 +377,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
 
             case InputMessage::Type::FOCUS: {
                 FocusEvent* focusEvent = factory->createFocusEvent();
-                if (!focusEvent) return NO_MEMORY;
+                if (!focusEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 initializeFocusEvent(*focusEvent, mMsg);
                 *outSeq = mMsg.header.seq;
@@ -374,7 +388,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
 
             case InputMessage::Type::CAPTURE: {
                 CaptureEvent* captureEvent = factory->createCaptureEvent();
-                if (!captureEvent) return NO_MEMORY;
+                if (!captureEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 initializeCaptureEvent(*captureEvent, mMsg);
                 *outSeq = mMsg.header.seq;
@@ -384,7 +399,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
 
             case InputMessage::Type::DRAG: {
                 DragEvent* dragEvent = factory->createDragEvent();
-                if (!dragEvent) return NO_MEMORY;
+                if (!dragEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 initializeDragEvent(*dragEvent, mMsg);
                 *outSeq = mMsg.header.seq;
@@ -394,7 +410,8 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
 
             case InputMessage::Type::TOUCH_MODE: {
                 TouchModeEvent* touchModeEvent = factory->createTouchModeEvent();
-                if (!touchModeEvent) return NO_MEMORY;
+                if (!touchModeEvent)
+                    return ConsumeResult{android::base::Error(NO_MEMORY), unfinishedInputMessages};
 
                 initializeTouchModeEvent(*touchModeEvent, mMsg);
                 *outSeq = mMsg.header.seq;
@@ -403,7 +420,7 @@ status_t InputConsumer::consume(InputEventFactoryInterface* factory, bool consum
             }
         }
     }
-    return OK;
+    return ConsumeResult{{/* OK */}, unfinishedInputMessages};
 }
 
 status_t InputConsumer::consumeBatch(InputEventFactoryInterface* factory, nsecs_t frameTime,
@@ -563,8 +580,12 @@ void InputConsumer::rewriteMessage(TouchState& state, InputMessage& msg) {
     for (uint32_t i = 0; i < msg.body.motion.pointerCount; i++) {
         uint32_t id = msg.body.motion.pointers[i].properties.id;
         if (state.lastResample.idBits.hasBit(id)) {
+            const int32_t actionMasked = msg.body.motion.action & AMOTION_EVENT_ACTION_MASK;
+            const bool isUpEvent = (actionMasked == AMOTION_EVENT_ACTION_UP);
+            const bool isPointerUpEvent = (actionMasked == AMOTION_EVENT_ACTION_POINTER_UP);
             if (eventTime < state.lastResample.eventTime ||
-                state.recentCoordinatesAreIdentical(id)) {
+                state.recentCoordinatesAreIdentical(id) ||
+                (input_flags::fix_action_up_resampling() && (isUpEvent || isPointerUpEvent))) {
                 PointerCoords& msgCoords = msg.body.motion.pointers[i].coords;
                 const PointerCoords& resampleCoords = state.lastResample.getPointerById(id);
                 ALOGD_IF(debugResampling(), "[%d] - rewrite (%0.3f, %0.3f), old (%0.3f, %0.3f)", id,
@@ -709,10 +730,8 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
                                      lerp(currentCoords.getX(), otherCoords.getX(), alpha));
         resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_Y,
                                      lerp(currentCoords.getY(), otherCoords.getY(), alpha));
-        if (input_flags::clear_relative_axes_in_resampled_coords()) {
-            for (int32_t axis : relativeAxesToClearOnResample) {
-                resampledCoords.setAxisValue(axis, 0);
-            }
+        for (int32_t axis : relativeAxesToClearOnResample) {
+            resampledCoords.setAxisValue(axis, 0);
         }
         ALOGD_IF(debugResampling(),
                  "[%d] - out (%0.3f, %0.3f), cur (%0.3f, %0.3f), "

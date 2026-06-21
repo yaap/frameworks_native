@@ -29,13 +29,14 @@ public:
     FrameTimeline(std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid);
     ~FrameTimeline();
 
-    MOCK_METHOD0(onBootFinished, void());
-    MOCK_METHOD1(addSurfaceFrame, void(std::shared_ptr<scheduler::SurfaceFrame>));
-    MOCK_METHOD4(setSfWakeUp, void(int64_t, nsecs_t, Fps, Fps));
-    MOCK_METHOD3(setSfPresent,
-                 void(nsecs_t, const std::shared_ptr<FenceTime>&,
-                      const std::shared_ptr<FenceTime>&));
-    MOCK_METHOD1(computeFps, float(const std::unordered_set<int32_t>&));
+    MOCK_METHOD(void, onBootFinished, (), (override));
+    MOCK_METHOD(void, addSurfaceFrame, (std::shared_ptr<scheduler::SurfaceFrame>), (override));
+    MOCK_METHOD(void, setSfWakeUp,
+                (int64_t, nsecs_t, Fps, Fps, scheduler::FrameTimelineDisplayState), (override));
+    MOCK_METHOD(void, setSfPresent,
+                (nsecs_t, const std::shared_ptr<FenceTime>&, const std::shared_ptr<FenceTime>&),
+                (override));
+    MOCK_METHOD(float, computeFps, (const std::unordered_set<int32_t>&), (override));
 };
 
 } // namespace android::mock

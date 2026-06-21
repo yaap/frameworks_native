@@ -23,6 +23,7 @@
 #include <utils/Errors.h>
 #include <utils/Tokenizer.h>
 #include <set>
+#include <unordered_map>
 
 namespace android {
 
@@ -32,7 +33,9 @@ struct AxisInfo {
         MODE_NORMAL = 0,
         // Axis value should be inverted before reporting.
         MODE_INVERT = 1,
-        // Axis value should be split into two axes
+        // Axis value should be split into two logical axes based on splitValue, which is the
+        // threshold value for splitting between axis and highAxis (i.e. if reported axis value is
+        // less than splitValue, use axis, else use highAxis)
         MODE_SPLIT = 2,
     };
 
@@ -76,6 +79,7 @@ public:
     std::optional<int32_t> findUsageCodeForLed(int32_t ledCode) const;
 
     std::optional<AxisInfo> mapAxis(int32_t scanCode) const;
+    void setAxisRemapping(const std::unordered_map<int32_t, int32_t>& axisRemapping);
     const std::string getLoadFileName() const;
     // Return pair of sensor type and sensor data index, for the input device abs code
     base::Result<std::pair<InputDeviceSensorType, int32_t>> mapSensor(int32_t absCode) const;
@@ -102,6 +106,8 @@ private:
     std::unordered_map<int32_t, Key> mKeysByScanCode;
     std::unordered_map<int32_t, Key> mKeysByUsageCode;
     std::unordered_map<int32_t, AxisInfo> mAxes;
+    std::unordered_map</* fromAndroidAxisId */ int32_t, /* toAndroidAxisId */ int32_t>
+            mAxisRemapping;
     std::unordered_map<int32_t, Led> mLedsByScanCode;
     std::unordered_map<int32_t, Led> mLedsByUsageCode;
     std::unordered_map<int32_t, Sensor> mSensorsByAbsCode;

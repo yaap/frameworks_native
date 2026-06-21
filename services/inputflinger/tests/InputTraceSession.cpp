@@ -162,20 +162,56 @@ bool eventMatches(const InputTraceSession::WindowDispatchEvent& expected,
             expected.window->getId() == traced.window_id();
 }
 
+static std::ostream& operator<<(std::ostream& out, const AndroidMotionEvent::Decoder& motion) {
+    out << "MotionEvent(id=" << motion.event_id()
+        << ", action=" << MotionEvent::actionToString(motion.action()) << ")";
+    return out;
+}
+
+static std::ostream& operator<<(std::ostream& out, const AndroidKeyEvent::Decoder& key) {
+    out << "KeyEvent(id=" << key.event_id() << ", action=" << KeyEvent::actionToString(key.action())
+        << ", key_code=" << key.key_code() << ")";
+    return out;
+}
+
+static std::ostream& operator<<(std::ostream& out,
+                                const AndroidWindowInputDispatchEvent::Decoder& dispatch) {
+    out << "WindowDispatch(event_id=" << dispatch.event_id()
+        << ", window_id=" << dispatch.window_id() << ")";
+    return out;
+}
+
+template <typename TracedEvents>
+std::string dumpTracedEvents(const TracedEvents& tracedEvents,
+                             const std::vector<bool>& tracedEventsMatched) {
+    std::stringstream out;
+    for (size_t i = 0; i < tracedEvents.size(); i++) {
+        const auto& [tracedEvent, isRedacted] = tracedEvents[i];
+        out << "\n\t" << tracedEvent << (isRedacted ? " (redacted)" : "");
+        if (!tracedEventsMatched[i]) {
+            out << " (not expected)";
+        }
+    }
+    return out.str();
+}
+
 template <typename ExpectedEvents, typename TracedEvents>
 void verifyExpectedEventsTraced(const ExpectedEvents& expectedEvents,
                                 const TracedEvents& tracedEvents, std::string_view name) {
     uint32_t totalExpectedCount = 0;
+    std::vector<bool> tracedEventsMatched(tracedEvents.size(), false);
 
     for (const auto& [expectedEvent, expectedLevel] : expectedEvents) {
         int32_t totalMatchCount = 0;
         int32_t redactedMatchCount = 0;
-        for (const auto& [tracedEvent, isRedacted] : tracedEvents) {
+        for (size_t i = 0; i < tracedEvents.size(); i++) {
+            const auto& [tracedEvent, isRedacted] = tracedEvents[i];
             if (eventMatches(expectedEvent, tracedEvent)) {
                 totalMatchCount++;
                 if (isRedacted) {
                     redactedMatchCount++;
                 }
+                tracedEventsMatched[i] = true;
             }
         }
         switch (expectedLevel) {
@@ -195,8 +231,9 @@ void verifyExpectedEventsTraced(const ExpectedEvents& expectedEvents,
     }
 
     ASSERT_EQ(tracedEvents.size(), totalExpectedCount)
-            << "The number of traced " << name
-            << " events does not exactly match the number of expected events";
+            << "Received " << tracedEvents.size() << " traced " << name << " events "
+            << ", but expected " << totalExpectedCount
+            << ". Received:" << dumpTracedEvents(tracedEvents, tracedEventsMatched);
 }
 
 } // namespace

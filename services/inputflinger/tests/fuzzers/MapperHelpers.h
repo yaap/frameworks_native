@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include "ftl/enum.h"
 
 #include <EventHub.h>
 #include <InputDevice.h>
@@ -92,11 +93,11 @@ constexpr size_t kMaxSize = 256;
 
 namespace android {
 
-template<class Fdp>
+template <class Fdp>
 ToolType getFuzzedToolType(Fdp& fdp) {
-    const int32_t toolType = fdp.template ConsumeIntegralInRange<int32_t>(
-                            static_cast<int32_t>(ToolType::ftl_first),
-                            static_cast<int32_t>(ToolType::ftl_last));
+    const int32_t toolType =
+            fdp.template ConsumeIntegralInRange<int32_t>(static_cast<int32_t>(ToolType::ftl_first),
+                                                         static_cast<int32_t>(ToolType::ftl_last));
     return static_cast<ToolType>(toolType);
 }
 
@@ -176,9 +177,18 @@ public:
         return mFdp->ConsumeBool();
     }
     bool hasMscEvent(int32_t deviceId, int mscEvent) const override { return mFdp->ConsumeBool(); }
-    status_t mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode, int32_t metaState,
-                    int32_t* outKeycode, int32_t* outMetaState, uint32_t* outFlags) const override {
-        return mFdp->ConsumeIntegral<status_t>();
+    std::optional<MappedKey> mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
+                                    int32_t metaState) const override {
+        if (mFdp->ConsumeBool()) {
+            return MappedKey{
+                    .keyCode = mFdp->ConsumeIntegral<int32_t>(),
+                    .originalKeyCode = static_cast<KeyCode>(
+                            mFdp->ConsumeIntegral<std::underlying_type_t<KeyCode>>()),
+                    .metaState = mFdp->ConsumeIntegral<int32_t>(),
+                    .flags = mFdp->ConsumeIntegral<uint32_t>(),
+            };
+        }
+        return std::nullopt;
     }
     status_t mapAxis(int32_t deviceId, int32_t scanCode, AxisInfo* outAxisInfo) const override {
         return mFdp->ConsumeIntegral<status_t>();
@@ -235,7 +245,9 @@ public:
         return mFdp->ConsumeIntegral<int32_t>();
     }
     void setKeyRemapping(int32_t deviceId,
-                         const std::map<int32_t, int32_t>& keyRemapping) const override {}
+                         const std::unordered_map<int32_t, int32_t>& keyRemapping) override {}
+    void setAxisRemapping(int32_t deviceId,
+                          const std::unordered_map<int32_t, int32_t>& axisRemapping) override {}
     int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const override {
         return mFdp->ConsumeIntegral<int32_t>();
     }

@@ -67,6 +67,9 @@ public:
                                                       void* cookie = nullptr, uint32_t flags = 0,
                                                       wp<DeathRecipient>* outRecipient = nullptr);
 
+    // Register a callback to be notified of frozen state changes of the
+    // service. Be sure to have a binder threadpool set up before calling this
+    // in order to receive the callbacks.
     [[nodiscard]] status_t addFrozenStateChangeCallback(
             const wp<FrozenStateChangeCallback>& recipient);
 
@@ -145,8 +148,8 @@ public:
         static sp<BpBinder> create(int32_t handle, std::function<void()>* postTask) {
             return BpBinder::create(handle, postTask);
         }
-        static sp<BpBinder> create(const sp<RpcSession>& session, uint64_t address) {
-            return BpBinder::create(session, address);
+        static sp<BpBinder> create(sp<RpcSession>&& session, uint64_t address) {
+            return BpBinder::create(std::move(session), address);
         }
 
         // valid if !isRpcBinder
@@ -175,7 +178,7 @@ private:
     friend class sp<BpBinder>;
 
     static sp<BpBinder> create(int32_t handle, std::function<void()>* postTask);
-    static sp<BpBinder> create(const sp<RpcSession>& session, uint64_t address);
+    static sp<BpBinder> create(sp<RpcSession>&& session, uint64_t address);
 
     struct BinderHandle {
         int32_t handle;

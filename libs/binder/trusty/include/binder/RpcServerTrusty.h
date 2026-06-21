@@ -74,11 +74,11 @@ public:
      * by a UUID. Deprecated. Use the version below that takes a trusty_peer_id.
      */
     void setPerSessionRootObject(std::function<sp<IBinder>(wp<RpcSession> session, const void* peer,
-                                                           size_t peer_len)>&& create_session);
+                                                           size_t peer_len)>&& create_root);
     void setPerSessionRootObject(
             std::function<sp<IBinder>(wp<RpcSession> session, const trusty_peer_id& peer,
-                                      size_t peer_len)>&& create_session) {
-        setPerSessionRootObjectInternal(mRpcServer.get(), std::move(create_session));
+                                      size_t peer_len)>&& create_root) {
+        setPerSessionRootObjectInternal(mRpcServer.get(), std::move(create_root));
     }
 
     sp<IBinder> getRootObject() { return mRpcServer->getRootObject(); }

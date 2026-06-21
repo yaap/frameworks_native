@@ -39,7 +39,10 @@
 #include <utils/Timers.h>
 #include <array>
 #include <limits>
+#include <optional>
 #include <queue>
+#include <string>
+#include <string_view>
 
 /*
  * Additional private constants not defined in ndk/ui/input.h.
@@ -688,7 +691,8 @@ public:
 
     inline nsecs_t getEventTime() const { return mEventTime; }
 
-    static const char* getLabel(int32_t keyCode);
+    static std::optional<std::string_view> getLabel(int32_t keyCode);
+    static std::string getLabelOrCode(int32_t keyCode);
     static std::optional<int> getKeyCodeFromLabel(const char* label);
 
     void initialize(int32_t id, DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
@@ -1016,7 +1020,8 @@ public:
         return mSamplePointerCoords.data();
     }
 
-    static const char* getLabel(int32_t axis);
+    static std::optional<std::string_view> getLabel(int32_t axis);
+    static std::string getLabelOrCode(int32_t axis);
     static std::optional<int> getAxisFromLabel(const char* label);
 
     static std::string actionToString(int32_t action);
@@ -1025,7 +1030,8 @@ public:
                                    std::vector<PointerCoords>>>
     split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
           const std::vector<PointerProperties>&, const std::vector<PointerCoords>&,
-          std::bitset<MAX_POINTER_ID + 1> splitPointerIds);
+          std::bitset<MAX_POINTER_ID + 1> splitPointerIds,
+          std::function<std::string(void)> debugInfo);
 
     // MotionEvent will transform various axes in different ways, based on the source. For
     // example, the x and y axes will not have any offsets/translations applied if it comes from a
@@ -1335,6 +1341,8 @@ public:
     // The sequence number for the request.
     uint32_t seq;
 };
+
+std::ostream& operator<<(std::ostream& out, const PointerCaptureRequest& request);
 
 /* Pointer icon styles.
  * Must match the definition in android.view.PointerIcon.

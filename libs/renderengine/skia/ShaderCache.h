@@ -21,14 +21,20 @@
 #include <cutils/compiler.h>
 #include <ftl/shared_mutex.h>
 #include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/gpu/graphite/PersistentPipelineStorage.h>
+#include <renderengine/RenderEngine.h>
 #include <utils/Mutex.h>
 
 #include <memory>
 #include <string>
 #include <vector>
 
-class GrDirectContext;
 class SkData;
+
+class GrDirectContext;
+namespace skgpu::graphite {
+class Context;
+}
 
 namespace android {
 
@@ -43,7 +49,7 @@ public:
      * "get" returns a pointer to the singleton ShaderCache object.  This
      * singleton object will never be destroyed.
      */
-    static ShaderCache& get();
+    static ShaderCache& get(renderengine::RenderEngine::SkiaBackend);
 
     /**
      * initShaderDiskCache" loads the serialized cache contents from disk,
@@ -81,12 +87,15 @@ public:
      */
     void store(const SkData& key, const SkData& data, const SkString& description) override;
 
+    void graphiteStore(const SkData& key, const SkData& data, bool isProtected);
+
     /**
-     * "onVkFrameFlushed" tries to store Vulkan pipeline cache state.
+     * "on*VkFrameFlushed" tries to store Vulkan pipeline cache state.
      * Pipeline cache is saved on disk only if the size of the data has changed or there was
      * a new shader compiled.
      */
-    void onVkFrameFlushed(GrDirectContext* context);
+    void onGaneshVkFrameFlushed(GrDirectContext* context);
+    void onGraphiteVkFrameFlushed(std::shared_ptr<skgpu::graphite::Context> context);
 
     int shadersCachedSinceLastCall() {
         std::lock_guard lock(mMutex);
@@ -202,15 +211,25 @@ private:
      */
     bool mInStoreVkPipelineInProgress = false;
 
+    static constexpr size_t kInvalidCacheSize = std::numeric_limits<size_t>::max();
+
     /**
      *  "mNewPipelineCacheSize" has the size of the new Vulkan pipeline cache data. It is used
      *  to prevent unnecessary disk writes, if the pipeline cache size has not changed.
      */
-    size_t mNewPipelineCacheSize GUARDED_BY(mMutex) = -1;
+    size_t mNewPipelineCacheSize GUARDED_BY(mMutex) = kInvalidCacheSize;
     /**
      *  "mOldPipelineCacheSize" has the size of the Vulkan pipeline cache data stored on disk.
      */
-    size_t mOldPipelineCacheSize GUARDED_BY(mMutex) = -1;
+    size_t mOldPipelineCacheSize GUARDED_BY(mMutex) = kInvalidCacheSize;
+
+    /**
+     * These two variables store the last known Graphite pipeline cache size for
+     * both the protected and unprotected contexts. This allows determination of
+     * when the disk cache is out of date and needs to be re-saved.
+     */
+    size_t mLastGraphiteProtectedCacheSize GUARDED_BY(mMutex) = kInvalidCacheSize;
+    size_t mLastGraphiteUnprotectedCacheSize GUARDED_BY(mMutex) = kInvalidCacheSize;
 
     /**
      *  "mCacheDirty" is true when there is new shader cache data, which is not saved to disk.
@@ -220,7 +239,8 @@ private:
     /**
      * "sCache" is the singleton ShaderCache object.
      */
-    static ShaderCache sCache;
+    static ShaderCache sGaneshCache;
+    static ShaderCache sGraphiteCache;
 
     /**
      * "sIDKey" is the cache key of the identity hash

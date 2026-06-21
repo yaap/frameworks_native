@@ -514,10 +514,6 @@ TEST_F(MultifileBlobCacheTest, MismatchedBuildIdClears) {
 
 // Ensure cache is correct when a key is reused
 TEST_F(MultifileBlobCacheTest, SameKeyDifferentValues) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     unsigned char buf[4] = {0xee, 0xee, 0xee, 0xee};
 
     size_t startingSize = mMBC->getTotalSize();
@@ -567,10 +563,6 @@ TEST_F(MultifileBlobCacheTest, SameKeyDifferentValues) {
 
 // Ensure cache is correct when a key is reused with large value size
 TEST_F(MultifileBlobCacheTest, SameKeyLargeValues) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     // Create the cache with larger limits to stress test reuse
     constexpr uint32_t kLocalMaxKeySize = 1 * 1024 * 1024;
     constexpr uint32_t kLocalMaxValueSize = 4 * 1024 * 1024;
@@ -612,10 +604,6 @@ TEST_F(MultifileBlobCacheTest, SameKeyLargeValues) {
 
 // Ensure cache eviction is LRU
 TEST_F(MultifileBlobCacheTest, CacheEvictionIsLRU) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     // Fill the cache with exactly how much it can hold
     int entry = 0;
     for (entry = 0; entry < kMaxTotalEntries; entry++) {
@@ -656,10 +644,6 @@ TEST_F(MultifileBlobCacheTest, CacheEvictionIsLRU) {
 
 // Ensure calling GET on an entry updates its access time, even if already in hotcache
 TEST_F(MultifileBlobCacheTest, GetUpdatesAccessTime) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     // Fill the cache with exactly how much it can hold
     int entry = 0;
     int result = 0;
@@ -770,10 +754,6 @@ bool MultifileBlobCacheTest::clearCache() {
 
 // Recover from lost cache in the case of app clearing it
 TEST_F(MultifileBlobCacheTest, RecoverFromLostCache) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     int entry = 0;
     int result = 0;
 
@@ -822,10 +802,6 @@ TEST_F(MultifileBlobCacheTest, RecoverFromLostCache) {
 
 // Ensure cache eviction succeeds if the cache is deleted
 TEST_F(MultifileBlobCacheTest, EvictAfterLostCache) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     int entry = 0;
     int result = 0;
 
@@ -858,10 +834,6 @@ TEST_F(MultifileBlobCacheTest, EvictAfterLostCache) {
 
 // Remove from cache when size is zero
 TEST_F(MultifileBlobCacheTest, ZeroSizeRemovesEntry) {
-    if (!flags::multifile_blobcache_advanced_usage()) {
-        GTEST_SKIP() << "Skipping test that requires multifile_blobcache_advanced_usage flag";
-    }
-
     // Put some entries in
     int entry = 0;
     int result = 0;

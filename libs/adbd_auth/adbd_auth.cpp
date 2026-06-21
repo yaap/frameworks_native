@@ -22,7 +22,7 @@
 
 using android::base::unique_fd;
 
-static constexpr uint32_t kAuthVersion = 2;
+static constexpr uint32_t kAuthVersion = 3;
 
 static std::set<AdbdAuthFeature> supported_features = {
     AdbdAuthFeature::WifiLifeCycle};
@@ -198,8 +198,10 @@ bool AdbdAuthContext::SendPacket() REQUIRES(mutex_) {
   CHECK_NE(-1, framework_fd_.get());
 
   auto& packet = output_queue_.front();
-  struct iovec iovs[3];
+  struct iovec iovs[6];
   int iovcnt = 2;
+  // A scrap buffer to store bytes if they are needed in an iovec.base
+  uint8_t bytes[2];
 
   if (auto* p = std::get_if<AdbdAuthPacketAuthenticated>(&packet)) {
     iovs[0].iov_base = const_cast<char*>("CK");
@@ -239,6 +241,42 @@ bool AdbdAuthContext::SendPacket() REQUIRES(mutex_) {
     iovs[0].iov_len = 2;
     iovs[1].iov_base = &p->port;
     iovs[1].iov_len = 2;
+  } else if (auto* p = std::get_if<AdbdPacketRegisterService>(&packet)) {
+      iovcnt = 6;
+      iovs[0].iov_base = const_cast<char*>("RS");
+      iovs[0].iov_len = 2;
+
+      bytes[0] = p->instance_name.size();
+      iovs[1].iov_base = &bytes[0];
+      iovs[1].iov_len = 1;
+      iovs[2].iov_base = p->instance_name.data();
+      iovs[2].iov_len = p->instance_name.size();
+
+      bytes[1] = p->service_type.size();
+      iovs[3].iov_base = &bytes[1];
+      iovs[3].iov_len = 1;
+      iovs[4].iov_base = p->service_type.data();
+      iovs[4].iov_len = p->service_type.size();
+
+      iovs[5].iov_base = &p->port;
+      iovs[5].iov_len = 2;
+  } else if (auto* p = std::get_if<AdbdPacketUnregisterService>(&packet)) {
+      iovcnt = 5;
+      iovs[0].iov_base = const_cast<char*>("US");
+      iovs[0].iov_len = 2;
+
+      bytes[0] = p->instance_name.size();
+      iovs[1].iov_base = &bytes[0];
+      iovs[1].iov_len = 1;
+      iovs[2].iov_base = p->instance_name.data();
+      iovs[2].iov_len = p->instance_name.size();
+
+      bytes[1] = p->service_type.size();
+      iovs[3].iov_base = &bytes[1];
+      iovs[3].iov_len = 1;
+      iovs[4].iov_base = p->service_type.data();
+      iovs[4].iov_len = p->service_type.size();
+
   } else {
     LOG(FATAL) << "adbd_auth: unhandled packet type?";
   }
@@ -305,6 +343,8 @@ void AdbdAuthContext::Run() {
           LOG(INFO) << "adbd_auth: received a new framework connection";
           std::lock_guard<std::mutex> lock(mutex_);
           ReplaceFrameworkFd(std::move(new_framework_fd));
+
+          this->on_framework_connected();
 
           // Stop iterating over events: one of the later ones might be the old
           // framework fd.
@@ -458,6 +498,24 @@ void AdbdAuthContext::SendTLSServerPort(uint16_t port) {
   Interrupt();
 }
 
+void AdbdAuthContext::SendRegisterService(const char* instance_name, const char* service_type,
+                                          uint16_t port) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    output_queue_.emplace_back(AdbdPacketRegisterService{
+        .instance_name = instance_name,
+        .service_type = service_type,
+        .port = port});
+    Interrupt();
+}
+
+void AdbdAuthContext::SendUnregisterService(const char* instance_name, const char* service_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    output_queue_.emplace_back(AdbdPacketUnregisterService{
+        .instance_name = instance_name,
+        .service_type = service_type});
+    Interrupt();
+}
+
 // Interrupt the worker thread to do some work.
 void AdbdAuthContext::Interrupt() {
   uint64_t value = 1;
@@ -515,26 +573,32 @@ void AdbdAuthContextV2::StopAdbWifi(std::string_view buf) EXCLUDES(mutex_) {
   callbacks_v2_.stop_adbd_wifi();
 }
 
+AdbdAuthContextV3::AdbdAuthContextV3(const AdbdAuthCallbacksV3* callbacks, std::optional<int> server_fd)
+        : AdbdAuthContextV2(callbacks, server_fd), callbacks_v3_(*callbacks) {}
+
 AdbdAuthContext* adbd_auth_new(AdbdAuthCallbacks* callbacks) {
+  AdbdAuthContext* ctx = nullptr;
   switch (callbacks->version) {
     case 1: {
-      AdbdAuthContext* ctx = new AdbdAuthContext(
-          reinterpret_cast<AdbdAuthCallbacksV1*>(callbacks));
-      ctx->InitFrameworkHandlers();
-      return ctx;
+      ctx = new AdbdAuthContext( reinterpret_cast<AdbdAuthCallbacksV1*>(callbacks));
+      break;
     }
-    case kAuthVersion: {
-      AdbdAuthContextV2* ctx2 = new AdbdAuthContextV2(
-          reinterpret_cast<AdbdAuthCallbacksV2*>(callbacks));
-      ctx2->InitFrameworkHandlers();
-      return ctx2;
+    case 2: {
+      ctx = new AdbdAuthContextV2( reinterpret_cast<AdbdAuthCallbacksV2*>(callbacks));
+      break;
+    }
+    case kAuthVersion : {
+      ctx = new AdbdAuthContextV3( reinterpret_cast<AdbdAuthCallbacksV3*>(callbacks));
+      break;
     }
     default: {
-      LOG(ERROR) << "adbd_auth: received unknown AdbdAuthCallbacks version "
-                 << callbacks->version;
+      LOG(FATAL) << "adbd_auth: unknown AdbdAuthCallbacks version " << callbacks->version;
       return nullptr;
     }
   }
+
+  ctx->InitFrameworkHandlers();
+  return ctx;
 }
 
 void adbd_auth_delete(AdbdAuthContext* ctx) { delete ctx; }
@@ -588,4 +652,44 @@ bool adbd_auth_supports_feature(AdbdAuthFeature f) {
 
 void adbd_auth_send_tls_server_port(AdbdAuthContext* ctx, uint16_t port) {
   ctx->SendTLSServerPort(port);
+}
+
+static bool validateMdnsNames(const char* instance_name, const char* service_type) {
+    if (strlen(instance_name) > 255 || strlen(service_type) > 255) {
+        LOG(ERROR) << "mDNS name is too long: instance='"
+        << instance_name << "', service='" << service_type << "'";
+        return false;
+    }
+    return true;
+}
+
+// RFC 1035: Domain Names - Implementation and Specification
+// "To simplify implementations, the total length of a domain name (i.e.,
+// label octets and label length octets) is restricted to 255 octets or
+// less."
+//
+// RFC 6762: Multicast DNS
+//  Multicast DNS borrows heavily from the existing DNS protocol
+//  [RFC1034] [RFC1035] [RFC6195], using the existing DNS message
+//  structure, name syntax, and resource record types.
+AdbdauthRegisterResult adbd_auth_register_service(AdbdAuthContext* ctx,
+                                                  const char* instance_name,
+                                                  const char* service_type,
+                                                  uint16_t port) {
+  if (!validateMdnsNames(instance_name, service_type)) {
+    return ADBD_AUTH_REGISTER_BAD_NAME;
+  }
+  ctx->SendRegisterService(instance_name, service_type, port);
+  return ADBD_AUTH_REGISTER_OK;
+}
+
+// See adbd_auth_register_service for name length restrictions.
+AdbdauthUnregisterResult adbd_auth_unregister_service(AdbdAuthContext* ctx,
+                                                      const char* instance_name,
+                                                      const char* service_type) {
+  if (!validateMdnsNames(instance_name, service_type)) {
+    return ADBD_AUTH_UNREGISTER_BAD_NAME;
+  }
+  ctx->SendUnregisterService(instance_name, service_type);
+  return ADBD_AUTH_UNREGISTER_OK;
 }

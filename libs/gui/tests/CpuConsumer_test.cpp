@@ -802,7 +802,6 @@ INSTANTIATE_TEST_CASE_P(Rgba8888Tests,
         ::testing::ValuesIn(rgba8888TestSets));
 #endif
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 TEST(CpuConsumerSlotTest, UnlimitedSlots_AcquireReleaseAll) {
     sp<CpuConsumer> cpuConsumer = sp<CpuConsumer>::make(3);
     sp<Surface> surface = cpuConsumer->getSurface();
@@ -824,5 +823,4 @@ TEST(CpuConsumerSlotTest, UnlimitedSlots_AcquireReleaseAll) {
         EXPECT_EQ(OK, cpuConsumer->unlockBuffer(nativeBuffer));
     }
 }
-#endif
 } // namespace android

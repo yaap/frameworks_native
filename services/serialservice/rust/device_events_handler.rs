@@ -64,11 +64,12 @@ impl DeviceEventsHandler {
             log::error!("unexpected device type {:?}", device_event.device_type);
             return;
         };
-        let Some(name) = devnode_path.file_name() else {
-            log::error!("no device name in {}", devnode_path.display());
+        if !devnode_path.starts_with("/dev/") {
+            log::error!("device name doesn't start with /dev/ in {}", devnode_path.display());
             return;
         };
-        let name = name.to_str().expect("Device paths should not have non-UTF-8 characters");
+        // Remove "/dev/" from the path, e.g. "/dev/ttyACM0" -> "ttyACM0"
+        let name = &devnode_path.to_str().unwrap()[5..];
         match device_event.event_type {
             EventType::Add => {
                 let Ok(driver_type) = ({
@@ -110,13 +111,9 @@ impl UsbDeviceId {
         let mut current_opt = device.parent_with_subsystem(subsystem);
         while let Some(current) = current_opt {
             let attrs = current.sysattrs();
-            let vendor_id = Self::read_hex_attr(&attrs, "idVendor");
-            if vendor_id.is_ok() {
+            if let Ok(vendor_id) = Self::read_hex_attr(&attrs, "idVendor") {
                 let product_id = Self::read_hex_attr(&attrs, "idProduct");
-                return Self {
-                    vendor_id: vendor_id.unwrap(),
-                    product_id: product_id.unwrap_or(-1),
-                };
+                return Self { vendor_id, product_id: product_id.unwrap_or(-1) };
             }
             current_opt = current.parent_with_subsystem(subsystem);
         }
@@ -161,6 +158,7 @@ mod tests {
                 devnode_path: Path::new("/dev/ttyACM0").to_path_buf(),
             },
             device,
+            extra_data: None,
         }])
         .boxed();
         let mut callback = MockDeviceEventCallback::new();
@@ -198,6 +196,7 @@ mod tests {
                 devnode_path: Path::new("/dev/ttyS0").to_path_buf(),
             },
             device,
+            extra_data: None,
         }])
         .boxed();
         let mut callback = MockDeviceEventCallback::new();
@@ -236,6 +235,7 @@ mod tests {
                     devnode_path: Path::new("/dev/ttyACM0").to_path_buf(),
                 },
                 device: device.clone(),
+                extra_data: None,
             },
             DeviceEvent {
                 event_type: EventType::Remove,
@@ -243,6 +243,7 @@ mod tests {
                     devnode_path: Path::new("/dev/ttyACM0").to_path_buf(),
                 },
                 device,
+                extra_data: None,
             },
         ])
         .boxed();
@@ -283,6 +284,7 @@ mod tests {
                 devnode_path: Path::new("/dev/alien").to_path_buf(),
             },
             device,
+            extra_data: None,
         }])
         .boxed();
         let mut callback = MockDeviceEventCallback::new();

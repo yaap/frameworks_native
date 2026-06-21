@@ -40,7 +40,7 @@ cc_test {
         "-Wextra",
     ],
     shared_libs: [
-        "android.hardware.vibrator-V3-ndk",
+        "android.hardware.vibrator-V4-ndk",
         "libbase",
         "libbinder_ndk",
         "liblog",

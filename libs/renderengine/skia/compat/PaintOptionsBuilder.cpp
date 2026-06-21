@@ -103,11 +103,11 @@ Builder& Builder::linearGrad(LinearGradientOptions options) {
     if (options == kSmall) {
         gradient = PrecompileShaders::LinearGradient(GradientShaderFlags::kSmall);
     } else if (options == kComplex) {
-        gradient = PrecompileShaders::
-                LinearGradient(GradientShaderFlags::kNoLarge,
-                               {SkGradientShader::Interpolation::InPremul::kNo,
-                                SkGradientShader::Interpolation::ColorSpace::kSRGB,
-                                SkGradientShader::Interpolation::HueMethod::kShorter});
+        gradient =
+                PrecompileShaders::LinearGradient(GradientShaderFlags::kNoLarge,
+                                                  {SkGradient::Interpolation::InPremul::kNo,
+                                                   SkGradient::Interpolation::ColorSpace::kSRGB,
+                                                   SkGradient::Interpolation::HueMethod::kShorter});
     }
 
     fPaintOptions.setShaders({std::move(gradient)});

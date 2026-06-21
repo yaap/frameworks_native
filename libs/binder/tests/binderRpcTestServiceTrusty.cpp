@@ -35,8 +35,15 @@ class MyBinderRpcTestTrusty : public MyBinderRpcTestDefault {
 public:
     wp<RpcServerTrusty> server;
 
+    MyBinderRpcTestTrusty(int clientUid) { mClientUid = clientUid; }
+
     Status countBinders(std::vector<int32_t>* out) override {
         return countBindersImpl(server, out);
+    }
+
+    Status getClientUid(int* uid) override {
+        *uid = mClientUid;
+        return Status::ok();
     }
 
     Status scheduleShutdown() override {
@@ -90,15 +97,24 @@ int main(void) {
         if (!serverInfo.server->setProtocolVersion(serverVersion)) {
             return EXIT_FAILURE;
         }
-        serverInfo.server->setPerSessionRootObject(
-                [=](wp<RpcSession> /*session*/, const void* /*addrPtr*/, size_t /*len*/) {
-                    auto service = sp<MyBinderRpcTestTrusty>::make();
-                    // Assign a unique connection identifier to service->port so
-                    // getClientPort returns a unique value per connection
-                    service->port = ++gConnectionCounter;
-                    service->server = server;
-                    return service;
-                });
+        serverInfo.server->setPerSessionRootObject([=](wp<RpcSession> session,
+                                                       const void* /*addrPtr*/, size_t /*len*/) {
+            sp<RpcSession> spSession = session.promote();
+            int clientUid = -1;
+            uid_t uid;
+            if (spSession && spSession->getClientUid(&uid)) {
+                clientUid = static_cast<int>(uid);
+            }
+
+            auto service = sp<MyBinderRpcTestTrusty>::make(clientUid);
+            // Assign a unique connection identifier to service->port so
+            // getClientPort returns a unique value per connection
+            service->port = ++gConnectionCounter;
+            service->server = server;
+            sp<MyBinderRpcTestTrusty> extension = sp<MyBinderRpcTestTrusty>::make(clientUid);
+            service->setExtension(extension);
+            return service;
+        });
 
         servers.push_back(std::move(serverInfo));
     }

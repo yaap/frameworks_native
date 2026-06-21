@@ -24,6 +24,8 @@
 #include <utils/Vector.h>
 
 #include <binder/IInterface.h>
+#include <sensor/ISensorEventConnection.h>
+#include <android/hardware/sensor/ISensorClientListener.h>
 
 struct native_handle;
 typedef struct native_handle native_handle_t;
@@ -57,6 +59,8 @@ public:
 
     virtual int setOperationParameter(
             int32_t handle, int32_t type, const Vector<float> &floats, const Vector<int32_t> &ints) = 0;
+    virtual status_t registerClientListener(
+            const sp<android::hardware::sensor::ISensorClientListener>& listener) = 0;
 };
 
 // ----------------------------------------------------------------------------

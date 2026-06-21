@@ -24,9 +24,14 @@ parcelable JankData {
   long frameVsyncId;
 
   /**
-   * Bitmask of jank types that occurred.
+   * Bitmask of jank types that occurred using legacy classification.
    */
-  int jankType;
+  int jankTypeLegacy;
+
+  /**
+   * Bitmask of jank types that occurred using experimental classification.
+   */
+  int jankTypeExperimental;
 
   /**
    * Time between frames in nanoseconds.
@@ -42,4 +47,14 @@ parcelable JankData {
    * Time taken by the application to render this frame.
    */
   long actualAppFrameTimeNs;
+
+  /**
+   * Delta between expected and actual present time.
+   */
+  long presentDelayNs;
+
+  /**
+   * Jank severity score.
+   */
+  double jankScore;
 }

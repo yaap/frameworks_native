@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <common/FlagManager.h>
 #include <ui/LayerStack.h>
 
 namespace android {
@@ -40,13 +39,7 @@ struct LayerFilter {
         if (other.layerStack == ui::UNASSIGNED_LAYER_STACK || other.layerStack != layerStack) {
             return false;
         }
-
-        if (FlagManager::getInstance().connected_displays_cursor()) {
-            return !(skipScreenshot && other.skipScreenshot);
-        }
-
-        // The output must be to an internal display if the input filter has that constraint.
-        return !other.toInternalDisplay || toInternalDisplay;
+        return !(skipScreenshot && other.skipScreenshot);
     }
 };
 

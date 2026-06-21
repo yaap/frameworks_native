@@ -56,7 +56,13 @@ public:
     //
     // This is called without any lock held and can be called concurrently by
     // multiple threads.
-    virtual void onBufferDetached(int /*slot*/) {} // Asynchronous
+    virtual void onBufferDetached(int /*slot*/, uint64_t /*bufferId*/) {} // Asynchronous
+
+    virtual void onBufferAcquired(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
+    virtual bool needsAcquiredNotify() { return false; }
+    virtual void onBufferDropped(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
+    virtual bool needsDroppedNotify() { return false; }
+
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
     // onBufferAttached is called from IGraphicBufferConsumer::attachBuffer to
     // notify the producer that a buffer is attached.

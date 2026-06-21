@@ -16,6 +16,7 @@
 #pragma once
 
 #include <android/frameworks/automotive/display/1.0/IAutomotiveDisplayProxyService.h>
+#include <com_android_graphics_libgui_flags.h> // Remove with WB_AAOS TODO(b/487968885)
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/Surface.h>
@@ -46,6 +47,9 @@ typedef struct DisplayDesc {
 class AutomotiveDisplayProxyService : public IAutomotiveDisplayProxyService {
 public:
     Return<sp<IGraphicBufferProducer>> getIGraphicBufferProducer(uint64_t id) override;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_AAOS)
+    sp<Surface> getSurface(uint64_t id);
+#endif
     Return<bool> showWindow(uint64_t id) override;
     Return<bool> hideWindow(uint64_t id) override;
     Return<void> getDisplayIdList(getDisplayIdList_cb _cb) override;

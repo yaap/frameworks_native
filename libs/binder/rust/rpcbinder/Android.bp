@@ -38,6 +38,7 @@ rust_library {
         "com.android.virt",
     ],
     min_sdk_version: "Tiramisu",
+    host_supported: true,
 }
 
 // Build a separate rust_library rather than depending directly on libbinder_rpc_unstable_bindgen,
@@ -69,6 +70,7 @@ rust_library {
     min_sdk_version: "Tiramisu",
     lints: "none",
     clippy_lints: "none",
+    host_supported: true,
 }
 
 // TODO(b/184872979): remove once the RPC Binder API is stabilised.
@@ -101,6 +103,7 @@ rust_bindgen {
         "com.android.virt",
     ],
     min_sdk_version: "Tiramisu",
+    host_supported: true,
 }
 
 rust_test {

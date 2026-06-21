@@ -66,8 +66,7 @@ class DisplayEventReceiver final {
 
     [[nodiscard]] static auto make(
             std::weak_ptr<SFController> controller, const sp<gui::ISurfaceComposer>& client,
-            PollFdThread& pollFdThread, gui::ISurfaceComposer::VsyncSource source,
-            const sp<IBinder>& layerHandle,
+            PollFdThread& pollFdThread, const sp<IBinder>& layerHandle,
             const ftl::Flags<gui::ISurfaceComposer::EventRegistration>& events)
             -> base::expected<std::shared_ptr<DisplayEventReceiver>, std::string>;
 
@@ -95,7 +94,6 @@ class DisplayEventReceiver final {
 
     [[nodiscard]] auto init(std::weak_ptr<SFController> controller,
                             const sp<gui::ISurfaceComposer>& client, PollFdThread& pollFdThread,
-                            gui::ISurfaceComposer::VsyncSource source,
                             const sp<IBinder>& layerHandle,
                             const ftl::Flags<gui::ISurfaceComposer::EventRegistration>& events)
             -> base::expected<void, std::string>;

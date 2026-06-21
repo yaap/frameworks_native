@@ -21,6 +21,7 @@
 #include <string>
 
 #include <android-base/expected.h>
+#include <ftl/non_null.h>
 
 #include "test_framework/core/DisplayConfiguration.h"
 #include "test_framework/hwc3/events/BufferPendingDisplay.h"
@@ -30,6 +31,12 @@
 #include "test_framework/hwc3/events/PowerMode.h"
 #include "test_framework/hwc3/events/VSync.h"
 #include "test_framework/hwc3/events/VSyncEnabled.h"
+
+namespace android::surfaceflinger::tests::end2end::test_framework::core {
+
+class TestService;
+
+}  // namespace android::surfaceflinger::tests::end2end::test_framework::core
 
 namespace android::surfaceflinger::tests::end2end::test_framework::hwc3 {
 
@@ -67,10 +74,12 @@ class Hwc3Controller final : public std::enable_shared_from_this<Hwc3Controller>
     [[nodiscard]] static auto getServiceName() -> std::string;
 
     // Makes the HWC3 controller instance.
-    [[nodiscard]] static auto make(std::span<const core::DisplayConfiguration> displays)
+    [[nodiscard]] static auto make(ftl::NonNull<std::weak_ptr<core::TestService>> service,
+                                   std::span<const core::DisplayConfiguration> displays)
             -> base::expected<std::shared_ptr<hwc3::Hwc3Controller>, std::string>;
 
-    explicit Hwc3Controller(Passkey passkey);
+    explicit Hwc3Controller(ftl::NonNull<std::weak_ptr<core::TestService>> service,
+                            Passkey passkey);
 
     // Allows the callbacks to be routed.
     [[nodiscard]] auto editCallbacks() -> Callbacks&;
@@ -99,6 +108,7 @@ class Hwc3Controller final : public std::enable_shared_from_this<Hwc3Controller>
     [[nodiscard]] auto init(std::span<const core::DisplayConfiguration> displays)
             -> base::expected<void, std::string>;
 
+    const ftl::NonNull<std::weak_ptr<core::TestService>> mService;
     std::shared_ptr<FakeComposer> mFakeComposer;
     std::shared_ptr<ObservingComposer> mObservingComposer;
     Callbacks mCallbacks;

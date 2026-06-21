@@ -43,6 +43,12 @@ aconfig_declarations {
     srcs: ["libvulkan_flags.aconfig"],
 }
 
+java_aconfig_library {
+    name: "libvulkan_flags_java_lib",
+    aconfig_declarations: "libvulkan_flags",
+    defaults: ["framework-minus-apex-aconfig-java-defaults"],
+}
+
 cc_aconfig_library {
     name: "libvulkanflags",
     aconfig_declarations: "libvulkan_flags",
@@ -119,6 +125,7 @@ cc_library_shared {
         "driver.cpp",
         "driver_gen.cpp",
         "layers_extensions.cpp",
+        "private_data.cpp",
         "stubhal.cpp",
         "swapchain.cpp",
     ],
@@ -131,8 +138,6 @@ cc_library_shared {
     ],
     export_header_lib_headers: ["vulkan_headers"],
     shared_libs: [
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore-utils",
         "libziparchive",
         "libhardware",
         "libsync",
@@ -151,10 +156,12 @@ cc_library_shared {
         "libdl_android",
         "android.hardware.graphics.common@1.0",
         "libSurfaceFlingerProp",
+        "libaconfig_storage_read_api_cc",
     ],
     static_libs: [
         "libgrallocusage",
         "libvulkanallocator",
         "libvulkanflags",
+        "libVulkanProperties",
     ],
 }

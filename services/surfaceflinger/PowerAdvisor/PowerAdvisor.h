@@ -69,6 +69,7 @@ public:
     virtual bool usePowerHintSession() = 0;
     virtual bool supportsPowerHintSession() = 0;
     virtual bool supportsGpuReporting() = 0;
+    virtual void setOptimizeForPerformance(bool enabled) = 0;
 
     // Sends a power hint that updates to the target work duration for the frame
     virtual void updateTargetWorkDuration(Duration targetDuration) = 0;
@@ -159,6 +160,7 @@ public:
     bool usePowerHintSession() override;
     bool supportsPowerHintSession() override;
     bool supportsGpuReporting() override;
+    void setOptimizeForPerformance(bool enabled) override;
     void updateTargetWorkDuration(Duration targetDuration) override;
     void reportActualWorkDuration() override;
     void enablePowerHintSession(bool enabled) override;
@@ -198,6 +200,7 @@ private:
 
     std::unique_ptr<power::PowerHalController> mPowerHal;
     std::atomic_bool mBootFinished = false;
+    std::atomic_bool mOptimizeForPerformance = true;
 
     std::unordered_set<DisplayId> mExpensiveDisplays;
     bool mNotifiedExpensiveRendering = false;

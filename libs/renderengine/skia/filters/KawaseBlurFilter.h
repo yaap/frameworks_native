@@ -44,8 +44,9 @@ public:
     virtual ~KawaseBlurFilter(){}
 
     // Execute blur, saving it to a texture
-    sk_sp<SkImage> generate(SkiaGpuContext* context, const uint32_t radius,
-                            const sk_sp<SkImage> blurInput, const SkRect& blurRect) const override;
+    sk_sp<SkImage> generateTemporaryImage(SkiaGpuContext* context, const DisplaySettings& display,
+                                          const uint32_t radius, const sk_sp<SkImage> blurInput,
+                                          const SkRect& blurRect) const override;
 
 private:
     sk_sp<SkRuntimeEffect> mBlurEffect;

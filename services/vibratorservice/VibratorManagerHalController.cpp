@@ -112,6 +112,20 @@ void ManagerHalController::tryReconnect() {
     }
 }
 
+std::shared_ptr<IVibratorManager> ManagerHalController::getHal() {
+    std::lock_guard<std::mutex> lock(mConnectedHalMutex);
+    if (mConnectedHal == nullptr) {
+        // Init was never called, so connect to HAL for the first time during this call.
+        mConnectedHal = mConnector(mCallbackScheduler);
+
+        if (mConnectedHal == nullptr) {
+            ALOGV("Skipped getHal because VibratorManager HAL is not available");
+            return nullptr;
+        }
+    }
+    return mConnectedHal->getHal();
+}
+
 HalResult<ManagerCapabilities> ManagerHalController::getCapabilities() {
     hal_fn<ManagerCapabilities> getCapabilitiesFn = [](std::shared_ptr<ManagerHalWrapper> hal) {
         return hal->getCapabilities();

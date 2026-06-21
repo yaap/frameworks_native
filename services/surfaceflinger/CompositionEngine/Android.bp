@@ -28,8 +28,6 @@ cc_defaults {
         "android.hardware.graphics.composer@2.2",
         "android.hardware.graphics.composer@2.3",
         "android.hardware.graphics.composer@2.4",
-        "android.hardware.power@1.0",
-        "android.hardware.power@1.3",
         "libbase",
         "libcutils",
         "libgui",
@@ -56,7 +54,7 @@ cc_defaults {
         "android.hardware.graphics.composer@2.2-command-buffer",
         "android.hardware.graphics.composer@2.3-command-buffer",
         "android.hardware.graphics.composer@2.4-command-buffer",
-        "android.hardware.graphics.composer3-command-buffer",
+        "android.hardware.graphics.composer3-command-buffer-V5",
         "libsurfaceflinger_backend_headers",
     ],
 }

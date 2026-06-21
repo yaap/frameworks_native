@@ -21,6 +21,7 @@
 #include <android-base/thread_annotations.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
+#include <input/KeyCode.h>
 #include <linux/input-event-codes.h>
 
 #include "TestConstants.h"
@@ -150,7 +151,7 @@ void FakeEventHub::addKeyCodeMapping(RawDeviceId deviceId, int32_t fromKeyCode, 
 }
 
 void FakeEventHub::setKeyRemapping(RawDeviceId deviceId,
-                                   const std::map<int32_t, int32_t>& keyRemapping) const {
+                                   const std::unordered_map<int32_t, int32_t>& keyRemapping) {
     Device* device = getDevice(deviceId);
     device->keyRemapping = keyRemapping;
 }
@@ -291,27 +292,24 @@ bool FakeEventHub::hasMscEvent(RawDeviceId deviceId, int mscEvent) const {
     return false;
 }
 
-status_t FakeEventHub::mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
-                              int32_t metaState, int32_t* outKeycode, int32_t* outMetaState,
-                              uint32_t* outFlags) const {
+std::optional<MappedKey> FakeEventHub::mapKey(RawDeviceId deviceId, int32_t scanCode,
+                                              int32_t usageCode, int32_t metaState) const {
     Device* device = getDevice(deviceId);
     if (device) {
         const KeyInfo* key = getKey(device, scanCode, usageCode);
         if (key) {
-            if (outKeycode) {
-                auto it = device->keyRemapping.find(key->keyCode);
-                *outKeycode = it != device->keyRemapping.end() ? it->second : key->keyCode;
-            }
-            if (outFlags) {
-                *outFlags = key->flags;
-            }
-            if (outMetaState) {
-                *outMetaState = metaState;
-            }
-            return OK;
+            int32_t keyCode;
+            auto it = device->keyRemapping.find(key->keyCode);
+            keyCode = it != device->keyRemapping.end() ? it->second : key->keyCode;
+            return MappedKey{
+                    .keyCode = keyCode,
+                    .originalKeyCode = static_cast<KeyCode>(key->keyCode),
+                    .metaState = metaState,
+                    .flags = key->flags,
+            };
         }
     }
-    return NAME_NOT_FOUND;
+    return std::nullopt;
 }
 
 const FakeEventHub::KeyInfo* FakeEventHub::getKey(Device* device, int32_t scanCode,

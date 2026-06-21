@@ -29,6 +29,7 @@ cc_test {
         "surfaceflinger_defaults",
         "libsurfaceflinger_common_test_deps",
         "libsurfaceflinger_proto_deps",
+        "skia_deps",
     ],
     test_suites: ["device-tests"],
     srcs: [
@@ -47,6 +48,7 @@ cc_test {
         "LayerRenderTypeTransaction_test.cpp",
         "LayerState_test.cpp",
         "LayerTransaction_test.cpp",
+        "LayerRenderComparison_test.cpp",
         "LayerTrustedPresentationListener_test.cpp",
         "LayerTypeAndRenderTypeTransaction_test.cpp",
         "LayerTypeTransaction_test.cpp",
@@ -54,6 +56,7 @@ cc_test {
         "MirrorLayer_test.cpp",
         "MultiDisplay_test.cpp",
         "RefreshRateOverlay_test.cpp",
+        "RenderCommandBufferLayer_test.cpp",
         "RelativeZ_test.cpp",
         "ReleaseBufferCallback_test.cpp",
         "ScreenCapture_test.cpp",
@@ -70,6 +73,8 @@ cc_test {
     static_libs: [
         "android.hardware.graphics.composer@2.1",
         "libsurfaceflinger_common",
+        "libipcrenderbuffer_static",
+        "libskia",
     ],
     shared_libs: [
         "android.hardware.graphics.common@1.2",

@@ -44,7 +44,6 @@ TEST(NotifyMotionArgsTest, TestCopyAssignmentOperator) {
     int32_t metaState = AMETA_SCROLL_LOCK_ON;
     uint32_t buttonState = AMOTION_EVENT_BUTTON_PRIMARY | AMOTION_EVENT_BUTTON_SECONDARY;
     MotionClassification classification = MotionClassification::DEEP_PRESS;
-    int32_t edgeFlags = AMOTION_EVENT_EDGE_FLAG_TOP;
     uint32_t pointerCount = 2;
     PointerProperties pointerProperties[pointerCount];
     PointerCoords pointerCoords[pointerCount];

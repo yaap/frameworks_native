@@ -94,7 +94,8 @@ public:
                                                          HAL_PIXEL_FORMAT_RGBA_8888,
                                                          0ULL /*usage*/);
         layer->setBuffer(externalTexture, bufferData, postTime, /*desiredPresentTime*/ 30, false,
-                         FrameTimelineInfo{}, gui::GameMode::Unsupported);
+                         FrameTimelineInfo{}, gui::GameMode::Unsupported,
+                         gui::ISystemContentPriorityConstants::Unset);
 
         commitTransaction(layer.get());
         nsecs_t latchTime = 25;
@@ -105,7 +106,7 @@ public:
         EXPECT_CALL(*mFlinger.getFrameTracer(),
                     traceTimestamp(layerId, bufferId, frameNumber, latchTime,
                                    FrameTracer::FrameEvent::LATCH, /*duration*/ 0));
-        layer->updateTexImage(latchTime, expectedPresentTime);
+        layer->latchBufferStatsAndHandles(latchTime, expectedPresentTime);
 
         auto glDoneFence = fenceFactory.createFenceTimeForTest(fence);
         auto presentFence = fenceFactory.createFenceTimeForTest(fence);

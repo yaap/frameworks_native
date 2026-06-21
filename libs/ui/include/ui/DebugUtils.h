@@ -37,4 +37,5 @@ std::string decodeColorMode(android::ui::ColorMode colormode);
 std::string decodeColorTransform(android_color_transform colorTransform);
 std::string decodePixelFormat(android::PixelFormat format);
 std::string decodeRenderIntent(android::ui::RenderIntent renderIntent);
+std::string decodeGrallocUsage(uint64_t usage);
 std::string toString(const android::DeviceProductInfo&);

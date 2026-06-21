@@ -18,6 +18,7 @@
 
 #include <android-base/logging.h>
 #include <android/util/ProtoOutputStream.h>
+#include <android_hardware_flags.h>
 #include <com_android_frameworks_sensorservice_flags.h>
 #include <cutils/atomic.h>
 #include <frameworks/base/core/proto/android/service/sensor_service.proto.h>
@@ -683,28 +684,47 @@ void SensorDevice::removeDisabledReasonForIdentLocked(void* ident, DisabledReaso
     }
 }
 
-void SensorDevice::setUidStateForConnection(void* ident, SensorService::UidState state) {
-    Mutex::Autolock _l(mLock);
-    if (state == SensorService::UID_STATE_ACTIVE) {
-        removeDisabledReasonForIdentLocked(ident, DisabledReason::DISABLED_REASON_UID_IDLE);
-    } else {
-        addDisabledReasonForIdentLocked(ident, DisabledReason::DISABLED_REASON_UID_IDLE);
-    }
-
+void SensorDevice::updateSensorActivationsForIdentLocked(void* ident) {
     for (size_t i = 0; i < mActivationCount.size(); ++i) {
         int handle = mActivationCount.keyAt(i);
         Info& info = mActivationCount.editValueAt(i);
 
         if (info.hasBatchParamsForIdent(ident)) {
             updateBatchParamsLocked(handle, info);
-            bool disable = info.numActiveClients() == 0 && info.isActive;
-            bool enable = info.numActiveClients() > 0 && !info.isActive;
+            bool shouldBeEnabled = info.numActiveClients() > 0 && !info.isActive;
+            bool shouldBeDisabled = info.numActiveClients() == 0 && info.isActive;
 
-            if ((enable || disable) && doActivateHardwareLocked(handle, enable) == NO_ERROR) {
-                info.isActive = enable;
+            if ((shouldBeEnabled || shouldBeDisabled) &&
+                doActivateHardwareLocked(handle, shouldBeEnabled) == NO_ERROR) {
+                info.isActive = shouldBeEnabled;
             }
         }
     }
+}
+
+void SensorDevice::setConnectionDisabledStatusLocked(void* ident, DisabledReason reason,
+                                                     bool disabled) {
+    ALOGI("Setting connection %p disabled status to %d for reason %d", ident, disabled, reason);
+    if (disabled) {
+        addDisabledReasonForIdentLocked(ident, reason);
+    } else {
+        removeDisabledReasonForIdentLocked(ident, reason);
+    }
+    updateSensorActivationsForIdentLocked(ident);
+}
+
+void SensorDevice::setUidStateForConnection(void* ident, SensorService::UidState state) {
+    Mutex::Autolock _l(mLock);
+    bool disabled = (state != SensorService::UID_STATE_ACTIVE);
+    setConnectionDisabledStatusLocked(ident, DisabledReason::DISABLED_REASON_UID_IDLE, disabled);
+}
+
+void SensorDevice::setFrozenStateForConnection(void* ident, bool frozen) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return;
+    }
+    Mutex::Autolock _l(mLock);
+    setConnectionDisabledStatusLocked(ident, DisabledReason::DISABLED_REASON_PID_FROZEN, frozen);
 }
 
 bool SensorDevice::isSensorActive(int handle) const {

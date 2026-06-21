@@ -29,17 +29,28 @@
 #include "graphite/Image.h"
 #include "graphite/ImageProvider.h"
 #include "skia/compat/GraphiteBackendTexture.h"
+#include "skia/compat/PipelineCallbackHandler.h"
 
 #include <android-base/macros.h>
+#include <common/trace.h>
 #include <log/log_main.h>
 #include <memory>
 
 namespace android::renderengine::skia {
 
 namespace {
-static skgpu::graphite::ContextOptions graphiteOptions() {
+
+static skgpu::graphite::ContextOptions graphiteOptions(
+        skgpu::graphite::PersistentPipelineStorage* persistentPipelineStorage,
+        SkSpan<sk_sp<SkRuntimeEffect>> userDefinedKnownRuntimeEffects,
+        PipelineCallbackHandler* callbackHandler) {
     skgpu::graphite::ContextOptions options;
     options.fDisableDriverCorrectnessWorkarounds = true;
+    options.fUserDefinedKnownRuntimeEffects = userDefinedKnownRuntimeEffects;
+
+    options.fPipelineCallbackContext = callbackHandler;
+    options.fPipelineCachingCallback = PipelineCallbackHandler::Callback;
+    options.fPersistentPipelineStorage = persistentPipelineStorage;
     return options;
 }
 
@@ -61,9 +72,15 @@ public:
 } // namespace
 
 std::unique_ptr<SkiaGpuContext> SkiaGpuContext::MakeVulkan_Graphite(
-        const skgpu::VulkanBackendContext& vulkanBackendContext) {
+        const skgpu::VulkanBackendContext& vulkanBackendContext,
+        skgpu::graphite::PersistentPipelineStorage* persistentPipelineStorage,
+        SkSpan<sk_sp<SkRuntimeEffect>> userDefinedKnownRuntimeEffects,
+        PipelineCallbackHandler* callbackHandler) {
     return std::make_unique<GraphiteGpuContext>(
-            skgpu::graphite::ContextFactory::MakeVulkan(vulkanBackendContext, graphiteOptions()));
+            skgpu::graphite::ContextFactory::
+                    MakeVulkan(vulkanBackendContext,
+                               graphiteOptions(persistentPipelineStorage,
+                                               userDefinedKnownRuntimeEffects, callbackHandler)));
 }
 
 GraphiteGpuContext::GraphiteGpuContext(std::unique_ptr<skgpu::graphite::Context> context)
@@ -131,6 +148,10 @@ bool GraphiteGpuContext::isAbandonedOrDeviceLost() {
     return mContext->isDeviceLost();
 }
 
+bool GraphiteGpuContext::supportsProtectedContent() const {
+    return mContext->supportsProtectedContent();
+}
+
 void GraphiteGpuContext::setResourceCacheLimit(size_t maxResourceBytes) {
     // Graphite has a separate budget for its Context and its Recorder. For now the majority of
     // memory that Graphite will allocate will be on the Recorder and minimal amount on the Context.
@@ -162,9 +183,24 @@ void GraphiteGpuContext::purgeUnlockedScratchResources() {
     mRecorder->freeGpuResources();
 }
 
-void GraphiteGpuContext::dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const {
-    mContext->dumpMemoryStatistics(traceMemoryDump);
-    mRecorder->dumpMemoryStatistics(traceMemoryDump);
+void GraphiteGpuContext::purgeResourcesNotUsedIn(std::chrono::milliseconds duration) {
+    SFTRACE_CALL();
+    mContext->performDeferredCleanup(duration);
+    mRecorder->performDeferredCleanup(duration);
+}
+
+void GraphiteGpuContext::reportStatsForEachCache(
+        const std::vector<ResourcePair>& resourceMap,
+        std::function<void(SkiaMemoryReporter& reporter, const char* label,
+                           const size_t cacheLimit)>
+                reportStats) const {
+    SkiaMemoryReporter contextReporter(resourceMap, true);
+    mContext->dumpMemoryStatistics(&contextReporter);
+    reportStats(contextReporter, "context", mContext->maxBudgetedBytes());
+
+    SkiaMemoryReporter recorderReporter(resourceMap, true);
+    mRecorder->dumpMemoryStatistics(&recorderReporter);
+    reportStats(recorderReporter, "recorder", mRecorder->maxBudgetedBytes());
 }
 
 } // namespace android::renderengine::skia

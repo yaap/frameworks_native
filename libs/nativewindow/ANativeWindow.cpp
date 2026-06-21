@@ -265,6 +265,20 @@ int32_t ANativeWindow_setFrameRateWithChangeStrategy(ANativeWindow* window, floa
     return native_window_set_frame_rate(window, frameRate, compatibility, changeFrameRateStrategy);
 }
 
+int32_t ANativeWindow_setProducerThrottlingEnabled(ANativeWindow* window, bool enabled) {
+    if (!window || !query(window, NATIVE_WINDOW_IS_VALID)) {
+        return -EINVAL;
+    }
+    return native_window_set_producer_throttling_enabled(window, enabled);
+}
+
+int32_t ANativeWindow_isProducerThrottlingEnabled(ANativeWindow* window, bool* outEnabled) {
+    if (!window || !query(window, NATIVE_WINDOW_IS_VALID)) {
+        return -EINVAL;
+    }
+    return native_window_is_producer_throttling_enabled(window, outEnabled);
+}
+
 /**************************************************************************************************
  * vndk-stable
  **************************************************************************************************/

@@ -527,8 +527,9 @@ def generate_vk_core_structs_init_code(version):
                 target_code_list = properties_code
                 struct_field_name = "properties"
             else:
-                # TODO: b/415707715 (Add tests for exceptions for structs not extending (VkPhysicalDeviceProperties2/VkPhysicalDeviceFeatures2))
-                raise Exception(f"Warning: Unknown Mapping: ' " f"for struct '{struct_name}'")
+                raise Exception(
+                    f"Warning: Unknown Mapping: for struct '{struct_name}'"
+                )
 
             if target_code_list is not None:
                 target_code_list.extend(
@@ -568,8 +569,10 @@ def generate_vk_extension_structs_init_code(mapping, struct_category):
                     is_valid_struct_category = (CONST_PHYSICAL_DEVICE_PROPERTIES_2 in mapping_name and struct_category == "Properties") or (
                         CONST_PHYSICAL_DEVICE_FEATURE_2 in mapping_name and struct_category == "Features"
                     )
-                elif struct_category.lower() in struct_name.lower():
-                    raise Exception(f"Warning: Unknown Mapping: ' " f"for struct '{struct_name}'")
+                else:
+                    raise Exception(
+                        f"Warning: Unknown Mapping: for struct '{struct_name}'"
+                    )
 
                 if is_valid_struct_category:
                     struct_count += 1
@@ -624,7 +627,6 @@ def get_dynamic_size_list_member_from_structures(properties_and_feature_set: Lis
     return entries
 
 
-
 def transform_list_member_name(member_name: str) -> str:
     def convert_camel_to_snake_case(camel_case_string: str) -> str:
         s1 = re.sub(r'(?<!^)([A-Z][a-z])', r'_\1', camel_case_string)
@@ -644,6 +646,29 @@ def transform_list_member_name(member_name: str) -> str:
     if snake_case_name.startswith('p_'):
         snake_case_name = snake_case_name[2:]
     return snake_case_name
+
+
+def generate_core_list_resizing_logic(vulkan_api_version: str, vk_properties_setter_line: str) -> str:
+    """
+    Generates C++ code for resizing lists in core Vulkan structs.
+    For a given Vulkan version (e.g., '1_4'), this function identifies core
+    structs with dynamically sized arrays (like VkPhysicalDeviceVulkan14Properties)
+    and generates the necessary C++ code to resize std::vector members and
+    re-query properties.
+    """
+    version_key = f"Core{vulkan_api_version.replace('_', '')}"
+    core_struct_list = VK.VULKAN_CORES_AND_STRUCTS_MAPPING['versions'].get(version_key, [])
+    if not core_struct_list:
+        return ""
+
+    # Flatten the list of dictionaries into a single list of structure names.
+    core_structures = []
+    for struct in core_struct_list:
+        for key in struct:
+            core_structures.append(key)
+    extension_name = f"core{vulkan_api_version.replace('_', '')}"
+
+    return generate_list_resizing_logic(core_structures, vk_properties_setter_line, extension_name, core_struct_name='properties')
 
 
 def generate_ext_dependent_structs_list_resizing_logic(
@@ -690,8 +715,24 @@ def generate_ext_independent_structs_list_resizing_logic(
 def generate_list_resizing_logic(
         structures: List[str],
         vk_properties_setter_line: str,
-        extension: Optional[str] = None
+        extension: Optional[str] = None,
+        core_struct_name: Optional[str] = None
 ) -> str:
+    """
+    Generates C++ code to handle dynamic lists in Vulkan structs by resizing
+    vector, connecting it to the struct, and then re-querying the
+    properties.
+    Args:
+        structures: A list of Vulkan structure names to process.
+        vk_properties_setter_line: The C++ line for re-querying properties.
+        extension: The name of the extension or core version used as a prefix
+            in the C++ code (e.g., 'khr_shader_float16_int8' or 'core14').
+        core_struct_name: If provided, this name is used for the struct
+            instance in the C++ code, overriding the default name generation.
+            Used for core structs (e.g., 'properties').
+    Returns:
+        A string containing the generated C++ code blocks.
+    """
     def _generate_if_condition_codeblock(
             if_condition: str,
             list_resize_codeblock: str,
@@ -719,17 +760,20 @@ def generate_list_resizing_logic(
 
     generated_code_blocks: List[str] = []
     dot_extension = f".{extension}" if extension else ""
-    for structure in structures:
+    for structure in sorted(structures):
         struct_category_mapping = VK.STRUCT_EXTENDS_MAPPING.get(structure)
         resolved_structure_name = get_class_name_from_alias(structure)
         is_valid_struct = struct_category_mapping and (
                 CONST_PHYSICAL_DEVICE_PROPERTIES_2 in struct_category_mapping
         ) and resolved_structure_name in VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING
         if is_valid_struct:
-            dynamic_size_list_variables = VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING[resolved_structure_name]
-            struct_instance_name = get_struct_name(structure)
+            dynamic_size_list_variables = VK.STRUCT_WITH_DYNAMIC_SIZE_LIST_MAPPING.get(resolved_structure_name, [])
+            if core_struct_name:
+                struct_instance_name = core_struct_name
+            else:
+                struct_instance_name = get_struct_name(structure)
             code_block_list = [] # list of pair(if condition logic, resizing code)
-            for list_name in dynamic_size_list_variables:
+            for list_name in sorted(dynamic_size_list_variables):
                 if list_name in VK.LIST_TYPE_FIELD_AND_SIZE_MAPPING:
                     list_size_field_name = VK.LIST_TYPE_FIELD_AND_SIZE_MAPPING[list_name]
                     condition_expression = f"device{dot_extension}.{struct_instance_name}.{list_size_field_name}"
@@ -842,7 +886,7 @@ def generate_vk_format_init_code(vk_version_api: str = None):
     if not vk_version_api:
         # Process all extensions
         for key, format_ranges in VK_FORMAT_RANGE_MAPPING.items():
-            if key.startswith("VK_VERSION_"):
+            if re.match(".*VERSION_[0-9]_[0-9]", key):
                 continue
             for start_format, end_format in format_ranges:
                 format_code = [f'if (HasExtension("{key}", device.extensions)) {{']

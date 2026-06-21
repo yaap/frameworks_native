@@ -18,8 +18,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <input/Input.h>
-#include <utils/Condition.h>
-#include <utils/Mutex.h>
+#include <jni.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -62,7 +61,7 @@ class InputReader : public InputReaderInterface {
 public:
     InputReader(std::shared_ptr<EventHubInterface> eventHub,
                 const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener,
-                JNIEnv* env,
+                JavaVM* vm,
                 std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend);
     virtual ~InputReader();
 
@@ -190,7 +189,7 @@ protected:
     mutable std::mutex mLock;
 
 private:
-    JNIEnv* mJniEnv;
+    JavaVM* mVm;
     std::unique_ptr<InputThread> mThread;
 
     std::condition_variable mReaderIsAliveCondition;

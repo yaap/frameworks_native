@@ -17,6 +17,7 @@
 #pragma once
 
 #include <aidl/com/android/server/inputflinger/IInputFlingerRust.h>
+#include <jni.h>
 #include <utils/Mutex.h>
 #include "InputFilterCallbacks.h"
 #include "InputFilterPolicyInterface.h"
@@ -50,7 +51,7 @@ public:
     using AidlDeviceInfo = aidl::com::android::server::inputflinger::DeviceInfo;
 
     explicit InputFilter(InputListenerInterface& listener, IInputFlingerRust& rust,
-                         InputFilterPolicyInterface& policy, JNIEnv* env);
+                         InputFilterPolicyInterface& policy, JavaVM* vm);
     ~InputFilter() override = default;
     void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
     void notifyKey(const NotifyKeyArgs& args) override;

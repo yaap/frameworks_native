@@ -45,8 +45,15 @@ std::pair<std::optional<uint32_t>, std::unique_ptr<InputEvent>> FakeInputReceive
     status_t status = WOULD_BLOCK;
     while (status == WOULD_BLOCK) {
         InputEvent* rawEventPtr = nullptr;
-        status = mConsumer.consume(&mEventFactory, /*consumeBatches=*/true, -1, &consumeSeq,
-                                   &rawEventPtr);
+        auto [result, unfinishedInputMessages] =
+                mConsumer.consume(&mEventFactory, /*consumeBatches=*/true, -1, &consumeSeq,
+                                  &rawEventPtr);
+        if (result.ok()) {
+            status = OK;
+        } else {
+            status = result.error().code();
+        }
+
         event = std::unique_ptr<InputEvent>(rawEventPtr);
         std::chrono::duration elapsed = std::chrono::steady_clock::now() - start;
         if (elapsed > timeout) {
@@ -303,6 +310,7 @@ sp<FakeWindowHandle> FakeWindowHandle::clone(ui::LogicalDisplayId displayId) {
     handle->mInfo.displayId = displayId;
     handle->mInfo.id = sId++;
     handle->mInputReceiver = mInputReceiver;
+    handle->mInfo.setInputConfig(InputConfig::CLONE, true);
     return handle;
 }
 

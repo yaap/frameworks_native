@@ -21,9 +21,7 @@
 #include <algorithm>
 
 #include <android-base/logging.h>
-#ifdef __ANDROID__
 #include <statslog_libinput.h>
-#endif // __ANDROID__
 
 #include "Eigen/Core"
 #include "Eigen/Geometry"
@@ -47,7 +45,6 @@ inline constexpr float PATH_LENGTH_EPSILON = 0.001;
 
 void MotionPredictorMetricsManager::defaultReportAtomFunction(
         const MotionPredictorMetricsManager::AtomFields& atomFields) {
-#ifdef __ANDROID__
     android::libinput::stats_write(android::libinput::STYLUS_PREDICTION_METRICS_REPORTED,
                                    /*stylus_vendor_id=*/0,
                                    /*stylus_product_id=*/0,
@@ -60,7 +57,6 @@ void MotionPredictorMetricsManager::defaultReportAtomFunction(
                                    atomFields.highVelocityOffTrajectoryRmse,
                                    atomFields.scaleInvariantAlongTrajectoryRmse,
                                    atomFields.scaleInvariantOffTrajectoryRmse);
-#endif // __ANDROID__
 }
 
 MotionPredictorMetricsManager::MotionPredictorMetricsManager(

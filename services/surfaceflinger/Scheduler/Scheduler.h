@@ -78,11 +78,6 @@ class TokenManager;
 class VsyncConfiguration;
 class VsyncSchedule;
 
-enum class Cycle {
-    Render,       // Surface rendering.
-    LastComposite // Ahead of display compositing by one refresh period.
-};
-
 class Scheduler : public IEventThreadCallback, android::impl::MessageQueue {
     using Impl = android::impl::MessageQueue;
 
@@ -93,11 +88,9 @@ public:
 
     void startTimers() REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
-    // Automatically selects a pacesetter display and designates if `pacesetterId` is not present,
-    // otherwise promotes `pacesetterId` to pacesetter. Returns true if a new display was chosen as
+    // Automatically selects a pacesetter display. Returns true if a new display was chosen as
     // the pacesetter.
-    bool designatePacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId = std::nullopt)
-            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+    bool designatePacesetterDisplay() REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     // Force `pacesetterId` as the pacesetter display, which will remain as the pacesetter display
     // until it is unregistered or the forced pacesetter is reset. Returns true if the forced
@@ -105,11 +98,9 @@ public:
     bool forcePacesetterDisplay(PhysicalDisplayId pacesetterId) REQUIRES(kMainThreadContext)
             EXCLUDES(mDisplayLock);
 
-    // Clears forced pacesetter display if present and sets the pacesetter to
-    // `pacesetterId` if present, otherwise automatically selects one. No-op if
-    // `mForcedPacesetterDisplayId` is not set.
-    bool resetForcedPacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId)
-            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+    // Clears forced pacesetter display if present and automatically selects a new pacesetter. No-op
+    // if `mForcedPacesetterDisplayId` is not set.
+    bool resetForcedPacesetterDisplay() REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     PhysicalDisplayId getPacesetterDisplayId() const EXCLUDES(mDisplayLock);
 
@@ -118,13 +109,10 @@ public:
     using ConstVsyncSchedulePtr = std::shared_ptr<const VsyncSchedule>;
     using VsyncSchedulePtr = std::shared_ptr<VsyncSchedule>;
 
-    // TODO: b/255635821 - Remove `defaultPacesetterId` parameter once the pacesetter_selection flag
-    // is live.
-    void registerDisplay(PhysicalDisplayId, ui::DisplayConnectionType, RefreshRateSelectorPtr,
-                         std::optional<PhysicalDisplayId> defaultPacesetterId)
+    void registerDisplay(PhysicalDisplayId, ui::DisplayConnectionType, RefreshRateSelectorPtr)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
-    void unregisterDisplay(PhysicalDisplayId, std::optional<PhysicalDisplayId> defaultPacesetterId)
-            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock, mPolicyLock);
+    void unregisterDisplay(PhysicalDisplayId) REQUIRES(kMainThreadContext)
+            EXCLUDES(mDisplayLock, mPolicyLock);
 
     void run();
 
@@ -152,12 +140,12 @@ public:
         return std::move(future);
     }
 
-    void createEventThread(Cycle, TokenManager*, std::chrono::nanoseconds workDuration,
+    void createEventThread(TokenManager*, std::chrono::nanoseconds workDuration,
                            std::chrono::nanoseconds readyDuration);
 
     sp<IDisplayEventConnection> createDisplayEventConnection(
-            Cycle, EventRegistrationFlags eventRegistration = {},
-            const sp<IBinder>& layerHandle = nullptr) EXCLUDES(mChoreographerLock);
+            EventRegistrationFlags eventRegistration = {}, const sp<IBinder>& layerHandle = nullptr)
+            EXCLUDES(mChoreographerLock);
 
     enum class Hotplug { Connected, Disconnected };
     void dispatchHotplug(PhysicalDisplayId, Hotplug);
@@ -183,11 +171,10 @@ public:
     void enableSyntheticVsync(bool = true) REQUIRES(kMainThreadContext);
     void omitVsyncDispatching(bool) REQUIRES(kMainThreadContext);
 
-    void onHdcpLevelsChanged(Cycle, PhysicalDisplayId, int32_t, int32_t);
+    void onHdcpLevelsChanged(PhysicalDisplayId, int32_t, int32_t);
 
     // Modifies work duration in the event thread.
-    void setDuration(Cycle, std::chrono::nanoseconds workDuration,
-                     std::chrono::nanoseconds readyDuration);
+    void setDuration(std::chrono::nanoseconds workDuration, std::chrono::nanoseconds readyDuration);
 
     VsyncModulator& vsyncModulator() { return *mVsyncModulator; }
 
@@ -207,7 +194,7 @@ public:
         }
 
         if (const auto config = (*mVsyncModulator.*handler)(args...)) {
-            setVsyncConfig(*config, getPacesetterVsyncPeriod());
+            setVsyncConfig(*config);
         }
     }
 
@@ -232,8 +219,12 @@ public:
         return refreshRate.getPeriodNsecs() - sfVsyncOffset.ns() + 1000000;
     }
 
-    // Sets the render rate for the scheduler to run at.
-    void setRenderRate(PhysicalDisplayId, Fps, bool applyImmediately);
+    // Combines resyncToHardwareVsync, setRenderRate, and updatePhaseConfiguration.
+    enum class ResyncToModeOpts { None, PeakRenderRate };
+    void resyncToMode(const FrameRateMode&, ResyncToModeOpts = ResyncToModeOpts::None);
+
+    // TODO: b/434757601 - Merge with DMC::setActiveMode.
+    void setRenderRate(PhysicalDisplayId, Fps renderRate, bool applyImmediately);
 
     void enableHardwareVsync(PhysicalDisplayId) REQUIRES(kMainThreadContext);
     void disableHardwareVsync(PhysicalDisplayId, bool disallow) REQUIRES(kMainThreadContext);
@@ -251,13 +242,16 @@ public:
     }
 
     void resync(ResyncCaller) override EXCLUDES(mDisplayLock);
-    void forceNextResync() { mLastResyncTime = 0; }
+    void forceNextResync() {
+        mLastResyncTime = 0;
+        mLastResyncTimeOnTx = 0;
+    }
 
-    // Passes a vsync sample to VsyncController. Returns true if
-    // VsyncController detected that the vsync period changed and false
-    // otherwise.
+    // Passes a vsync sample to VsyncController. Returns true if VsyncController detected that the
+    // vsync period changed and false otherwise.
     bool addResyncSample(PhysicalDisplayId, nsecs_t timestamp,
-                         std::optional<nsecs_t> hwcVsyncPeriod);
+                         std::optional<nsecs_t> hwcVsyncPeriod,
+                         VSyncTracker::VsyncTimeSource source);
     void addPresentFence(PhysicalDisplayId, std::shared_ptr<FenceTime>)
             REQUIRES(kMainThreadContext);
 
@@ -295,13 +289,11 @@ public:
         return std::const_pointer_cast<VsyncSchedule>(std::as_const(*this).getVsyncSchedule(idOpt));
     }
 
-    TimePoint expectedPresentTimeForPacesetter() const EXCLUDES(mDisplayLock) {
+    const FrameTarget* pacesetterFrameTarget() const EXCLUDES(mDisplayLock) {
         std::scoped_lock lock(mDisplayLock);
         return pacesetterDisplayLocked()
-                .transform([](const Display& display) {
-                    return display.targeterPtr->target().expectedPresentTime();
-                })
-                .value_or(TimePoint());
+                .transform([](const Display& display) { return &display.targeterPtr->target(); })
+                .value_or(nullptr);
     }
 
     // Returns true if a given vsync timestamp is considered valid vsync
@@ -311,7 +303,7 @@ public:
     bool isVsyncInPhase(TimePoint expectedVsyncTime, Fps frameRate) const;
 
     void dump(utils::Dumper&) const EXCLUDES(mVsyncConfigLock);
-    void dump(Cycle, std::string&) const;
+    void dump(std::string&) const;
     void dumpVsync(std::string&) const EXCLUDES(mDisplayLock);
 
     // Returns the preferred refresh rate and frame rate for the pacesetter display.
@@ -363,6 +355,9 @@ public:
         return pacesetterSelectorPtr()->getActiveMode().fps;
     }
 
+    // Returns true if the follower's refresh rate is close to the pacesetter's.
+    bool isLockstepFollower(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
+
     Fps getNextFrameInterval(PhysicalDisplayId, TimePoint currentExpectedPresentTime) const
             EXCLUDES(mDisplayLock);
 
@@ -403,15 +398,7 @@ private:
 
     // Used to skip event dispatch before EventThread creation during boot.
     // TODO: b/241285191 - Reorder Scheduler initialization to avoid this.
-    bool hasEventThreads() const {
-        return CC_LIKELY(
-                mRenderEventThread &&
-                (FlagManager::getInstance().deprecate_vsync_sf() || mLastCompositeEventThread));
-    }
-
-    EventThread& eventThreadFor(Cycle cycle) const {
-        return *(cycle == Cycle::Render ? mRenderEventThread : mLastCompositeEventThread);
-    }
+    bool hasEventThreads() const { return CC_LIKELY(mEventThread); }
 
     // Update feature state machine to given state when corresponding timer resets or expires.
     void kernelIdleTimerCallback(PhysicalDisplayId, TimerState) EXCLUDES(mDisplayLock);
@@ -426,7 +413,7 @@ private:
                                      DisplayModePtr modePtr = nullptr)
             REQUIRES(kMainThreadContext, mDisplayLock);
     void resyncAllToHardwareVsync(bool allowToEnable) EXCLUDES(mDisplayLock);
-    void setVsyncConfig(const VsyncConfig&, Period vsyncPeriod);
+    void setVsyncConfig(const VsyncConfig&);
 
     // TODO: b/241286431 - Remove this option, which assumes that the pacesetter does not change
     // when a (secondary) display is registered or unregistered. In the short term, this avoids
@@ -437,18 +424,10 @@ private:
         bool toggleIdleTimer;
     };
 
-    void promotePacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId, PromotionParams)
+    void promotePacesetterDisplay(PromotionParams,
+                                  std::optional<PhysicalDisplayId> pacesetterId = std::nullopt)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
-    // Changes to the displays (e.g. registering and unregistering) must be made
-    // while mDisplayLock is locked, and the new pacesetter then must be promoted while
-    // mDisplayLock is still locked. However, a new pacesetter means that
-    // MessageQueue and EventThread need to use the new pacesetter's
-    // VsyncSchedule, and this must happen while mDisplayLock is *not* locked,
-    // or else we may deadlock with EventThread.
-    std::shared_ptr<VsyncSchedule> promotePacesetterDisplayLocked(
-            std::optional<PhysicalDisplayId> pacesetterId, PromotionParams)
-            REQUIRES(kMainThreadContext, mDisplayLock);
     void applyNewVsyncSchedule(std::shared_ptr<VsyncSchedule>) EXCLUDES(mDisplayLock);
 
     // If toggleIdleTimer is true, the calling thread blocks until the pacesetter's idle timer
@@ -458,8 +437,7 @@ private:
             EXCLUDES(mDisplayLock, mPolicyLock);
 
     void registerDisplayInternal(PhysicalDisplayId, ui::DisplayConnectionType,
-                                 RefreshRateSelectorPtr, VsyncSchedulePtr,
-                                 std::optional<PhysicalDisplayId> defaultPacesetterId)
+                                 RefreshRateSelectorPtr, VsyncSchedulePtr)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     struct Policy;
@@ -532,19 +510,23 @@ private:
     // NOTE: If displays with highest refresh rates have roughly equal refresh rates,
     // and the current pacesetter is among them, then the current pacesetter will remain the
     // pacesetter.
-    PhysicalDisplayId selectPacesetterDisplay(std::optional<PhysicalDisplayId> desiredPacesetterId)
-            const REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+    PhysicalDisplayId selectPacesetterDisplay(
+            std::optional<PhysicalDisplayId> desiredPacesetterId = std::nullopt) const
+            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
     PhysicalDisplayId selectPacesetterDisplayLocked(
             std::optional<PhysicalDisplayId> desiredPacesetterId) const
             REQUIRES(kMainThreadContext, mDisplayLock);
 
+    bool isLockstepFollowerLocked(PhysicalDisplayId) const
+            REQUIRES(mDisplayLock, kMainThreadContext);
+
     // Returns true if any powered on display is capable of switching modes.
     bool canAnySelectorSwitch() const EXCLUDES(mDisplayLock);
 
-    std::unique_ptr<EventThread> mRenderEventThread;
-    std::unique_ptr<EventThread> mLastCompositeEventThread;
+    std::unique_ptr<EventThread> mEventThread;
 
     std::atomic<nsecs_t> mLastResyncTime = 0;
+    std::atomic<nsecs_t> mLastResyncTimeOnTx = 0;
 
     const FeatureFlags mFeatures;
 
@@ -642,6 +624,18 @@ private:
         return pacesetterDisplayLocked()
                 .transform([](const Display& display) { return display.selectorPtr; })
                 .or_else([] { return std::optional<RefreshRateSelectorPtr>(nullptr); })
+                .value();
+    }
+
+    RefreshRateSelectorPtr selectorPtrLocked(PhysicalDisplayId displayId) const
+            REQUIRES(mDisplayLock) {
+        ftl::FakeGuard guard(kMainThreadContext);
+        return mDisplays.get(displayId)
+                .transform([](const Display& display) { return display.selectorPtr; })
+                .or_else([this] {
+                    ftl::FakeGuard guard(mDisplayLock);
+                    return std::make_optional(pacesetterSelectorPtrLocked());
+                })
                 .value();
     }
 

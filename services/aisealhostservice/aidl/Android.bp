@@ -1,0 +1,22 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+aidl_interface {
+    name: "aiseal_internal_service_aidl",
+    srcs: ["com/**/*.aidl"],
+    unstable: true,
+    backend: {
+        java: {
+            sdk_version: "module_current",
+        },
+        rust: {
+            enabled: true,
+        },
+    },
+    visibility: [
+        "//frameworks/base/services/aiseal",
+        "//frameworks/native/services/aisealhostservice",
+        "//system/tools/aidl/build",
+    ],
+}

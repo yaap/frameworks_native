@@ -16,13 +16,15 @@
 
 #pragma once
 
-#include <deque>
+#include <memory>
 #include <optional>
-#include <unordered_map>
+#include <vector>
 
 #include <android-base/thread_annotations.h>
 #include <binder/IBinder.h>
 #include <ftl/future.h>
+#include <ftl/small_map.h>
+#include <ftl/small_vector.h>
 #include <gui/BufferReleaseChannel.h>
 #include <gui/CornerRadii.h>
 #include <gui/ITransactionCompletedListener.h>
@@ -30,9 +32,11 @@
 #include <ui/Fence.h>
 #include <ui/FenceResult.h>
 
+#include "Utils/FenceUtils.h"
+
 namespace android {
 
-class CallbackHandle : public RefBase {
+class CallbackHandle {
 public:
     CallbackHandle(const sp<IBinder>& transactionListener, const std::vector<CallbackId>& ids,
                    const sp<IBinder>& sc);
@@ -43,8 +47,6 @@ public:
 
     bool releasePreviousBuffer = false;
     std::string name;
-    sp<Fence> previousReleaseFence;
-    std::vector<ftl::Future<FenceResult>> previousReleaseFences;
     std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence = -1;
     nsecs_t latchTime = -1;
     std::optional<uint32_t> transformHint = std::nullopt;
@@ -59,13 +61,13 @@ public:
     ReleaseCallbackId previousReleaseCallbackId = ReleaseCallbackId::INVALID_ID;
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
     std::weak_ptr<renderengine::ExternalTexture> previousBuffer;
+    FenceMerger fenceMerger;
 };
 
 class TransactionCallbackInvoker {
 public:
-    status_t addCallbackHandles(const std::deque<sp<CallbackHandle>>& handles);
-    status_t addOnCommitCallbackHandles(const std::deque<sp<CallbackHandle>>& handles,
-                                             std::deque<sp<CallbackHandle>>& outRemainingHandles);
+    void addCallbackHandles(std::vector<CallbackHandle>&& handles);
+    void addOnCommitCallbackHandles(std::vector<CallbackHandle>& handles);
 
     void addEmptyTransaction(const ListenerCallbacks& listenerCallbacks);
 
@@ -76,15 +78,13 @@ public:
         mCompletedTransactions.clear();
     }
 
-    status_t addCallbackHandle(const sp<CallbackHandle>& handle);
+    void addCallbackHandle(CallbackHandle&& handle);
 
 private:
-    status_t findOrCreateTransactionStats(const sp<IBinder>& listener,
-                                          const std::vector<CallbackId>& callbackIds,
-                                          TransactionStats** outTransactionStats);
+    TransactionStats& findOrCreateTransactionStats(const sp<IBinder>& listener,
+                                                   const std::vector<CallbackId>& callbackIds);
 
-    std::unordered_map<sp<IBinder>, std::deque<TransactionStats>, IListenerHash>
-        mCompletedTransactions;
+    ftl::SmallVector<std::pair<sp<IBinder>, TransactionStats>, 10> mCompletedTransactions;
 
     struct BufferRelease {
         std::string layerName;
@@ -92,7 +92,10 @@ private:
         ReleaseCallbackId callbackId;
         sp<Fence> fence;
         uint32_t currentMaxAcquiredBufferCount;
+        std::weak_ptr<renderengine::ExternalTexture> previousBuffer;
     };
+
+    ftl::SmallMap<ReleaseCallbackId, FenceMerger, 20> mReleaseIdToFenceMerger;
     std::vector<BufferRelease> mBufferReleases;
 
     sp<Fence> mPresentFence;

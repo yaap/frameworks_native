@@ -18,8 +18,24 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItemConsumer.h>
 #include "TransactionTestHarnesses.h"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#include <android/ipcrenderbuffer/IPCRecordingCanvas.h>
+#pragma clang diagnostic pop
+#include <SkColorSpace.h>
+#include <SkImage.h>
+#include <SkRuntimeEffect.h>
+#include <SkString.h>
+#include <android/hardware_buffer.h>
+#include <android/ipcrenderbuffer/RenderBufferHelpers.h>
+#include <gui/GraphicBuffersRegisterInfo.h>
+#include <gui/ISurfaceComposer.h>
+#include <gui/SurfaceComposerClient.h>
+#include <private/gui/ComposerService.h>
 
 namespace android {
 
@@ -50,10 +66,19 @@ protected:
 INSTANTIATE_TEST_CASE_P(
         LayerTypeAndRenderTypeTransactionTests, LayerTypeAndRenderTypeTransactionTest,
         ::testing::Combine(
-                ::testing::Values(
-                        static_cast<uint32_t>(ISurfaceComposerClient::eFXSurfaceBufferState)),
+            []() {
+                std::vector<uint32_t> layerTypes;
+                if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+                    layerTypes.push_back(
+                            static_cast<uint32_t>(ISurfaceComposerClient::eFXSurfaceBufferState));
+                    layerTypes.push_back(static_cast<uint32_t>(LAYER_TYPE_RENDER_COMMAND_BUFFER));
+                } else {
+                    layerTypes.push_back(
+                            static_cast<uint32_t>(ISurfaceComposerClient::eFXSurfaceBufferState));
+                }
+                return ::testing::ValuesIn(layerTypes);
+            }(),
                 ::testing::Values(RenderPath::VIRTUAL_DISPLAY, RenderPath::SCREENSHOT)));
-
 TEST_P(LayerTypeAndRenderTypeTransactionTest, SetZBasic) {
     sp<SurfaceControl> layerR;
     sp<SurfaceControl> layerG;
@@ -252,7 +277,6 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiusInvalidCrop) {
         const uint8_t bottom = size - 1;
         const uint8_t right = size - 1;
         auto shot = getScreenCapture();
-        std::this_thread::sleep_for(std::chrono::seconds(5));
         // Solid corners since we don't round a layer without a valid crop
         shot->expectColor(Rect(0, 0, testArea, testArea), Color::RED);
         shot->expectColor(Rect(size - testArea, 0, right, testArea), Color::RED);
@@ -304,7 +328,6 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiiWithRotation) {
     sp<SurfaceControl> parent;
     sp<SurfaceControl> child;
     const uint8_t size = 64;
-    const uint8_t testArea = 4;
     const gui::CornerRadii radii = gui::CornerRadii(0, 10, 20, 30); // TL, TR, BL, BR
     ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", size, size));
     ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, size, size));
@@ -854,8 +877,8 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetClientDrawnCornerRadiiWithMisma
     ASSERT_NO_FATAL_FAILURE(fillLayerColor(layer, Color::RED, size, size));
 
     Transaction()
-            .setClientDrawnCornerRadius(layer, cornerRadius, clientCrop)
             .setCornerRadius(layer, cornerRadius)
+            .setClientDrawnCornerRadius(layer, cornerRadius, clientCrop)
             .apply();
     {
         const uint8_t bottom = size - 1;
@@ -1106,6 +1129,269 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBoxShadowSettings) {
     auto shot = getScreenCapture();
     shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
                                            "testdata/SetBoxShadowSettings.png");
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetRenderBuffer) {
+    if (!com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        return;
+    }
+
+    const uint32_t layerSize = 256;
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("renderbuffer layer", 0, 0));
+
+    IPCClientResourceCache clientCache;
+    auto canvas = IPCRecordingCanvas(clientCache);
+    canvas.storeSize(layerSize, layerSize);
+    canvas.startRecording();
+    canvas.drawColor(0xFFB0E0E6, SkBlendMode::kSrc);
+
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setColor(0xFFE55B13);
+    canvas.drawRect(SkRect::MakeWH(layerSize / 2, layerSize / 2), paint);
+
+    SkPaint circlePaint;
+    circlePaint.setAntiAlias(true);
+    circlePaint.setColor(0xFF556B2F);
+    canvas.drawCircle(layerSize, layerSize, layerSize / 2, circlePaint);
+
+    canvas.endRecording();
+
+    constexpr int cropInset = 10;
+    constexpr int cornerRadius = 20;
+    Transaction()
+            .setLayer(layer, mLayerZBase + 1)
+            .setRenderCommandBuffer(layer, canvas.getRenderCommandBufferProducer())
+            .setRenderCommandBufferFrameId(layer, 1)
+            .setCrop(layer,
+                     Rect(cropInset, cropInset, layerSize - 2 * cropInset,
+                          layerSize - 2 * cropInset))
+            .setCornerRadius(layer, cornerRadius)
+            .apply();
+
+    auto shot = getScreenCapture();
+    shot->expectBufferMatchesImageFromFile(Rect(0, 0, layerSize, layerSize),
+                                           "testdata/SetRenderBuffer.png");
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetRenderBufferWithShader) {
+    if (!com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        return;
+    }
+
+    const uint32_t layerSize = 256;
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("shader layer", 0, 0));
+
+    IPCClientResourceCache clientCache;
+    auto canvas = IPCRecordingCanvas(clientCache);
+    canvas.storeSize(layerSize, layerSize);
+
+    // Animate over 3 frames
+    canvas.startRecording();
+    canvas.drawColor(SK_ColorBLACK);
+
+    auto [effect, error] = SkRuntimeEffect::MakeForShader(SkString(R"(
+        uniform float2 iResolution;
+        vec4 main(vec2 fragCoord) {
+            vec2 uv = fragCoord / iResolution.xy;
+            float v = 0.0;
+            vec2 c = uv * 2.0 - 1.0;
+            v += sin((c.x));
+            v += sin((c.y)/2.0);
+            v += sin((c.x+c.y)/2.0);
+            v += sqrt(c.x*c.x+c.y*c.y+1.0);
+            v = v/2.0;
+            vec3 col = vec3(sin(3.14*v), cos(3.14*v), -sin(3.14*v));
+            return vec4(col * 0.5 + 0.5, 1.0);
+        }
+    )"));
+    ASSERT_NE(nullptr, effect);
+
+    SkRuntimeShaderBuilder builder(effect);
+    builder.uniform("iResolution") = SkV2{(float)layerSize, (float)layerSize};
+
+    SkPaint paint;
+    paint.setShader(builder.makeShader());
+    canvas.drawRect(SkRect::MakeWH(layerSize, layerSize), paint);
+    canvas.endRecording();
+
+    Transaction()
+            .setLayer(layer, mLayerZBase + 1)
+            .setRenderCommandBuffer(layer, canvas.getRenderCommandBufferProducer())
+            .setRenderCommandBufferFrameId(layer, 1)
+            .setCrop(layer, Rect(0, 0, layerSize, layerSize))
+            .apply(true);
+
+    // Verify output
+    auto shot = getScreenCapture();
+    shot->expectBufferMatchesImageFromFile(Rect(0, 0, layerSize, layerSize),
+                                           "testdata/SetRenderBufferWithShader.png");
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, RegisterGraphicBuffer) {
+    if (!com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        return;
+    }
+
+    const uint32_t width = 256;
+    const uint32_t height = 256;
+
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("fractalLayer", width, height));
+
+    // Create GraphicBuffer and draw a fractal
+    sp<GraphicBuffer> buffer =
+            sp<GraphicBuffer>::make(width, height, PIXEL_FORMAT_RGBA_8888, 1,
+                                    BufferUsage::CPU_WRITE_OFTEN | BufferUsage::GPU_TEXTURE,
+                                    "fractalBuffer");
+    ASSERT_NE(nullptr, buffer);
+
+    uint32_t* pixels = nullptr;
+    buffer->lock(static_cast<uint32_t>(BufferUsage::CPU_WRITE_OFTEN), (void**)&pixels);
+    ASSERT_NE(nullptr, pixels);
+
+    // Simple Mandelbrot fractal generation
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            float real = (x - width / 2.0f) * 4.0f / width;
+            float imag = (y - height / 2.0f) * 4.0f / height;
+            float cr = real;
+            float ci = imag;
+            int n;
+            for (n = 0; n < 255; n++) {
+                float nr = real * real - imag * imag + cr;
+                float ni = 2 * real * imag + ci;
+                if (nr * nr + ni * ni > 4.0f) break;
+                real = nr;
+                imag = ni;
+            }
+            // Simple grayscale coloring based on iteration count
+            uint8_t color = n;
+            pixels[y * width + x] = (0xFF << 24) | (color << 16) | (color << 8) | color;
+        }
+    }
+    buffer->unlock();
+
+    sk_sp<SkImage> image =
+            SkImages::DeferredFromAHardwareBuffer(buffer->toAHardwareBuffer(), kOpaque_SkAlphaType);
+
+    // Register the buffer with SurfaceFlinger
+    auto renderResourceToken = sp<BBinder>::make();
+
+    gui::GraphicBuffersRegisterInfo registerInfo;
+    registerInfo.renderResourceToken = renderResourceToken;
+    registerInfo.buffers.push_back(buffer);
+    ComposerService::getComposerService()->registerGraphicBuffers(registerInfo);
+
+    // Populate the cache with the GraphicBuffer id
+    IPCClientResourceCache clientCache;
+    clientCache.bitmaps[image->uniqueID()] = IPCClientBitmap{buffer->getId()};
+
+    // Command recording
+    auto canvas = IPCRecordingCanvas(clientCache);
+    canvas.storeSize(width, height);
+    canvas.startRecording();
+    canvas.drawImage(image.get(), 0, 0, SkSamplingOptions());
+    canvas.endRecording();
+
+    // Set buffer and apply transaction
+    Transaction()
+            .setLayer(layer, mLayerZBase + 1)
+            //.setBuffer(layer, buffer)
+            .setRenderResourceToken(layer, renderResourceToken)
+            .setCrop(layer, Rect(0, 0, width, height))
+            .setRenderCommandBuffer(layer, canvas.getRenderCommandBufferProducer())
+            .setRenderCommandBufferFrameId(layer, 1)
+            .apply(true);
+
+    // Verify output
+    auto shot = getScreenCapture();
+    shot->expectBufferMatchesImageFromFile(Rect(0, 0, width, height), "testdata/DrawFractal.png");
+
+    // Unregister the buffer
+    gui::GraphicBuffersUnregisterInfo unregisterInfo;
+    unregisterInfo.renderResourceToken = renderResourceToken;
+    unregisterInfo.bufferIds.push_back(buffer->getId());
+    ComposerService::getComposerService()->unregisterGraphicBuffers(unregisterInfo);
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, RegisterGraphicBufferRenderTarget) {
+    if (!com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        return;
+    }
+
+    const uint32_t width = 256;
+    const uint32_t height = 256;
+
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("renderTargetLayer", width, height));
+
+    // Create GraphicBuffer with HW_TEXTURE | HW_RENDER
+    sp<GraphicBuffer> buffer = sp<GraphicBuffer>::make(width, height, PIXEL_FORMAT_RGBA_8888, 1,
+                                                       GraphicBuffer::USAGE_HW_TEXTURE |
+                                                               GraphicBuffer::USAGE_HW_RENDER |
+                                                               GraphicBuffer::USAGE_SW_WRITE_OFTEN,
+                                                       "renderTargetBuffer");
+    ASSERT_NE(nullptr, buffer);
+
+    sk_sp<SkImage> image =
+            SkImages::DeferredFromAHardwareBuffer(buffer->toAHardwareBuffer(), kOpaque_SkAlphaType);
+
+    // Register the buffer with SurfaceFlinger
+    auto renderResourceToken = sp<BBinder>::make();
+    gui::GraphicBuffersRegisterInfo registerInfo;
+    registerInfo.renderResourceToken = renderResourceToken;
+    registerInfo.buffers.push_back(buffer);
+    ComposerService::getComposerService()->registerGraphicBuffers(registerInfo);
+
+    // Populate the cache
+    IPCClientResourceCache clientCache;
+    uint32_t imageId = image->uniqueID();
+    clientCache.bitmaps[imageId] = IPCClientBitmap{buffer->getId()};
+
+    auto canvas = IPCRecordingCanvas(clientCache);
+    canvas.storeSize(width, height);
+    canvas.startRecording();
+
+    // Draw a pretty picture offscreen
+    canvas.beginRenderTarget(buffer->getId());
+    canvas.drawColor(0xFFFDF5E6);
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setColor(0xFFFF7F50);
+    canvas.drawCircle(width / 3.0f, height / 3.0f, 60, paint);
+    paint.setColor(0xFF4682B4);
+    canvas.drawCircle(2 * width / 3.0f, 2 * height / 3.0f, 80, paint);
+    paint.setColor(0xFFFFD700);
+    canvas.drawCircle(width / 2.0f, height / 2.0f, 40, paint);
+    canvas.endRenderTarget();
+
+    // Draw the result of the render target onto the main canvas
+    canvas.drawColor(SK_ColorWHITE);
+    canvas.drawImage(image.get(), 0, 0, SkSamplingOptions());
+
+    canvas.endRecording();
+
+    // Set buffer and apply transaction
+    Transaction()
+            .setLayer(layer, mLayerZBase + 1)
+            .setRenderResourceToken(layer, renderResourceToken)
+            .setCrop(layer, Rect(0, 0, width, height))
+            .setRenderCommandBuffer(layer, canvas.getRenderCommandBufferProducer())
+            .setRenderCommandBufferFrameId(layer, 1)
+            .apply(true);
+
+    auto shot = getScreenCapture();
+    shot->expectBufferMatchesImageFromFile(Rect(0, 0, width, height),
+                                           "testdata/RegisterGraphicBufferRenderTarget.png");
+
+    // Unregister the buffer
+    gui::GraphicBuffersUnregisterInfo unregisterInfo;
+    unregisterInfo.renderResourceToken = renderResourceToken;
+    unregisterInfo.bufferIds.push_back(buffer->getId());
+    ComposerService::getComposerService()->unregisterGraphicBuffers(unregisterInfo);
 }
 
 TEST_P(LayerTypeAndRenderTypeTransactionTest, CropElevationShadowByParent) {

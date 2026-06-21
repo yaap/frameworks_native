@@ -43,6 +43,9 @@ public:
     // sets level for correction saturation, [0-10].
     void setLevel(int32_t level);
 
+    // Whether to use the updated daltonization algorithm.
+    void setUseUpdatedAlgorithm(bool useUpdatedAlgorithm);
+
     // returns the color transform to apply in the shader
     const mat4& operator()();
 
@@ -52,9 +55,16 @@ public:
 private:
     void update();
 
+    // Updates mColorTransform based on the original Android algorithm.
+    void updateColorTransform();
+
+    // Updates mColorTransform based on the updated algorithm.
+    void updateColorTransformNew();
+
     ColorBlindnessType mType = ColorBlindnessType::None;
     ColorBlindnessMode mMode = ColorBlindnessMode::Simulation;
     bool mDirty = true;
+    bool mUseUpdatedAlgorithm = false;
     mat4 mColorTransform;
     // level of error spreading, [0.0-1.0].
     float mLevel = 0.7f;

@@ -39,7 +39,7 @@ __BEGIN_DECLS
  * Do not use this from a library. Apps setup their own threadpools, and otherwise, the main
  * function should be responsible for configuring the threadpool for the entire application.
  */
-void ABinderProcess_startThreadPool(void);
+void ABinderProcess_startThreadPool(void) __INTRODUCED_IN(29);
 /**
  * This sets the maximum number of threads that can be started in the threadpool. By default, after
  * startThreadPool is called, this is 15. If it is called additional times, it will only prevent
@@ -56,14 +56,14 @@ void ABinderProcess_startThreadPool(void);
  * Do not use this from a library. Apps setup their own threadpools, and otherwise, the main
  * function should be responsible for configuring the threadpool for the entire application.
  */
-bool ABinderProcess_setThreadPoolMaxThreadCount(uint32_t numThreads);
+bool ABinderProcess_setThreadPoolMaxThreadCount(uint32_t numThreads) __INTRODUCED_IN(29);
 /**
  * Check if the threadpool has already been started.
  * This tells whether someone in the process has called ABinderProcess_startThreadPool. Usually,
  * you should use this in a library to abort if the threadpool is not started.
  * Programs should configure binder threadpools once at the beginning.
  */
-bool ABinderProcess_isThreadPoolStarted(void);
+bool ABinderProcess_isThreadPoolStarted(void) __INTRODUCED_IN(34);
 /**
  * This adds the current thread to the threadpool. This thread will be in addition to the thread
  * configured with ABinderProcess_setThreadPoolMaxThreadCount and started with
@@ -72,20 +72,26 @@ bool ABinderProcess_isThreadPoolStarted(void);
  * Do not use this from a library. Apps setup their own threadpools, and otherwise, the main
  * function should be responsible for configuring the threadpool for the entire application.
  */
-void ABinderProcess_joinThreadPool(void);
+void ABinderProcess_joinThreadPool(void) __INTRODUCED_IN(29);
 
 /**
  * Disables (or enables) background scheduling.
  *
- * By default, binder threads execute at a lower priority. However, this can cause
- * priority inversion, so it is recommended to be disabled in high priority
- * or in system processes.
+ * By default, binder threads execute at a lower priority. This is called
+ * background scheduling in Android. This was done originally in Android
+ * as a generic way to give additional priority to the foreground app.
+ * However, like ABinderProcess_setMinSchedulerPolicy, this also sometimes
+ * causes scheduling inversion in system processes when they get stuck at this
+ * lower priority, so it's best to disable this in high-throughput or
+ * latency-sensitive processes in the direct path of input, especially if their
+ * priorities are managed separately anyway.
  *
- * See also AIBinder_setMinSchedulerPolicy, which overrides this setting.
+ * See also AIBinder_setMinSchedulerPolicy which overrides the priority on a
+ * per-binder call basis.
  *
  * \param disable whether to disable background scheduling
  */
-void ABinderProcess_disableBackgroundScheduling(bool disable);
+void ABinderProcess_disableBackgroundScheduling(bool disable) __INTRODUCED_IN(37);
 
 /**
  * This gives you an fd to wait on. Whenever data is available on the fd,

@@ -4,16 +4,6 @@ package: "com.android.graphics.surfaceflinger.flags"
 container: "system"
 
 flag {
-  name: "add_first_vsync_to_tracker"
-  namespace: "core_graphics"
-  description: "Add the first vsync timestamp to vsync tracker when priod confirmation is still in progress"
-  bug: "422343157"
-  metadata {
-      purpose: PURPOSE_BUGFIX
-    }
-} # add_first_vsync_to_tracker
-
-flag {
   name: "adpf_gpu_sf"
   namespace: "game"
   description: "Guards use of the sending ADPF GPU duration hint and load hints from SurfaceFlinger to Power HAL"
@@ -21,11 +11,14 @@ flag {
 } # adpf_gpu_sf
 
 flag {
-  name: "anchor_list"
-  namespace: "core_graphics"
-  description: "Use an anchor list for frame rate selection"
-  bug: "356986687"
-} # anchor_list
+  name: "align_adpf_with_sf_opt_policy"
+  namespace: "window_surfaces"
+  description: "Align ADPF with SF optimization policy"
+  bug: "477953599"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # align_adpf_with_sf_opt_policy
 
 flag {
   name: "arr_setframerate_api"
@@ -37,14 +30,6 @@ flag {
 } # arr_setframerate_api
 
 flag {
-  name: "arr_setframerate_gte_enum"
-  namespace: "core_graphics"
-  description: "Exposes GTE (greater than or equal to) enum for Android 16"
-  bug: "380949716"
-  is_fixed_read_only: true
-} # arr_setframerate_gte_enum
-
-flag {
   name: "arr_surfacecontrol_setframerate_api"
   namespace: "core_graphics"
   description: "New SDK SurfaceControl.Transaction#setFrameRate API for Android 16"
@@ -54,22 +39,61 @@ flag {
 } # arr_surfacecontrol_setframerate_api
 
 flag {
-  name: "begone_bright_hlg"
+  name: "bugfix_layer_caching_color_inversion_flickering"
   namespace: "core_graphics"
-  description: "Caps HLG brightness relative to SDR"
-  bug: "362510107"
-  is_fixed_read_only: true
-} # begone_bright_hlg
-
-flag {
-  name: "buffer_stuffing_fix"
-  namespace: "core_graphics"
-  description: "bug fix for buffer stuffing classification"
-  bug: "417070677"
+  description: "Fixes the flickering when turning on color inversion and the layer caching"
+  bug: "404903019"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
-} # buffer_stuffing_fix
+} # bugfix_layer_caching_color_inversion_flickering
+
+flag {
+  name: "bugfix_resize_virtual_display_surfaces"
+  namespace: "core_graphics"
+  description: "Surfaces should be resized when virtual display size is set"
+  bug: "391237198"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # bugfix_resize_virtual_display_surfaces
+
+flag {
+  name: "bugfix_virtual_display_refresh_rate"
+  namespace: "core_graphics"
+  description: "Fixes Virtual Display setRequestedRefreshRate api"
+  bug: "478905638"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # bugfix_virtual_display_refresh_rate
+
+flag {
+  name: "color_transform_box_shadows_and_border"
+  namespace: "core_graphics"
+  description: "Passes colorTransform filter to BoxShadows and Borders to match image colorTranform and to fix flickering issues with layer caching"
+  bug: "491171525"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # color_transform_box_shadows_and_border
+
+flag {
+  name: "color_transform_translation"
+  namespace: "core_graphics"
+  description: "Fixes a bug that incorrectly applies a the translation component of global color transforms to source alpha"
+  bug: "432040449"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # color_transform_translation
+
+flag {
+  name: "configure_work_duration"
+  namespace: "window_surfaces"
+  description: "Enable the work duration configuration via DisplayModeSpecs."
+  bug: "399491928"
+} # configure_work_duration
 
 flag {
   name: "connected_display_hdr_v2"
@@ -77,6 +101,13 @@ flag {
   description: "enable connected display hdr selection"
   bug: "374182788"
 } # connected_display_hdr_v2
+
+flag {
+  name: "connected_display_hdr_v3"
+  namespace: "core_graphics"
+  description: "enable connected display hdr"
+  bug: "374182788"
+} # connected_display_hdr_v3
 
 flag {
   name: "correct_dpi_with_display_size"
@@ -88,28 +119,6 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # correct_dpi_with_display_size
-
-flag {
-  name: "deprecate_frame_tracker"
-  namespace: "core_graphics"
-  description: "Deprecate using FrameTracker to accumulate and provide FrameStats"
-  bug: "241394120"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # deprecate_frame_tracker
-
-flag {
-  name: "deprecate_vsync_sf"
-  namespace: "core_graphics"
-  description: "Depracate eVsyncSourceSurfaceFlinger and use vsync_app everywhere"
-  bug: "162235855"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # deprecate_vsync_sf
 
 flag {
   name: "disable_synthetic_vsync_for_performance"
@@ -133,32 +142,28 @@ flag {
 } # disable_transparent_region_hint
 
 flag {
+  name: "enable_color_correction_bugfix"
+  namespace: "accessibility"
+  description: "Enable a corrected color correction (daltonization) algorithm matching the one used in ChromeOS"
+  bug: "322829049"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # enable_color_correction_bugfix
+
+flag {
   name: "display_command_modeset"
-  namespace: "desktop_display"
+  namespace: "core_graphics"
   description: "Guards use of the new display command modeset"
   bug: "373900661"
 } # display_command_modeset
 
 flag {
-  name: "filter_refresh_rates_within_config_group"
-  namespace: "core_graphics"
-  description: "Filter refresh rates within a config group"
-  bug: "415374829"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # filter_refresh_rates_within_config_group
-
-flag {
-  name: "flush_buffer_slots_to_uncache"
-  namespace: "core_graphics"
-  description: "Flush DisplayCommands for disabled displays in order to uncache requested buffers."
-  bug: "330806421"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # flush_buffer_slots_to_uncache
+  name: "fence_handling"
+  namespace: "window_surfaces"
+  description: "Unblock main thread with asynchronous fence handling"
+  bug: "428611036"
+} # fence_handling
 
 flag {
   name: "follower_arbitrary_refresh_rate_selection"
@@ -168,6 +173,13 @@ flag {
 } # follower_arbitrary_refresh_rate_selection
 
 flag {
+  name: "follower_arbitrary_refresh_rate_selection_platform"
+  namespace: "core_graphics"
+  description: "Platform flag to enable selection of any refresh rate for the follower display instead of one matching the pacesetter."
+  bug: "371584290"
+} # follower_arbitrary_refresh_rate_selection_platform
+
+flag {
   name: "follower_display_backpressure"
   namespace: "desktop_display"
   description: "Skips presentation on a follower display if there is a pending present for the next follower vsync. Enables follower displays to present even when their refresh rate does not match the pacesetter display."
@@ -175,11 +187,32 @@ flag {
 } # follower_display_backpressure
 
 flag {
+  name: "follower_display_backpressure_platform"
+  namespace: "core_graphics"
+  description: "Platform flag to skips presentation on a follower display if there is a pending present for the next follower vsync. Enables follower displays to present even when their refresh rate does not match the pacesetter display."
+  bug: "374072507"
+} # follower_display_backpressure_platform
+
+flag {
+  name: "force_sdr_invalid_hdr_type"
+  namespace: "core_graphics"
+  description: "Allow OEMs to opt into receiving stronger signals about forced-SDR mode by sending forceHdrType=INVALID_HDR_TYPE into Composer HAL"
+  bug: "419756717"
+} # force_sdr_invalid_hdr_type
+
+flag {
   name: "force_slower_follower_gpu_composition"
   namespace: "desktop_display"
   description: "Force slower connected displays to be GPU composited."
   bug: "389982803"
 } # force_slower_follower_gpu_composition
+
+flag {
+  name: "force_slower_follower_gpu_composition_platform"
+  namespace: "core_graphics"
+  description: "Platform flag to force slower connected displays to be GPU composited."
+  bug: "389982803"
+} # force_slower_follower_gpu_composition_platform
 
 flag {
   name: "force_compile_graphite_renderengine"
@@ -201,6 +234,16 @@ flag {
 } # frame_rate_category_mrr
 
 flag {
+  name: "frametimeline_boottime_in_lambda"
+  namespace: "core_graphics"
+  description: "Converts monotonic boottime timestamps to wallclock time in FrameTimeline"
+  bug: "477947066"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # frametimeline_boottime_in_lambda
+
+flag {
   name: "frontend_caching_v0"
   namespace: "core_graphics"
   description: "Enables caching of frontend layer states"
@@ -208,11 +251,25 @@ flag {
 } # frontend_caching_v0
 
 flag {
+  name: "get_display_known_vsync_sample_enabled"
+  namespace: "core_graphics"
+  description: "Enables querying the last known vsync timestamp from the hwc service."
+  bug: "441162952"
+} # get_display_known_vsync_sample_enabled
+
+flag {
   name: "graphite_renderengine_preview_rollout"
   namespace: "core_graphics"
-  description: "R/W flag to enable Skia's Graphite Vulkan backend in RenderEngine, IF it is already compiled with force_compile_graphite_renderengine, AND the debug.renderengine.graphite_preview_optin sysprop is set to true."
+  description: "R/W flag to enable Skia's Graphite Vulkan backend in RenderEngine, if the device-specific debug.renderengine.graphite_preview_optin sysprop also is set to true."
   bug: "293371537"
 } # graphite_renderengine_preview_rollout
+
+flag {
+  name: "graphite_renderengine_preview2_rollout"
+  namespace: "core_graphics"
+  description: "Second wave R/W flag to enable Skia's Graphite Vulkan backend in RenderEngine, if the device-specific debug.renderengine.graphite_preview2_optin sysprop also is set to true."
+  bug: "293371537"
+} # graphite_renderengine_preview2_rollout
 
 flag {
   name: "graphite_renderengine_desktop_rollout"
@@ -222,21 +279,14 @@ flag {
 } # graphite_renderengine_desktop_rollout
 
 flag {
-  name: "hdcp_negotiation"
+  name: "hwc_buffer_override_skip"
   namespace: "core_graphics"
-  description: "detect secure layers to start HDCP negotiation"
-  bug: "375340594"
+  description: "Include non-client HWC layers when checking for overriden buffers to skip."
+  bug: "491180382"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
-} # hdcp_negotiation
-
-flag {
-  name: "increase_missed_frame_jank_threshold"
-  namespace: "core_graphics"
-  description: "Increase the jank threshold to 4 milliseconds"
-  bug: "342265411"
-} # increase_missed_frame_jank_threshold
+} # hwc_buffer_override_skip
 
 flag {
   name: "local_tonemap_screenshots"
@@ -255,6 +305,37 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # md_degrade_hdr
+
+flag {
+  name: "mrr_full_frame_rate_list"
+  namespace: "core_graphics"
+  description: "Enables all native refresh rates in the full frame rate list for MRR devices"
+  bug: "453004817"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # mrr_full_frame_rate_list
+
+flag {
+  name: "mirror_uid_filtering"
+  namespace: "window_surfaces"
+  description: "Enables UID filtering when building layer snapshots of mirrors. Layers that have different UID from the mirror root's will be dropped "
+  bug: "437391557"
+} # mirror_uid_filtering
+
+flag {
+  name: "mirror_with_crop"
+  namespace: "window_surfaces"
+  description: "Enables mirroring a layer with cropping"
+  bug: "474153029"
+} # mirror_with_crop
+
+flag {
+  name: "modeset_multi_display"
+  namespace: "core_graphics"
+  description: "Allows multiple display to be modeset at the same time."
+  bug: "460127976"
+} # modeset_multi_display
 
 flag {
   name: "modeset_state_machine"
@@ -290,18 +371,22 @@ flag {
 } # offload_gpu_composition
 
 flag {
-  name: "pacesetter_selection"
-  namespace: "desktop_display"
-  description: "Moves pacesetter designation to the display with highest refresh rate. Prefers to keep the same display as pacesetter if there are multiple displays of the same highest refresh rate."
-  bug: "374072507"
-} # pacesetter_selection
-
-flag {
-  name: "parse_edid_version_and_input_type"
-  namespace: "desktop_display"
+  name: "parse_edid_version_and_input_type_v2"
+  namespace: "serviceability"
   description: "Extends the display information parsed and provided by SurfaceFlinger to include EDID version and input type."
   bug: "420767380"
-} # parse_edid_version_and_input_type
+  is_exported: true
+} # parse_edid_version_and_input_type_v2
+
+flag {
+  name: "re_powered_off_displays_inform_cache_budgets"
+  namespace: "core_graphics"
+  description: "Allow powered off displays to contribute to RenderEngine's cache budgets, since displays aren't fully initialized when cache budget calculations are needed during boot."
+  bug: "446658240"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # re_powered_off_displays_inform_cache_budgets
 
 flag {
   name: "readback_screenshot"
@@ -310,26 +395,6 @@ flag {
   bug: "384816457"
   is_exported: true
 } # readback_screenshot
-
-flag {
-  name: "reset_model_flushes_fence"
-  namespace: "core_graphics"
-  description: "VsyncReactor flushes pending fence before calling to reset model"
-  bug: "272802278"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # reset_model_flushes_fence
-
-flag {
-  name: "resync_on_tx"
-  namespace: "core_graphics"
-  description: "Resync to vsync on an incoming transaction"
-  bug: "425994753"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
- } # resync_on_tx
 
 flag {
   name: "set_client_drawn_corner_radii"
@@ -341,6 +406,15 @@ flag {
   }
 } # set_client_drawn_corner_radii
 
+flag {
+  name: "set_power_mode_async"
+  namespace: "window_surfaces"
+  description: "Run power mode hardware transitions asynchronously"
+  bug: "339477240"
+  metadata {
+    purpose: PURPOSE_FEATURE
+  }
+} # set_power_mode_async
 
 flag {
   name: "shader_disk_cache"
@@ -348,6 +422,16 @@ flag {
   description: "Enable shader disk cache for RenderEngine"
   bug: "428980914"
 } # shader_disk_cache
+
+flag {
+  name: "small_blur_region_improvements"
+  namespace: "core_graphics"
+  description: "Flag for some small blur region improvements"
+  bug: "475706309"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # small_blur_region_improvements
 
 flag {
   name: "skip_invisible_windows_in_input"
@@ -369,24 +453,6 @@ flag {
 } # stable_edid_ids
 
 flag {
-    name: "stop_layer"
-    namespace: "window_surfaces"
-    description: "Enables stop layers when building layer snapshots"
-    bug: "403312802"
-    is_fixed_read_only: true
-} # stop_layer
-
-flag {
-    name: "supported_refresh_rate_update"
-    namespace: "core_graphics"
-    description: "Update the supported refresh rate list"
-    bug: "431061528"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-} # supported_refresh_rate_update
-
-flag {
   name: "synced_resolution_switch"
   namespace: "core_graphics"
   description: "Synchronize resolution modeset with framebuffer resizing"
@@ -402,24 +468,46 @@ flag {
 } # true_hdr_screenshots
 
 flag {
-    name: "use_at_least_60_for_min_vote"
+    name: "use_content_priority_for_jank_classification"
     namespace: "core_graphics"
-    description: "Chooses the lowest >= 60 render rate when all voters want Min frame rate"
-    bug: "441896528"
-    metadata {
-        purpose: PURPOSE_BUGFIX
-    }
-} # use_at_least_60_for_min_vote
+    description: "Use content priority for jank classification"
+    bug: "423713756"
+} # use_content_priority_for_jank_classification
 
 flag {
-  name: "vsync_predictor_predicts_within_threshold"
+    name: "use_experimental_jank_classification"
+    namespace: "core_graphics"
+    description: "Use experimental jank classification"
+    bug: "416904263"
+} # use_experimental_jank_classification
+
+flag {
+    name: "use_last_vsync_predict"
+    namespace: "core_graphics"
+    description: "Use the latest VSYNC timestamp for prediction on ARR devices with stable VSYNC signals."
+    bug: "362803698"
+} # use_last_vsync_predict
+
+flag {
+  name: "vd_aware_scheduler"
   namespace: "core_graphics"
-  description: "VSyncPredictor to ignore vsyncs before the given threshold for period and intercept calculation"
-  bug: "411593328"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
- } # vsync_predictor_predicts_within_threshold
+  description: "Extend scheduler with support for virtual displays"
+  bug: "480207885"
+} # vd_aware_scheduler
+
+flag {
+    name: "virtual_display_content_filtering"
+    namespace: "window_surfaces"
+    description: "Secure apps from unauthorized content capture"
+    bug: "293903721"
+} # virtual_display_content_filtering
+
+flag {
+  name: "wb_framebuffersurface2"
+  namespace: "core_graphics"
+  description: "When enabled, use an updated FrameBufferSurface instead of the legacy one"
+  bug: "340933138"
+} # wb_framebuffersurface2
 
 flag {
   name: "wb_virtualdisplay2"
@@ -429,20 +517,13 @@ flag {
 } # wb_virtualdisplay2
 
 flag {
-  name: "window_blur_kawase2"
+  name: "window_blur_kawase2_preallocate_buffers"
   namespace: "core_graphics"
-  description: "Flag for using Kawase2 algorithm for window blur"
-  bug: "353826438"
-} # window_blur_kawase2
-
-flag {
-  name: "window_blur_kawase2_fix_aliasing"
-  namespace: "core_graphics"
-  description: "Flag for mitigating aliasing in Kawase2 window blur"
-  bug: "33968507"
+  description: "Flag for preallocating buffers for kawase2 window blur"
+  bug: "445059696"
   metadata {
     purpose: PURPOSE_BUGFIX
   }
-} # window_blur_kawase2_fix_aliasing
+} # window_blur_kawase2_preallocate_buffers
 
 # IMPORTANT - please keep alphabetize to reduce merge conflicts

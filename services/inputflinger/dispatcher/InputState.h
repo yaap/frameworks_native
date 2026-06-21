@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "CancelationOptions.h"
+#include "CancellationOptions.h"
 #include "Entry.h"
 
 #include <ftl/flags.h>
@@ -61,9 +61,9 @@ public:
     // Create cancel events for the previous stream if the current motionEntry requires it.
     std::unique_ptr<EventEntry> cancelConflictingInputStream(const MotionEntry& motionEntry);
 
-    // Synthesizes cancelation events for the current state and resets the tracked state.
-    std::vector<std::unique_ptr<EventEntry>> synthesizeCancelationEvents(
-            nsecs_t currentTime, const CancelationOptions& options);
+    // Synthesizes cancellation events for the current state and resets the tracked state.
+    std::vector<std::unique_ptr<EventEntry>> synthesizeCancellationEvents(
+            nsecs_t currentTime, const CancellationOptions& options);
 
     // Synthesizes down events for the current state.
     std::vector<std::unique_ptr<EventEntry>> synthesizePointerDownEvents(nsecs_t currentTime);
@@ -134,14 +134,15 @@ private:
     void addKeyMemento(const KeyEntry& entry, int32_t flags);
     void addMotionMemento(const MotionEntry& entry, ftl::Flags<MotionFlag> flags, bool hovering);
 
-    static bool shouldCancelKey(const KeyMemento& memento, const CancelationOptions& options);
-    static bool shouldCancelMotion(const MotionMemento& memento, const CancelationOptions& options);
+    static bool shouldCancelKey(const KeyMemento& memento, const CancellationOptions& options);
+    static bool shouldCancelMotion(const MotionMemento& memento,
+                                   const CancellationOptions& options);
     bool shouldCancelPreviousStream(const MotionEntry& motionEntry) const;
     std::unique_ptr<MotionEntry> createCancelEntryForMemento(const MotionMemento& memento,
                                                              nsecs_t eventTime) const;
 
     // Synthesizes pointer cancel events for a particular set of pointers.
-    std::vector<std::unique_ptr<MotionEntry>> synthesizeCancelationEventsForPointers(
+    std::vector<std::unique_ptr<MotionEntry>> synthesizeCancellationEventsForPointers(
             const MotionMemento& memento, std::bitset<MAX_POINTER_ID + 1> pointerIds,
             nsecs_t currentTime);
     friend std::ostream& operator<<(std::ostream& out, const InputState& state);

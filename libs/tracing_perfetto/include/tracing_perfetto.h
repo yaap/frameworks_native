@@ -17,11 +17,13 @@
 #pragma once
 
 #include <stdint.h>
-#include "perfetto/public/te_category_macros.h"
+#include <stdio.h>
 
 namespace tracing_perfetto {
 
 void registerWithPerfetto(bool test = false);
+
+bool isTagEnabled(uint64_t category);
 
 void traceBegin(uint64_t category, const char* name);
 
@@ -29,7 +31,18 @@ void traceEnd(uint64_t category);
 
 void traceAsyncBegin(uint64_t category, const char* name, int32_t cookie);
 
-void traceFormatBegin(uint64_t category, const char* fmt, ...);
+template <typename... Args>
+inline void traceFormatBegin(uint64_t category, const char* fmt, Args... args) {
+  if (isTagEnabled(category)) {
+    if constexpr (sizeof...(Args) == 0) {
+      traceBegin(category, fmt);
+    } else {
+      char buf[256];
+      snprintf(buf, sizeof(buf), fmt, args...);
+      traceBegin(category, buf);
+    }
+  }
+}
 
 void traceAsyncEnd(uint64_t category, const char* name, int32_t cookie);
 
@@ -41,7 +54,19 @@ void traceAsyncEndForTrack(uint64_t category, const char* trackName,
 
 void traceInstant(uint64_t category, const char* name);
 
-void traceFormatInstant(uint64_t category, const char* fmt, ...);
+template <typename... Args>
+inline void traceFormatInstant(uint64_t category, const char* fmt,
+                               Args... args) {
+  if (isTagEnabled(category)) {
+    if constexpr (sizeof...(Args) == 0) {
+      traceInstant(category, fmt);
+    } else {
+      char buf[256];
+      snprintf(buf, sizeof(buf), fmt, args...);
+      traceInstant(category, buf);
+    }
+  }
+}
 
 void traceInstantForTrack(uint64_t category, const char* trackName,
                             const char* name);
@@ -49,9 +74,5 @@ void traceInstantForTrack(uint64_t category, const char* trackName,
 void traceCounter(uint64_t category, const char* name, int64_t value);
 
 void traceCounter32(uint64_t category, const char* name, int32_t value);
-
-bool isTagEnabled(uint64_t category);
-
-PerfettoTeCategory* getPerfettoCategory(uint64_t category);
 
 }  // namespace tracing_perfetto

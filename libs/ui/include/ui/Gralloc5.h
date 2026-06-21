@@ -156,6 +156,17 @@ public:
             buffer_handle_t bufferHandle,
             std::optional<std::vector<uint8_t>> smpte2094_10) const override;
 
+    [[nodiscard]] status_t getStride(buffer_handle_t bufferHandle,
+                                     uint32_t *outStride) const override;
+
+    [[nodiscard]] status_t getSmpte2094_50(
+            buffer_handle_t bufferHandle,
+            std::optional<std::vector<uint8_t>>* outSmpte2094_50) const override;
+
+    [[nodiscard]] status_t setSmpte2094_50(
+            buffer_handle_t bufferHandle,
+            std::optional<std::vector<uint8_t>> smpte2094_50) const override;
+
 private:
     void unlockBlocking(buffer_handle_t bufferHandle) const;
 

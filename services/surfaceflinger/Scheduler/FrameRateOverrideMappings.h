@@ -39,8 +39,6 @@ public:
             EXCLUDES(mFrameRateOverridesLock);
     bool updateFrameRateOverridesByContent(const UidToFrameRateOverride& frameRateOverrides)
             EXCLUDES(mFrameRateOverridesLock);
-    void setGameModeRefreshRateForUid(FrameRateOverride frameRateOverride)
-            EXCLUDES(mFrameRateOverridesLock);
     void setPreferredRefreshRateForUid(FrameRateOverride frameRateOverride)
             EXCLUDES(mFrameRateOverridesLock);
 
@@ -48,9 +46,8 @@ public:
 
 private:
     size_t maxOverridesCount() const REQUIRES(mFrameRateOverridesLock) {
-        return std::max({mFrameRateOverridesByContent.size(),
-                         mFrameRateOverridesFromGameManager.size(),
-                         mFrameRateOverridesFromBackdoor.size()});
+        return std::max(
+                {mFrameRateOverridesByContent.size(), mFrameRateOverridesFromBackdoor.size()});
     }
 
     void dump(utils::Dumper&, std::string_view name, const UidToFrameRateOverride&) const;
@@ -63,7 +60,6 @@ private:
     // run at.
     UidToFrameRateOverride mFrameRateOverridesByContent GUARDED_BY(mFrameRateOverridesLock);
     UidToFrameRateOverride mFrameRateOverridesFromBackdoor GUARDED_BY(mFrameRateOverridesLock);
-    UidToFrameRateOverride mFrameRateOverridesFromGameManager GUARDED_BY(mFrameRateOverridesLock);
 };
 
 } // namespace android::scheduler

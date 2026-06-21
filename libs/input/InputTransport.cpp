@@ -22,6 +22,7 @@
 #include <cutils/properties.h>
 #include <ftl/enum.h>
 #include <log/log.h>
+#include <utils/Timers.h>
 #include <utils/Trace.h>
 
 #include <com_android_input_flags.h>
@@ -536,8 +537,8 @@ sp<IBinder> InputChannel::getConnectionToken() const {
 
 // --- InputPublisher ---
 
-InputPublisher::InputPublisher(const std::shared_ptr<InputChannel>& channel)
-      : mChannel(channel), mInputVerifier(mChannel->getName()) {}
+InputPublisher::InputPublisher(std::unique_ptr<InputChannel> channel)
+      : mChannel(std::move(channel)), mInputVerifier(mChannel->getName()) {}
 
 InputPublisher::~InputPublisher() {
 }
@@ -549,16 +550,16 @@ status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, DeviceId
                                          int32_t metaState, int32_t repeatCount, nsecs_t downTime,
                                          nsecs_t eventTime) {
     ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("publishKeyEvent(inputChannel=%s, action=%s, keyCode=%s)",
-                                mChannel->getName().c_str(), KeyEvent::actionToString(action),
-                                KeyEvent::getLabel(keyCode)));
+                   StringPrintf("publishKeyEvent(inputChannel=%s, action=%s)",
+                                mChannel->getName().c_str(), KeyEvent::actionToString(action)));
     ALOGD_IF(debugTransportPublisher(),
              "channel '%s' publisher ~ %s: seq=%u, id=%d, deviceId=%d, source=%s, "
              "action=%s, flags=0x%x, keyCode=%s, scanCode=%d, metaState=0x%x, repeatCount=%d, "
              "downTime=%" PRId64 "ns, eventTime=%" PRId64 "ns",
              mChannel->getName().c_str(), __func__, seq, eventId, deviceId,
              inputEventSourceToString(source).c_str(), KeyEvent::actionToString(action), flags,
-             KeyEvent::getLabel(keyCode), scanCode, metaState, repeatCount, downTime, eventTime);
+             KeyEvent::getLabelOrCode(keyCode).c_str(), scanCode, metaState, repeatCount, downTime,
+             eventTime);
 
     if (!seq) {
         ALOGE("Attempted to publish a key event with sequence number 0.");
@@ -665,9 +666,10 @@ status_t InputPublisher::publishMotionEvent(
     const status_t status = mChannel->sendMessage(&msg);
 
     if (status == OK && verifyEvents()) {
-        Result<void> result = mInputVerifier.processMovement(deviceId, source, action, actionButton,
-                                                             pointerCount, pointerProperties,
-                                                             pointerCoords, flags, buttonState);
+        Result<bool> result =
+                mInputVerifier.processMovement(deviceId, eventTime, source, action, actionButton,
+                                               pointerCount, pointerProperties, pointerCoords,
+                                               flags, buttonState, downTime);
         if (!result.ok()) {
             LOG(ERROR) << "Bad stream: " << result.error();
             return BAD_VALUE;

@@ -97,14 +97,7 @@ public:                                                                         
     static ::android::sp<I##INTERFACE> asInterface(const ::android::sp<::android::IBinder>& obj); \
     virtual const ::android::String16& getInterfaceDescriptor() const;                            \
     I##INTERFACE();                                                                               \
-    virtual ~I##INTERFACE();                                                                      \
-    static bool setDefaultImpl(::android::sp<I##INTERFACE> impl);                                 \
-    static const ::android::sp<I##INTERFACE>& getDefaultImpl();                                   \
-                                                                                                  \
-private:                                                                                          \
-    [[clang::no_destroy]] static ::android::sp<I##INTERFACE> default_impl;                        \
-                                                                                                  \
-public:
+    virtual ~I##INTERFACE();
 
 #define __IINTF_CONCAT(x, y) (x ## y)
 
@@ -128,32 +121,21 @@ public:
 #endif
 
 // Macro to be used by both IMPLEMENT_META_INTERFACE and IMPLEMENT_META_NESTED_INTERFACE
-#define DO_NOT_DIRECTLY_USE_ME_IMPLEMENT_META_INTERFACE0(ITYPE, INAME, BPTYPE)                     \
-    const ::android::String16& ITYPE::getInterfaceDescriptor() const { return ITYPE::descriptor; } \
-    ::android::sp<ITYPE> ITYPE::asInterface(const ::android::sp<::android::IBinder>& obj) {        \
-        ::android::sp<ITYPE> intr;                                                                 \
-        if (obj != nullptr) {                                                                      \
-            intr = ::android::sp<ITYPE>::cast(obj->queryLocalInterface(ITYPE::descriptor));        \
-            if (intr == nullptr) {                                                                 \
-                intr = ::android::sp<BPTYPE>::make(obj);                                           \
-            }                                                                                      \
-        }                                                                                          \
-        return intr;                                                                               \
-    }                                                                                              \
-    ::android::sp<ITYPE> ITYPE::default_impl;                                                      \
-    bool ITYPE::setDefaultImpl(::android::sp<ITYPE> impl) {                                        \
-        /* Only one user of this interface can use this function     */                            \
-        /* at a time. This is a heuristic to detect if two different */                            \
-        /* users in the same process use this function.              */                            \
-        assert(!ITYPE::default_impl);                                                              \
-        if (impl) {                                                                                \
-            ITYPE::default_impl = std::move(impl);                                                 \
-            return true;                                                                           \
-        }                                                                                          \
-        return false;                                                                              \
-    }                                                                                              \
-    const ::android::sp<ITYPE>& ITYPE::getDefaultImpl() { return ITYPE::default_impl; }            \
-    ITYPE::INAME() {}                                                                              \
+#define DO_NOT_DIRECTLY_USE_ME_IMPLEMENT_META_INTERFACE0(ITYPE, INAME, BPTYPE)              \
+    const ::android::String16& ITYPE::getInterfaceDescriptor() const {                      \
+        return ITYPE::descriptor;                                                           \
+    }                                                                                       \
+    ::android::sp<ITYPE> ITYPE::asInterface(const ::android::sp<::android::IBinder>& obj) { \
+        ::android::sp<ITYPE> intr;                                                          \
+        if (obj != nullptr) {                                                               \
+            intr = ::android::sp<ITYPE>::cast(obj->queryLocalInterface(ITYPE::descriptor)); \
+            if (intr == nullptr) {                                                          \
+                intr = ::android::sp<BPTYPE>::make(obj);                                    \
+            }                                                                               \
+        }                                                                                   \
+        return intr;                                                                        \
+    }                                                                                       \
+    ITYPE::INAME() {}                                                                       \
     ITYPE::~INAME() {}
 
 // Macro for an interface type.

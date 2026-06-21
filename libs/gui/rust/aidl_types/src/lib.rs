@@ -50,3 +50,5 @@ stub_unstructured_parcelable!(ScreenCaptureResults);
 stub_unstructured_parcelable!(VsyncEventData);
 stub_unstructured_parcelable!(WindowInfo);
 stub_unstructured_parcelable!(WindowInfosUpdate);
+stub_unstructured_parcelable!(GraphicBuffersRegisterInfo);
+stub_unstructured_parcelable!(GraphicBuffersUnregisterInfo);

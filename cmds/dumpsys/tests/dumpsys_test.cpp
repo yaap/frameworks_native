@@ -210,7 +210,8 @@ class DumpsysTest : public Test {
         CaptureStdout();
         CaptureStderr();
         dump_.setServiceArgs(args, supportsProto, priorityFlags);
-        status_t status = dump_.startDumpThread(Dumpsys::TYPE_DUMP, serviceName, args);
+        status_t status = dump_.startDumpThread(Dumpsys::TYPE_DUMP, serviceName, args,
+                                                Dumpsys::ServiceBehavior::DUMP_IF_STARTED);
         EXPECT_THAT(status, Eq(0));
         status = dump_.writeDump(STDOUT_FILENO, serviceName, std::chrono::milliseconds(500), false,
                                  elapsedDuration, bytesWritten);

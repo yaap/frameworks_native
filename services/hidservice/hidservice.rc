@@ -1,0 +1,6 @@
+service hidservice /system/bin/hidservice
+    interface aidl hidservice
+    disabled
+    oneshot
+    user system
+    group system

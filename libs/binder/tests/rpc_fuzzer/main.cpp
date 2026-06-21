@@ -159,7 +159,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                 std::string writeData = provider.ConsumeRandomLengthString();
                 ssize_t size = TEMP_FAILURE_RETRY(send(connections.at(idx).get(), writeData.data(),
                                                        writeData.size(), MSG_NOSIGNAL));
-                CHECK(errno == EPIPE || size == writeData.size())
+                CHECK(errno == ECONNRESET || errno == EPIPE || size == writeData.size())
                         << size << " " << writeData.size() << " " << strerror(errno);
             } else {
                 connections.erase(connections.begin() + idx); // hang up

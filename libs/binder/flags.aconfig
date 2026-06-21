@@ -1,0 +1,23 @@
+# All flags in this package must be fixed, read-only.  That makes the flags
+# build-time constants whose value is a constexpr in the generated header
+# files.  That, in turn, enables dead-code optimization in the code that
+# uses the flags.
+
+package: "android.os.binder.flags"
+container: "system"
+
+flag {
+    name: "enable_frozen_object_error"
+    namespace: "system_performance"
+    description: "Exposes BR_FROZEN_OBJECT to the framwork."
+    is_fixed_read_only: true
+    bug: "449200336"
+}
+
+flag {
+    name: "binder_stats_v3"
+    namespace: "system_performance"
+    description: "Add Latency histogram, main thread detection and proc_state detection in native binder stats "
+    is_fixed_read_only: true
+    bug: "458340205"
+}

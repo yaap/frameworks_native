@@ -242,7 +242,7 @@ void VelocityTracker::addMovement(nsecs_t eventTime, int32_t pointerId, int32_t 
                                   float position) {
     if (pointerId < 0 || pointerId > MAX_POINTER_ID) {
         LOG(FATAL) << "Invalid pointer ID " << pointerId << " for axis "
-                   << MotionEvent::getLabel(axis);
+                   << MotionEvent::getLabelOrCode(axis);
     }
 
     if (mCurrentPointerIdBits.hasBit(pointerId) &&
@@ -268,7 +268,7 @@ void VelocityTracker::addMovement(nsecs_t eventTime, int32_t pointerId, int32_t 
     mConfiguredStrategies[axis]->addMovement(eventTime, pointerId, position);
 
     if (DEBUG_VELOCITY) {
-        LOG(INFO) << "VelocityTracker: addMovement axis=" << MotionEvent::getLabel(axis)
+        LOG(INFO) << "VelocityTracker: addMovement axis=" << MotionEvent::getLabelOrCode(axis)
                   << ", eventTime=" << eventTime << "ns, pointerId=" << pointerId
                   << ", activePointerId=" << toString(mActivePointerId) << ", position=" << position
                   << ", velocity=" << toString(getVelocity(axis, pointerId));

@@ -21,7 +21,7 @@ Take the generated vulkan_profiles.h and vulkan_profiles.cpp from the debug dire
 The files need to be modified to land.
 1. Replace the generated license with the correct Android license
 (https://cs.android.com/android/platform/superproject/main/+/main:development/docs/copyright-templates/c.txt).
-Make sure to set the copyright to the current year. You should also remove the `This file is ***GENERATED***` part.
+As per the Google copyright policy, do not modify the existing year in a copyright year notice.
 2. Add VK_USE_PLATFORM_ANDROID_KHR between the license and the first includes for vulkan_profiles.cpp
 ```
  */

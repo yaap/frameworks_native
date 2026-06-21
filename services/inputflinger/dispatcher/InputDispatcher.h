@@ -19,7 +19,7 @@
 #include <com_android_input_flags.h>
 
 #include "AnrTracker.h"
-#include "CancelationOptions.h"
+#include "CancellationOptions.h"
 #include "DragState.h"
 #include "Entry.h"
 #include "FocusResolver.h"
@@ -44,6 +44,7 @@
 #include <gui/WindowInfosUpdate.h>
 #include <input/Input.h>
 #include <input/InputTransport.h>
+#include <jni.h>
 #include <limits.h>
 #include <powermanager/PowerManager.h>
 #include <stddef.h>
@@ -90,9 +91,9 @@ public:
 
     explicit InputDispatcher(InputDispatcherPolicyInterface&,
                              std::shared_ptr<input_trace::InputTracingBackendInterface>,
-                             JNIEnv* env);
+                             JavaVM* vm);
     // Creates a dispatcher without tracing. Used in some tests.
-    explicit InputDispatcher(InputDispatcherPolicyInterface& policy, JNIEnv* env);
+    explicit InputDispatcher(InputDispatcherPolicyInterface& policy, JavaVM* vm);
     ~InputDispatcher() override;
 
     void dump(std::string& dump) const override;
@@ -177,11 +178,14 @@ private:
         NO_POINTER_CAPTURE,
     };
 
-    JNIEnv* mJniEnv;
+    JavaVM* mVm;
     std::unique_ptr<InputThread> mThread;
 
     InputDispatcherPolicyInterface& mPolicy;
     android::InputDispatcherConfiguration mConfig GUARDED_BY(mLock);
+
+    ui::LogicalDisplayId calculateIntendedDisplayIdLocked(const NotifyKeyArgs& args) const
+            REQUIRES(mLock);
 
     mutable std::mutex mLock;
 
@@ -291,6 +295,8 @@ private:
                 std::vector<sp<android::gui::WindowInfoHandle>>&& windowHandles);
 
         void setDisplayInfos(const std::vector<android::gui::DisplayInfo>& displayInfos);
+
+        bool hasDisplay(ui::LogicalDisplayId displayId) const;
 
         void removeDisplay(ui::LogicalDisplayId displayId);
 
@@ -432,8 +438,8 @@ private:
         std::string dump() const;
 
         // Updates the touchState for display from WindowInfo,
-        // returns list of CancelationOptions for every cancelled touch
-        std::list<CancelationOptions> updateFromWindowInfo(
+        // returns list of CancellationOptions for every cancelled touch
+        std::list<CancellationOptions> updateFromWindowInfo(
                 ui::LogicalDisplayId displayId,
                 const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
@@ -443,12 +449,12 @@ private:
         // pointers, list of cancelled windows and pointers on successful transfer.
         std::optional<
                 std::tuple<sp<gui::WindowInfoHandle>, DeviceId, std::vector<PointerProperties>,
-                           std::list<CancelationOptions>, std::list<PointerDownArgs>>>
+                           std::list<CancellationOptions>, std::list<PointerDownArgs>>>
         transferTouchGesture(const sp<IBinder>& fromToken, const sp<IBinder>& toToken,
                              bool transferEntireGesture,
                              const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
-        base::Result<std::list<CancelationOptions>, status_t> pilferPointers(
+        base::Result<std::list<CancellationOptions>, status_t> pilferPointers(
                 const sp<IBinder>& token, const Connection& requestingConnection,
                 const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
@@ -483,7 +489,8 @@ private:
         std::optional<std::tuple<TouchState&, TouchedWindow&, ui::LogicalDisplayId>>
         findTouchStateWindowAndDisplay(const sp<IBinder>& token);
 
-        std::pair<std::list<CancelationOptions>, std::list<PointerDownArgs>> transferWallpaperTouch(
+        std::pair<std::list<CancellationOptions>, std::list<PointerDownArgs>>
+        transferWallpaperTouch(
                 const sp<gui::WindowInfoHandle> fromWindowHandle,
                 const sp<gui::WindowInfoHandle> toWindowHandle, TouchState& state,
                 DeviceId deviceId, const std::vector<PointerProperties>& pointers,
@@ -505,11 +512,11 @@ private:
         // and false otherwise.
         bool isStylusActiveInDisplay(ui::LogicalDisplayId displayId) const;
 
-        std::list<CancelationOptions> eraseRemovedWindowsFromWindowInfo(
+        std::list<CancellationOptions> eraseRemovedWindowsFromWindowInfo(
                 TouchState& state, ui::LogicalDisplayId displayId,
                 const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
-        std::list<CancelationOptions> updateHoveringStateFromWindowInfo(
+        std::list<CancellationOptions> updateHoveringStateFromWindowInfo(
                 TouchState& state, ui::LogicalDisplayId displayId,
                 const std::unique_ptr<trace::EventTrackerInterface>& traceTracker);
 
@@ -607,6 +614,11 @@ private:
     } mKeyRepeatState GUARDED_BY(mLock);
 
     void resetKeyRepeatLocked() REQUIRES(mLock);
+    /**
+     * If a key is being repeated, synthesize the repeat and place it into the inbound queue
+     * for processing. Return the time at which the dispatcher should wake up next.
+     */
+    nsecs_t processKeyRepeatLocked(nsecs_t currentTime) REQUIRES(mLock);
     std::shared_ptr<KeyEntry> synthesizeKeyRepeatLocked(nsecs_t currentTime) REQUIRES(mLock);
 
     // Deferred command processing.
@@ -617,7 +629,10 @@ private:
     // The dispatching timeout to use for Monitors.
     std::chrono::nanoseconds mMonitorDispatchingTimeout GUARDED_BY(mLock);
 
+    nsecs_t processPreAnrsLocked() REQUIRES(mLock);
+
     nsecs_t processAnrsLocked() REQUIRES(mLock);
+
     void processLatencyStatisticsLocked() REQUIRES(mLock);
     std::chrono::nanoseconds getDispatchingTimeoutLocked(
             const std::shared_ptr<Connection>& connection) REQUIRES(mLock);
@@ -750,6 +765,45 @@ private:
     void logOutboundMotionDetails(const char* prefix, const MotionEntry& entry);
 
     /**
+     * Consolidated state for a "no focused window" ANR.
+     */
+    struct NoFocusedWindowAnrState {
+        /** The timestamp in nanoseconds at which we started waiting for a focused window before
+         * declaring an ANR.
+         */
+        nsecs_t eventTime;
+
+        /** The timestamp in nanoseconds at which the ANR is raised. */
+        nsecs_t timeoutEndTime;
+
+        /**
+         * The focused application at the time when no focused window was present.
+         * Used to raise an ANR when we have no focused window.
+         */
+        std::shared_ptr<InputApplicationHandle> applicationHandle;
+
+        /** Id of the event. */
+        int32_t eventId;
+
+        /** The configured ANR timeout threshold in milliseconds after which ANR is raised. */
+        std::chrono::milliseconds timeoutDuration;
+
+        /** Whether a pre-ANR notification has already been sent for this ANR. */
+        bool notifiedPreAnr = false;
+
+        explicit NoFocusedWindowAnrState(nsecs_t eventTime, nsecs_t timeoutEndTime,
+                                         std::shared_ptr<InputApplicationHandle> applicationHandle,
+                                         int32_t eventId, std::chrono::milliseconds timeoutDuration)
+              : eventTime(eventTime),
+                timeoutEndTime(timeoutEndTime),
+                applicationHandle(std::move(applicationHandle)),
+                eventId(eventId),
+                timeoutDuration(timeoutDuration) {}
+    };
+
+    std::optional<NoFocusedWindowAnrState> mNoFocusedWindowAnrState GUARDED_BY(mLock);
+
+    /**
      * This field is set if there is no focused window, and we have an event that requires
      * a focused window to be dispatched (for example, a KeyEvent).
      * When this happens, we will wait until *mNoFocusedWindowTimeoutTime before
@@ -772,20 +826,22 @@ private:
             REQUIRES(mLock);
 
     /**
-     * The focused application at the time when no focused window was present.
-     * Used to raise an ANR when we have no focused window.
-     */
-    std::shared_ptr<InputApplicationHandle> mAwaitedFocusedApplication GUARDED_BY(mLock);
-    /**
      * The displayId that the focused application is associated with.
      */
     ui::LogicalDisplayId mAwaitedApplicationDisplayId GUARDED_BY(mLock);
     void processNoFocusedWindowAnrLocked() REQUIRES(mLock);
 
+    nsecs_t processNoFocusedWindowPreAnrLocked() REQUIRES(mLock);
     /**
      * Tell policy about a window or a monitor that just became unresponsive. Starts ANR.
+     *
+     * Note: For window unresponsive ANR, the timeoutDuration is the actual elapsed time waited
+     * before ANR is raised. This is different from No focused window ANR where it is the configured
+     * timeout threshold.
      */
-    void processConnectionUnresponsiveLocked(const Connection& connection, std::string reason)
+    void processConnectionUnresponsiveLocked(const Connection& connection, std::string reason,
+                                             int32_t eventId, nsecs_t eventTime,
+                                             std::chrono::milliseconds timeoutDuration)
             REQUIRES(mLock);
     /**
      * Tell policy about a window or a monitor that just became responsive.
@@ -793,7 +849,9 @@ private:
     void processConnectionResponsiveLocked(const Connection& connection) REQUIRES(mLock);
 
     void sendWindowUnresponsiveCommandLocked(const sp<IBinder>& connectionToken,
-                                             std::optional<gui::Pid> pid, std::string reason)
+                                             std::optional<gui::Pid> pid, std::string reason,
+                                             int32_t eventId, nsecs_t eventTime,
+                                             std::chrono::milliseconds timeoutDuration)
             REQUIRES(mLock);
     void sendWindowResponsiveCommandLocked(const sp<IBinder>& connectionToken,
                                            std::optional<gui::Pid> pid) REQUIRES(mLock);
@@ -871,18 +929,18 @@ private:
     void dispatchPointerDownOutsideFocus(uint32_t source, int32_t action,
                                          const sp<IBinder>& newToken) REQUIRES(mLock);
 
-    void synthesizeCancelationEventsForAllConnectionsLocked(CancelationOptions&& options)
+    void synthesizeCancellationEventsForAllConnectionsLocked(CancellationOptions&& options)
             REQUIRES(mLock);
-    void synthesizeCancelationEventsForMonitorsLocked(const CancelationOptions& options)
+    void synthesizeCancellationEventsForMonitorsLocked(const CancellationOptions& options)
             REQUIRES(mLock);
-    void synthesizeCancelationEventsForWindowLocked(const CancelationOptions&,
-                                                    const std::shared_ptr<Connection>& = nullptr)
+    void synthesizeCancellationEventsForWindowLocked(const CancellationOptions&,
+                                                     const std::shared_ptr<Connection>& = nullptr)
             REQUIRES(mLock);
     // This is a convenience function used to generate cancellation for a connection without having
     // to check whether it's a monitor or a window. For non-monitors, the window handle must not be
     // null. Always prefer the "-ForWindow" method above when explicitly dealing with windows.
-    void synthesizeCancelationEventsForConnectionLocked(
-            const std::shared_ptr<Connection>& connection, const CancelationOptions& options,
+    void synthesizeCancellationEventsForConnectionLocked(
+            const std::shared_ptr<Connection>& connection, const CancellationOptions& options,
             const sp<gui::WindowInfoHandle>& window) REQUIRES(mLock);
 
     void synthesizePointerDownEventsForConnectionLocked(
@@ -901,7 +959,11 @@ private:
 
     // Dump state.
     void dumpDispatchStateLocked(std::string& dump) const REQUIRES(mLock);
-    void logDispatchStateLocked() const REQUIRES(mLock);
+    // Logs the dispatcher state to logcat.
+    // A delay may be added to avoid overwhelming the logcat buffer. This delay should be zero
+    // unless we are crashing after the log to prevent the system monitor from incorrectly
+    // detecting a deadlock while this thread sleeps.
+    void logDispatchStateLocked(std::chrono::milliseconds delay = 1ms) const REQUIRES(mLock);
     std::string dumpPointerCaptureStateLocked() const REQUIRES(mLock);
 
     status_t removeInputChannelLocked(const std::shared_ptr<Connection>& connection, bool notify)
@@ -920,7 +982,8 @@ private:
             REQUIRES(mLock);
     void sendFocusChangedCommandLocked(const sp<IBinder>& oldToken, const sp<IBinder>& newToken)
             REQUIRES(mLock);
-    void sendDropWindowCommandLocked(const sp<IBinder>& token, float x, float y) REQUIRES(mLock);
+    void sendDropWindowCommandLocked(const sp<IBinder>& token, vec2 location, vec2 rawLocation)
+            REQUIRES(mLock);
     void onAnrLocked(const std::shared_ptr<Connection>& connection) REQUIRES(mLock);
     void onAnrLocked(std::shared_ptr<InputApplicationHandle> application) REQUIRES(mLock);
     void updateLastAnrStateLocked(const sp<android::gui::WindowInfoHandle>& window,
@@ -929,6 +992,13 @@ private:
                                   const std::string& reason) REQUIRES(mLock);
     void updateLastAnrStateLocked(const std::string& windowLabel, const std::string& reason)
             REQUIRES(mLock);
+    void onPreAnrLocked(const std::shared_ptr<InputApplicationHandle>& inputApplicationHandle,
+                        int32_t eventId, std::chrono::milliseconds elapsedDuration,
+                        std::chrono::milliseconds timeoutDuration) REQUIRES(mLock);
+
+    // Input verifiers for each display.
+    // In the case of mouse/touchpad cursor events, the verifier on the primary display
+    // in the topology group will be used.
     std::map<ui::LogicalDisplayId, InputVerifier> mVerifiersByDisplay;
     // Returns a fallback KeyEntry that should be sent to the connection, if required.
     std::unique_ptr<const KeyEntry> afterKeyEventLockedInterruptable(
@@ -957,6 +1027,10 @@ private:
     /** Stores the value of the input flag for per device input latency metrics. */
     const bool mPerDeviceInputLatencyMetricsFlag =
             com::android::input::flags::enable_per_device_input_latency_metrics();
+
+    /** Stores the value of the flag for ANR warning callback from input dispatcher. */
+    bool mAnrWarningCallbackInputDispatcherEnabled{
+            com::android::input::flags::enable_anr_warning_callback_input_dispatcher()};
 };
 
 } // namespace android::inputdispatcher

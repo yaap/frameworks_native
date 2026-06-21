@@ -20,7 +20,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include <LocklessQueue.h>
+#include <gui/LocklessQueue.h>
 
 namespace android::surfaceflinger {
 

@@ -89,10 +89,13 @@ void LayerFECompositionState::dump(std::string& out) const {
         for (const auto& region : blurRegions) {
             out.append("\n           ");
             base::StringAppendF(&out,
-                                "{radius=%du, cornerRadii=[%f, %f, %f, %f], alpha=%f, rect=[%d, "
+                                "{radius=%du, cornerRadii=[%f, %f, %f, %f, %f, %f, %f, %f], "
+                                "alpha=%f, rect=[%d, "
                                 "%d, %d, %d]",
-                                region.blurRadius, region.cornerRadiusTL, region.cornerRadiusTR,
-                                region.cornerRadiusBL, region.cornerRadiusBR, region.alpha,
+                                region.blurRadius, region.cornerRadiusTLX, region.cornerRadiusTLY,
+                                region.cornerRadiusTRX, region.cornerRadiusTRY,
+                                region.cornerRadiusBLX, region.cornerRadiusBLY,
+                                region.cornerRadiusBRX, region.cornerRadiusBRY, region.alpha,
                                 region.left, region.top, region.right, region.bottom);
         }
         out.append("\n      }\n      ");
@@ -135,6 +138,10 @@ void LayerFECompositionState::dump(std::string& out) const {
     dumpVal(out, "caching hint", toString(cachingHint));
     if (pictureProfileHandle) {
         dumpVal(out, "pictureProfile", toString(pictureProfileHandle));
+    }
+    if (luts) {
+        out.append("\n      luts: ");
+        luts->dump(out);
     }
 
     out.append("\n");

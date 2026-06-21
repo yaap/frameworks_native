@@ -40,18 +40,17 @@ static std::string contextToString(BinderDebugContext context) {
 }
 
 static status_t scanBinderContext(pid_t pid, const std::string& contextName,
+                                  binderdebug::FileReader& fileReader,
                                   std::function<void(const std::string&)> eachLine) {
-    std::ifstream ifs("/dev/binderfs/binder_logs/proc/" + std::to_string(pid));
-    if (!ifs.is_open()) {
-        ifs.open("/d/binder/proc/" + std::to_string(pid));
-        if (!ifs.is_open()) {
+    if (!fileReader.Open("/dev/binderfs/binder_logs/proc/" + std::to_string(pid))) {
+        if (!fileReader.Open("/d/binder/proc/" + std::to_string(pid))) {
             return -errno;
         }
     }
 
     bool isDesiredContext = false;
     std::string line;
-    while (getline(ifs, line)) {
+    while (fileReader.GetLine(line)) {
         if (base::StartsWith(line, "context")) {
             isDesiredContext = base::Split(line, " ").back() == contextName;
             continue;
@@ -67,13 +66,18 @@ static status_t scanBinderContext(pid_t pid, const std::string& contextName,
 // Examples of what we are looking at:
 // node 66730: u00007590061890e0 c0000759036130950 pri 0:120 hs 1 hw 1 ls 0 lw 0 is 2 iw 2 tr 1 proc 2300 1790
 // thread 2999: l 00 need_return 1 tr 0
-status_t getBinderPidInfo(BinderDebugContext context, pid_t pid, BinderPidInfo* pidInfo) {
+#ifndef BINDER_DEBUG_TEST
+static
+#endif
+        status_t getBinderPidInfo(BinderDebugContext context, pid_t pid,
+                                  std::unique_ptr<binderdebug::FileReader> fileReader,
+                                  BinderPidInfo* pidInfo) {
     std::smatch match;
     static const std::regex kReferencePrefix("^\\s*node \\d+:\\s+u([0-9a-f]+)\\s+c([0-9a-f]+)\\s+");
     static const std::regex kThreadPrefix("^\\s*thread \\d+:\\s+l\\s+(\\d)(\\d)");
     std::string contextStr = contextToString(context);
-    status_t ret = scanBinderContext(pid, contextStr, [&](const std::string& line) {
-        if (base::StartsWith(line, "  node")) {
+    status_t ret = scanBinderContext(pid, contextStr, *fileReader, [&](const std::string& line) {
+        if (base::StartsWith(line, "  node ")) {
             std::vector<std::string> splitString = base::Tokenize(line, " ");
             bool pids = false;
             uint64_t ptr = 0;
@@ -102,7 +106,7 @@ status_t getBinderPidInfo(BinderDebugContext context, pid_t pid, BinderPidInfo* 
                     }
                 }
             }
-        } else if (base::StartsWith(line, "  thread")) {
+        } else if (base::StartsWith(line, "  thread ")) {
             auto pos = line.find("l ");
             if (pos != std::string::npos) {
                 // "1" is waiting in binder driver
@@ -127,47 +131,59 @@ status_t getBinderPidInfo(BinderDebugContext context, pid_t pid, BinderPidInfo* 
     return ret;
 }
 
+status_t getBinderPidInfo(BinderDebugContext context, pid_t pid, BinderPidInfo* pidInfo) {
+    return getBinderPidInfo(context, pid, std::make_unique<binderdebug::FileReader>(), pidInfo);
+}
+
 // Examples of what we are looking at:
 // ref 52493: desc 910 node 52492 s 1 w 1 d 0000000000000000
 // node 29413: u00007803fc982e80 c000078042c982210 pri 0:139 hs 1 hw 1 ls 0 lw 0 is 2 iw 2 tr 1 proc 488 683
-status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servicePid,
-                             int32_t handle, std::vector<pid_t>* pids) {
-    std::smatch match;
-    static const std::regex kNodeNumber("^\\s+ref \\d+:\\s+desc\\s+(\\d+)\\s+node\\s+(\\d+).*");
+#ifndef BINDER_DEBUG_TEST
+static
+#endif
+        status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servicePid,
+                                     int32_t handle,
+                                     std::unique_ptr<binderdebug::FileReader> fileReader,
+                                     std::vector<pid_t>* pids) {
     std::string contextStr = contextToString(context);
-    int32_t node;
-    status_t ret = scanBinderContext(pid, contextStr, [&](const std::string& line) {
-        if (!base::StartsWith(line, "  ref")) return;
+    int32_t node = -1;
+    status_t ret = scanBinderContext(pid, contextStr, *fileReader, [&](const std::string& line) {
+        if (!base::StartsWith(line, "  ref ")) return;
 
         std::vector<std::string> splitString = base::Tokenize(line, " ");
-        if (splitString.size() < 12) {
-            LOG(ERROR) << "Failed to parse binder_logs ref entry. Expecting size greater than 11, but got: " << splitString.size();
+
+        if (splitString.size() > 5) {
+            int32_t desc;
+            if (!::android::base::ParseInt(splitString[3].c_str(), &desc)) {
+                LOG(ERROR) << "Failed to parse desc int: " << splitString[3];
+                return;
+            }
+            if (handle != desc) {
+                return;
+            }
+            // We only expect live node desc to match handle
+            if (!::android::base::ParseInt(splitString[5].c_str(), &node)) {
+                LOG(ERROR) << "Failed to parse node int: " << splitString[5];
+                return;
+            }
+            LOG(INFO) << "Parsed the node: " << node;
             return;
         }
-        int32_t desc;
-        if (!::android::base::ParseInt(splitString[3].c_str(), &desc)) {
-            LOG(ERROR) << "Failed to parse desc int: " << splitString[3];
-            return;
-        }
-        if (handle != desc) {
-            return;
-        }
-        if (!::android::base::ParseInt(splitString[5].c_str(), &node)) {
-            LOG(ERROR) << "Failed to parse node int: " << splitString[5];
-            return;
-        }
-        LOG(INFO) << "Parsed the node: " << node;
+
+        LOG(ERROR) << "Failed to parse binder_logs ref entry with size: " << splitString.size();
     });
-    if (ret != OK) {
+
+    // Don't bother scanning for clients if node hasn't been parsed
+    if (ret != OK || node < 0) {
         return ret;
     }
 
-    ret = scanBinderContext(servicePid, contextStr, [&](const std::string& line) {
-        if (!base::StartsWith(line, "  node")) return;
+    ret = scanBinderContext(servicePid, contextStr, *fileReader, [&](const std::string& line) {
+        if (!base::StartsWith(line, "  node ")) return;
 
         std::vector<std::string> splitString = base::Tokenize(line, " ");
-        if (splitString.size() < 21) {
-            LOG(ERROR) << "Failed to parse binder_logs node entry. Expecting size greater than 20, but got: " << splitString.size();
+        // Ignore lines for "node work" and nodes without a count
+        if (splitString[1] == "work") {
             return;
         }
 
@@ -182,6 +198,7 @@ status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servic
         if (node != matchedNode) {
             return;
         }
+
         bool pidsSection = false;
         for (const auto& token : splitString) {
             if (token == "proc") {
@@ -199,7 +216,18 @@ status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servic
     return ret;
 }
 
-status_t getBinderTransactions(pid_t pid, std::string& transactionsOutput) {
+status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servicePid,
+                             int32_t handle, std::vector<pid_t>* pids) {
+    return getBinderClientPids(context, pid, servicePid, handle,
+                               std::make_unique<binderdebug::FileReader>(), pids);
+}
+
+#ifndef BINDER_DEBUG_TEST
+static
+#endif
+        status_t getBinderTransactions(pid_t pid,
+                                       std::unique_ptr<binderdebug::FileReader> fileReader,
+                                       std::string& transactionsOutput) {
     // Hashed log will contain scrambled node ptr and cookie information, so
     // try to access standard logs first.
     static const char* kBinderTransactionLogPaths[] = {
@@ -208,15 +236,13 @@ status_t getBinderTransactions(pid_t pid, std::string& transactionsOutput) {
             "/dev/binderfs/binder_logs/transactions_hashed",
     };
 
-    std::ifstream ifs;
     for (auto& path : kBinderTransactionLogPaths) {
-        ifs.open(path);
-        if (ifs.is_open()) {
+        if (fileReader->Open(path)) {
             break;
         }
     }
 
-    if (!ifs.is_open()) {
+    if (!fileReader->IsOpen()) {
         LOG(ERROR) << "Could not open /dev/binderfs/binder_logs/transactions. "
                    << "Likely a permissions issue. errno: " << errno;
         return -errno;
@@ -227,19 +253,24 @@ status_t getBinderTransactions(pid_t pid, std::string& transactionsOutput) {
     errno = 0;
 
     std::string line;
-    while (getline(ifs, line)) {
+    while (fileReader->GetLine(line)) {
         // The section for this pid ends with another "proc <pid>" for another
         // process. There is only one entry per pid so we can stop looking after
         // we've grabbed the whole section
         if (base::StartsWith(line, "proc " + std::to_string(pid))) {
             do {
                 transactionsOutput += line + '\n';
-            } while (getline(ifs, line) && !base::StartsWith(line, "proc "));
+            } while (fileReader->GetLine(line) && !base::StartsWith(line, "proc "));
             return OK;
         }
     }
 
     return NAME_NOT_FOUND;
+}
+
+status_t getBinderTransactions(pid_t pid, std::string& transactionsOutput) {
+    return getBinderTransactions(pid, std::make_unique<binderdebug::FileReader>(),
+                                 transactionsOutput);
 }
 
 } // namespace  android

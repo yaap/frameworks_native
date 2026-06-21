@@ -169,8 +169,10 @@ private:
                 ASSERT_NE(previousReleaseFence, nullptr)
                         << "failed to set release prev buffer fence";
             } else if (mPreviousBufferResult == ExpectedResult::PreviousBuffer::NOT_RELEASED) {
-                ASSERT_EQ(previousReleaseFence, nullptr)
-                        << "should not have set released prev buffer fence";
+                if (previousReleaseFence) {
+                    ASSERT_FALSE(previousReleaseFence->isValid())
+                            << "should not have set released prev buffer fence";
+                }
             }
         }
 

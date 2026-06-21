@@ -1,9 +1,9 @@
 set noparent
 
+# dumpsys is the tool to dump info from binder services, this is not the same
+# as dumpstate.
+include platform/frameworks/native:/libs/binder/OWNERS
+
 maco@google.com
 himanshuz@google.com
 nandana@google.com
-jsharkey@android.com
-
-# for ServiceManager mock
-per-file dumpsys_test.cpp=smoreland@google.com

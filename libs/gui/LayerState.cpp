@@ -21,11 +21,13 @@
 #include <android/gui/ISurfaceComposerClient.h>
 #include <android/native_window.h>
 #include <binder/Parcel.h>
+#include <binder/Parcelable.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/FrameRateUtils.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/LayerState.h>
 #include <gui/SurfaceControl.h>
+#include <gui/view/Surface.h>
 #include <private/gui/ParcelUtils.h>
 #include <system/window.h>
 #include <utils/Errors.h>
@@ -69,7 +71,6 @@ bool isSameSurfaceControl(const sp<SurfaceControl>& lhs, const sp<SurfaceControl
 layer_state_t::layer_state_t()
       : surface(nullptr),
         layerId(-1),
-        what(0),
         x(0),
         y(0),
         z(0),
@@ -118,7 +119,7 @@ status_t layer_state_t::write(Parcel& output) const
 {
     SAFE_PARCEL(output.writeStrongBinder, surface);
     SAFE_PARCEL(output.writeInt32, layerId);
-    SAFE_PARCEL(output.writeUint64, what);
+    SAFE_PARCEL(output.write, what.data(), what.dataSize());
     SAFE_PARCEL(output.writeFloat, x);
     SAFE_PARCEL(output.writeFloat, y);
     SAFE_PARCEL(output.writeInt32, z);
@@ -172,7 +173,7 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeBool, colorSpaceAgnostic);
     SAFE_PARCEL(output.writeVectorSize, listeners);
 
-    for (auto listener : listeners) {
+    for (const auto& listener : listeners) {
         SAFE_PARCEL(output.writeStrongBinder, listener.transactionCompletedListener);
         SAFE_PARCEL(output.writeParcelableVector, listener.callbackIds);
     }
@@ -194,10 +195,14 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeUint32, blurRegions.size());
     for (auto region : blurRegions) {
         SAFE_PARCEL(output.writeUint32, region.blurRadius);
-        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTL);
-        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTR);
-        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBL);
-        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBR);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTLX);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTLY);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTRX);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusTRY);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBLX);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBLY);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBRX);
+        SAFE_PARCEL(output.writeFloat, region.cornerRadiusBRY);
         SAFE_PARCEL(output.writeFloat, region.alpha);
         SAFE_PARCEL(output.writeInt32, region.left);
         SAFE_PARCEL(output.writeInt32, region.top);
@@ -222,6 +227,7 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeParcelable, trustedPresentationListener);
     SAFE_PARCEL(output.writeFloat, currentHdrSdrRatio);
     SAFE_PARCEL(output.writeFloat, desiredHdrSdrRatio);
+    SAFE_PARCEL(output.writeFloat, maxDesiredHdrSdrRatio);
     SAFE_PARCEL(output.writeInt32, static_cast<int32_t>(cachingHint));
 
     const bool hasBufferReleaseChannel = (bufferReleaseChannel != nullptr);
@@ -241,6 +247,31 @@ status_t layer_state_t::write(Parcel& output) const
     }
 
     SAFE_PARCEL(output.writeInt32, systemContentPriority);
+
+    if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        const bool hasRenderCommandBufferProducer = (renderCommandBufferProducer != nullptr);
+        SAFE_PARCEL(output.writeBool, hasRenderCommandBufferProducer);
+        if (hasRenderCommandBufferProducer) {
+            renderCommandBufferProducer->writeToParcel(&output);
+        }
+
+        SAFE_PARCEL(output.writeStrongBinder, renderResourceToken);
+
+        SAFE_PARCEL(output.writeUint64, renderCommandBufferFrameId);
+        SAFE_PARCEL(output.writeInt64, renderCommandBufferFrameIdQueueTime);
+    }
+
+    SAFE_PARCEL(output.writeUint32, compositionFilterFlag);
+    SAFE_PARCEL(output.writeStrongBinder, postProcessShader);
+    SAFE_PARCEL(output.writeUint32, static_cast<uint32_t>(postProcessTarget));
+    if (postProcessUniforms) {
+        SAFE_PARCEL(output.writeBool, true);
+        SAFE_PARCEL(output.writeByteArray, postProcessUniforms->size(),
+                    postProcessUniforms->data());
+    } else {
+        SAFE_PARCEL(output.writeBool, false);
+    }
+
     return NO_ERROR;
 }
 
@@ -248,7 +279,7 @@ status_t layer_state_t::read(const Parcel& input)
 {
     SAFE_PARCEL(input.readNullableStrongBinder, &surface);
     SAFE_PARCEL(input.readInt32, &layerId);
-    SAFE_PARCEL(input.readUint64, &what);
+    SAFE_PARCEL(input.read, what.data(), what.dataSize());
     SAFE_PARCEL(input.readFloat, &x);
     SAFE_PARCEL(input.readFloat, &y);
     SAFE_PARCEL(input.readInt32, &z);
@@ -355,10 +386,14 @@ status_t layer_state_t::read(const Parcel& input)
     for (uint32_t i = 0; i < numRegions; i++) {
         BlurRegion region;
         SAFE_PARCEL(input.readUint32, &region.blurRadius);
-        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTL);
-        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTR);
-        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBL);
-        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBR);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTLX);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTLY);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTRX);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusTRY);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBLX);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBLY);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBRX);
+        SAFE_PARCEL(input.readFloat, &region.cornerRadiusBRY);
         SAFE_PARCEL(input.readFloat, &region.alpha);
         SAFE_PARCEL(input.readInt32, &region.left);
         SAFE_PARCEL(input.readInt32, &region.top);
@@ -395,6 +430,8 @@ status_t layer_state_t::read(const Parcel& input)
     currentHdrSdrRatio = tmpFloat;
     SAFE_PARCEL(input.readFloat, &tmpFloat);
     desiredHdrSdrRatio = tmpFloat;
+    SAFE_PARCEL(input.readFloat, &tmpFloat);
+    maxDesiredHdrSdrRatio = tmpFloat;
 
     int32_t tmpInt32;
     SAFE_PARCEL(input.readInt32, &tmpInt32);
@@ -423,6 +460,32 @@ status_t layer_state_t::read(const Parcel& input)
     }
 
     SAFE_PARCEL(input.readInt32, &systemContentPriority);
+
+    if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        bool hasRenderCommandBufferProducer;
+        SAFE_PARCEL(input.readBool, &hasRenderCommandBufferProducer);
+        if (hasRenderCommandBufferProducer) {
+            renderCommandBufferConsumer = std::make_shared<RenderCommandBufferConsumer>();
+            RenderCommandBufferConsumer::readFromParcel(input, renderCommandBufferConsumer.get());
+        }
+
+        SAFE_PARCEL(input.readNullableStrongBinder, &renderResourceToken);
+        SAFE_PARCEL(input.readUint64, &renderCommandBufferFrameId);
+        SAFE_PARCEL(input.readInt64, &renderCommandBufferFrameIdQueueTime);
+    }
+    SAFE_PARCEL(input.readUint32, &compositionFilterFlag);
+
+    SAFE_PARCEL(input.readNullableStrongBinder, &postProcessShader);
+    uint32_t tmpPostProcessTarget;
+    SAFE_PARCEL(input.readUint32, &tmpPostProcessTarget);
+    postProcessTarget = static_cast<SampleTarget>(tmpPostProcessTarget);
+    bool hasPostProcessUniforms;
+    SAFE_PARCEL(input.readBool, &hasPostProcessUniforms);
+    if (hasPostProcessUniforms) {
+        postProcessUniforms = std::make_shared<std::vector<uint8_t>>();
+        SAFE_PARCEL(input.readByteVector, postProcessUniforms.get());
+    }
+
     return NO_ERROR;
 }
 
@@ -438,7 +501,7 @@ DisplayState::DisplayState() = default;
 
 status_t DisplayState::write(Parcel& output) const {
     SAFE_PARCEL(output.writeStrongBinder, token);
-    SAFE_PARCEL(output.writeStrongBinder, IInterface::asBinder(surface));
+    SAFE_PARCEL(output.writeParcelable, surface);
     SAFE_PARCEL(output.writeUint32, what);
     SAFE_PARCEL(output.writeUint32, flags);
     SAFE_PARCEL(output.writeUint32, layerStack.id);
@@ -452,9 +515,9 @@ status_t DisplayState::write(Parcel& output) const {
 
 status_t DisplayState::read(const Parcel& input) {
     SAFE_PARCEL(input.readStrongBinder, &token);
-    sp<IBinder> tmpBinder;
-    SAFE_PARCEL(input.readNullableStrongBinder, &tmpBinder);
-    surface = interface_cast<IGraphicBufferProducer>(tmpBinder);
+    view::Surface viewSurface;
+    SAFE_PARCEL(input.readParcelable, &viewSurface);
+    surface = std::move(viewSurface);
 
     SAFE_PARCEL(input.readUint32, &what);
     SAFE_PARCEL(input.readUint32, &flags);
@@ -594,6 +657,21 @@ void layer_state_t::sanitize(int32_t permissions) {
             what &= ~eFrameRateChanged; // logged in ValidateFrameRate
         }
     }
+    if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        if ((what & eRenderCommandBufferChanged) || (what & eRenderCommandBufferFrameIdChanged)) {
+            if (!(permissions & layer_state_t::Permission::ACCESS_SURFACE_FLINGER)) {
+                what &= ~eRenderCommandBufferChanged;
+                what &= ~eRenderCommandBufferFrameIdChanged;
+                ALOGE("Stripped attempt to set eRenderCommandBufferChanged in sanitize");
+            }
+        }
+    }
+    if (what & layer_state_t::eCompositionFilterFlagChanged) {
+        if (!(permissions & Permission::ACCESS_SURFACE_FLINGER)) {
+            what &= ~eCompositionFilterFlagChanged;
+            ALOGE("Stripped attempt to set eCompositionFilterFlagChanged in sanitize");
+        }
+    }
 }
 
 void layer_state_t::merge(const layer_state_t& other) {
@@ -695,6 +773,10 @@ void layer_state_t::merge(const layer_state_t& other) {
     if (other.what & eDesiredHdrHeadroomChanged) {
         what |= eDesiredHdrHeadroomChanged;
         desiredHdrSdrRatio = other.desiredHdrSdrRatio;
+    }
+    if (other.what & eDesiredMaxHdrHeadroomChanged) {
+        what |= eDesiredMaxHdrHeadroomChanged;
+        maxDesiredHdrSdrRatio = other.maxDesiredHdrSdrRatio;
     }
     if (other.what & eCachingHintChanged) {
         what |= eCachingHintChanged;
@@ -843,15 +925,41 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eSystemContentPriorityChanged;
         systemContentPriority = other.systemContentPriority;
     }
+    if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        if (other.what & eRenderCommandBufferChanged) {
+            what |= eRenderCommandBufferChanged;
+            renderCommandBufferProducer = other.renderCommandBufferProducer;
+            renderCommandBufferConsumer = other.renderCommandBufferConsumer;
+        }
+        if (other.what & eRenderCommandBufferFrameIdChanged) {
+            what |= eRenderCommandBufferFrameIdChanged;
+            renderCommandBufferFrameId = other.renderCommandBufferFrameId;
+            renderCommandBufferFrameIdQueueTime = other.renderCommandBufferFrameIdQueueTime;
+        }
+        if (other.what & eRenderResourceTokenChanged) {
+            what |= eRenderResourceTokenChanged;
+            renderResourceToken = other.renderResourceToken;
+        }
+    }
+    if (other.what & eCompositionFilterFlagChanged) {
+        what |= eCompositionFilterFlagChanged;
+        compositionFilterFlag = other.compositionFilterFlag;
+    }
+    if (other.what & ePostProcessChanged) {
+        what |= ePostProcessChanged;
+        postProcessShader = other.postProcessShader;
+        postProcessUniforms = other.postProcessUniforms;
+        postProcessTarget = other.postProcessTarget;
+    }
     if ((other.what & what) != other.what) {
         ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
-              "other.what=0x%" PRIX64 " what=0x%" PRIX64 " unmerged flags=0x%" PRIX64,
-              other.what, what, (other.what & what) ^ other.what);
+              "unmerged flags=%s",
+              ((other.what & what) ^ other.what).to_string().c_str());
     }
 }
 
-uint64_t layer_state_t::diff(const layer_state_t& other) const {
-    uint64_t diff = 0;
+layer_state_t::LayerChangedSet layer_state_t::diff(const layer_state_t& other) const {
+    LayerChangedSet diff;
     CHECK_DIFF2(diff, ePositionChanged, other, x, y);
     if (other.what & eLayerChanged) {
         diff |= eLayerChanged;
@@ -892,6 +1000,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF2(diff, eExtendedRangeBrightnessChanged, other, currentHdrSdrRatio,
                 desiredHdrSdrRatio);
     CHECK_DIFF(diff, eDesiredHdrHeadroomChanged, other, desiredHdrSdrRatio);
+    CHECK_DIFF(diff, eDesiredMaxHdrHeadroomChanged, other, maxDesiredHdrSdrRatio);
     CHECK_DIFF(diff, eCachingHintChanged, other, cachingHint);
     CHECK_DIFF(diff, eHdrMetadataChanged, other, hdrMetadata);
     if (other.what & eSurfaceDamageRegionChanged &&
@@ -935,6 +1044,15 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eAppContentPriorityChanged, other, appContentPriority);
     CHECK_DIFF(diff, eSystemContentPriorityChanged, other, systemContentPriority);
     if (other.what & eStopLayerChanged) diff |= eStopLayerChanged;
+    if (com_android_graphics_libgui_flags_out_of_process_rendering()) {
+        if (other.what & eRenderCommandBufferChanged) diff |= eRenderCommandBufferChanged;
+        if (other.what & eRenderCommandBufferFrameIdChanged)
+            diff |= eRenderCommandBufferFrameIdChanged;
+
+        if (other.what & eRenderResourceTokenChanged) diff |= eRenderResourceTokenChanged;
+    }
+    CHECK_DIFF(diff, eCompositionFilterFlagChanged, other, compositionFilterFlag);
+    if (other.what & ePostProcessChanged) diff |= ePostProcessChanged;
 
     return diff;
 }

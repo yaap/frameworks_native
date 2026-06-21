@@ -23,13 +23,10 @@
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
-#include <com_android_input_flags.h>
 #include <ftl/enum.h>
 
 #include <input/Resampler.h>
 #include <utils/Timers.h>
-
-namespace input_flags = com::android::input::flags;
 
 namespace android {
 namespace {
@@ -96,10 +93,8 @@ PointerCoords calculateResampledCoords(const PointerCoords& a, const PointerCoor
     resampledCoords.isResampled = true;
     resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_X, lerp(a.getX(), b.getX(), alpha));
     resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, lerp(a.getY(), b.getY(), alpha));
-    if (input_flags::clear_relative_axes_in_resampled_coords()) {
-        for (int32_t axis : relativeAxesToClearOnResample) {
-            resampledCoords.setAxisValue(axis, 0);
-        }
+    for (int32_t axis : relativeAxesToClearOnResample) {
+        resampledCoords.setAxisValue(axis, 0);
     }
     return resampledCoords;
 }

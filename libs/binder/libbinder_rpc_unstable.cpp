@@ -135,6 +135,41 @@ ARpcServer* ARpcServer_newBoundSocket(AIBinder* service, int socketFd) {
     return createObjectHandle<ARpcServer>(server);
 }
 
+ARpcServer* ARpcServer_newBoundSocketWithFactory(
+        int socketFd, ARpcServer_PerSessionFactoryCallback factory, void* userfactory,
+        ARpcServer_PerSessionFactoryCallback_deleter deleter) {
+    auto server = RpcServer::make();
+    auto fd = unique_fd(socketFd);
+    if (!fd.ok()) {
+        ALOGE("Invalid socket fd %d", socketFd);
+        return nullptr;
+    }
+    if (status_t status = server->setupRawSocketServer(std::move(fd)); status != OK) {
+        ALOGE("Failed to set up RPC server with fd %d error: %s", socketFd,
+              statusToString(status).c_str());
+        return nullptr;
+    }
+
+    // Use a shared_ptr with a custom deleter to manage the lifetime of the userfactory.
+    auto ownedUserfactory = std::shared_ptr<void>(userfactory, deleter);
+
+    server->setPerSessionRootObject(
+            [factory, ownedUserfactory](android::wp<RpcSession> session, const void* addrstruct,
+                                        size_t addrstructLen) -> android::sp<android::IBinder> {
+                sp<RpcSession> spSession = session.promote();
+                if (spSession == nullptr) {
+                    return nullptr;
+                }
+
+                // The factory returns a raw AIBinder*, which we convert to a sp<IBinder>.
+                return AIBinder_toPlatformBinder(factory(createObjectHandle<ARpcSession>(spSession),
+                                                         addrstruct, addrstructLen,
+                                                         ownedUserfactory.get()));
+            });
+
+    return createObjectHandle<ARpcServer>(server);
+}
+
 ARpcServer* ARpcServer_newUnixDomainBootstrap(AIBinder* service, int bootstrapFd) {
     auto server = RpcServer::make();
     auto fd = unique_fd(bootstrapFd);
@@ -291,5 +326,10 @@ void ARpcSession_setMaxIncomingThreads(ARpcSession* handle, size_t threads) {
 void ARpcSession_setMaxOutgoingConnections(ARpcSession* handle, size_t connections) {
     auto session = handleToStrongPointer<RpcSession>(handle);
     session->setMaxOutgoingConnections(connections);
+}
+
+bool ARpcSession_getClientUid(ARpcSession* handle, uid_t* uid) {
+    auto session = handleToStrongPointer<RpcSession>(handle);
+    return session->getClientUid(uid);
 }
 }

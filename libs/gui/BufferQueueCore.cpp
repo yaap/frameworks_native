@@ -71,19 +71,19 @@ static uint64_t getUniqueId() {
     return id | counter++;
 }
 
-static status_t getProcessName(int pid, String8& name) {
-    FILE* fp = fopen(String8::format("/proc/%d/cmdline", pid), "r");
-    if (NULL != fp) {
-        const size_t size = 64;
-        char proc_name[size];
-        char* result = fgets(proc_name, size, fp);
-        fclose(fp);
-        if (result != nullptr) {
-            name = proc_name;
-            return NO_ERROR;
-        }
+static status_t getProcessName(pid_t pid, String8& name) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/exe", pid);
+
+    char proc_name[64];
+    // readlink is a fast, non-blocking operation in this context
+    ssize_t len = readlink(path, proc_name, sizeof(proc_name) - 1);
+    if (len != -1) {
+        proc_name[len] = '\0'; // Null-terminate the string out of paranoia.
+        return name.setTo(proc_name, len);
+    } else {
+        return INVALID_OPERATION;
     }
-    return INVALID_OPERATION;
 }
 
 BufferQueueCore::BufferQueueCore()
@@ -99,11 +99,9 @@ BufferQueueCore::BufferQueueCore()
         mConnectedProducerListener(),
         mBufferReleasedCbEnabled(false),
         mBufferAttachedCbEnabled(false),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        mBufferAcquiredCbEnabled(false),
+        mBufferDroppedCbEnabled(false),
         mSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
-#else
-        mSlots(),
-#endif
         mQueue(),
         mFreeSlots(),
         mFreeBuffers(),
@@ -117,9 +115,7 @@ BufferQueueCore::BufferQueueCore()
         mDefaultWidth(1),
         mDefaultHeight(1),
         mDefaultBufferDataSpace(HAL_DATASPACE_UNKNOWN),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         mAllowExtendedSlotCount(false),
-#endif
         mMaxBufferCount(BufferQueueDefs::NUM_BUFFER_SLOTS),
         mMaxAcquiredBufferCount(1),
         mMaxDequeuedBufferCount(1),
@@ -140,7 +136,8 @@ BufferQueueCore::BufferQueueCore()
         mLastQueuedSlot(INVALID_BUFFER_SLOT),
         mUniqueId(getUniqueId()),
         mAutoPrerotation(false),
-        mTransformHintInUse(0) {
+        mTransformHintInUse(0),
+        mPresentMode(ANATIVEWINDOW_PRESENT_DEFAULT) {
     int numStartingBuffers = getMaxBufferCountLocked();
     for (int s = 0; s < numStartingBuffers; s++) {
         mFreeSlots.insert(s);
@@ -169,6 +166,8 @@ void BufferQueueCore::dumpState(const String8& prefix, String8* outResult) const
                             mTransformHint, mFrameCounter);
     outResult->appendFormat("%s  mTransformHintInUse=%02x mAutoPrerotation=%d\n", prefix.c_str(),
                             mTransformHintInUse, mAutoPrerotation);
+    outResult->appendFormat("%s  mProducerThrottlingEnabled=%s\n", prefix.c_str(),
+                            mProducerThrottlingEnabled ? "true" : "false");
 
     outResult->appendFormat("%sFIFO(%zu):\n", prefix.c_str(), mQueue.size());
 
@@ -177,9 +176,11 @@ void BufferQueueCore::dumpState(const String8& prefix, String8* outResult) const
     outResult->appendFormat("mConnectedApi=%d, mConsumerUsageBits=%" PRIu64 ", ", mConnectedApi,
                             mConsumerUsageBits);
 
+    outResult->appendFormat("mPresentMode=%d\n", mPresentMode);
+
     String8 producerProcName = String8("\?\?\?");
     String8 consumerProcName = String8("\?\?\?");
-    int32_t pid = getpid();
+    pid_t pid = getpid();
     getProcessName(mConnectedPid, producerProcName);
     getProcessName(pid, consumerProcName);
     outResult->appendFormat("mId=%" PRIx64 ", producer=[%d:%s], consumer=[%d:%s])\n", mUniqueId,
@@ -231,11 +232,7 @@ void BufferQueueCore::dumpState(const String8& prefix, String8* outResult) const
 }
 
 int BufferQueueCore::getTotalSlotCountLocked() const {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     return mAllowExtendedSlotCount ? mMaxBufferCount : BufferQueueDefs::NUM_BUFFER_SLOTS;
-#else
-    return BufferQueueDefs::NUM_BUFFER_SLOTS;
-#endif
 }
 
 int BufferQueueCore::getMinUndequeuedBufferCountLocked() const {
@@ -270,7 +267,6 @@ int BufferQueueCore::getMaxBufferCountLocked() const {
     return maxBufferCount;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 status_t BufferQueueCore::extendSlotCountLocked(int size) {
     int previousSize = (int)mSlots.size();
     if (previousSize > size) {
@@ -288,7 +284,6 @@ status_t BufferQueueCore::extendSlotCountLocked(int size) {
     mMaxBufferCount = size;
     return NO_ERROR;
 }
-#endif
 
 void BufferQueueCore::clearBufferSlotLocked(int slot) {
     BQ_LOGV("clearBufferSlotLocked: slot %d", slot);

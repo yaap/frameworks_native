@@ -27,17 +27,9 @@
 
 #pragma once
 
+#include <android/binder_api_level_utils.h>
 #include <android/binder_auto_utils.h>
 #include <android/binder_ibinder.h>
-
-#if defined(__BIONIC__)
-#define API_LEVEL_AT_LEAST(sdk_api_level) __builtin_available(android sdk_api_level, *)
-#elif defined(TRUSTY_USERSPACE)
-// TODO(b/349936395): set to true for Trusty
-#define API_LEVEL_AT_LEAST(sdk_api_level) (false)
-#else
-#define API_LEVEL_AT_LEAST(sdk_api_level) (true)
-#endif  // __BIONIC__
 
 #if __has_include(<android/binder_shell.h>)
 #include <android/binder_shell.h>
@@ -48,6 +40,7 @@
 
 #include <memory>
 #include <mutex>
+#include <type_traits>
 
 namespace ndk {
 

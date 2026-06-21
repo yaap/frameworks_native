@@ -40,6 +40,8 @@ cc_benchmark {
         "librenderengine",
         "libshaders",
         "libtonemap",
+        "libstatspull-fake",
+        "libstatssocket-fake",
     ],
     shared_libs: [
         "libbase",

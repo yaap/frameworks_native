@@ -155,11 +155,6 @@ void APerformanceHint_getRateLimiterPropertiesForTesting(
         int32_t* maxLoadHintsPerInterval, int64_t* loadHintInterval);
 
 /*
- * Forces the "new load hint" flag to be disabled for testing.
- */
-void APerformanceHint_setUseNewLoadHintBehaviorForTesting(bool newBehavior);
-
-/*
  * Forces the graphics pipeline flag to be enabled or disabled, for testing only.
  */
 void APerformanceHint_setUseGraphicsPipelineForTesting(bool enabled);

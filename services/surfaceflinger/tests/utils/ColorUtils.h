@@ -30,14 +30,21 @@ struct Color {
     static const Color RED;
     static const Color GREEN;
     static const Color BLUE;
+    static const Color YELLOW;
     static const Color WHITE;
     static const Color BLACK;
     static const Color TRANSPARENT;
+
+    bool operator==(const Color& other) const {
+        return r == other.r && g == other.g && b == other.b && a == other.a;
+    }
+    bool operator!=(const Color& other) const { return !(*this == other); }
 };
 
 const Color Color::RED{255, 0, 0, 255};
 const Color Color::GREEN{0, 255, 0, 255};
 const Color Color::BLUE{0, 0, 255, 255};
+const Color Color::YELLOW{255, 255, 0, 255};
 const Color Color::WHITE{255, 255, 255, 255};
 const Color Color::BLACK{0, 0, 0, 255};
 const Color Color::TRANSPARENT{0, 0, 0, 0};
@@ -83,4 +90,5 @@ public:
     }
 };
 } // namespace
+
 } // namespace android

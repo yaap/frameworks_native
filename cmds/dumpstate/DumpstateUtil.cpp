@@ -18,20 +18,35 @@
 
 #include "DumpstateUtil.h"
 
+#include <android-base/file.h>
+#include <android-base/properties.h>
+#include <android-base/scopeguard.h>
+#include <android-base/stringprintf.h>
+#include <android-base/strings.h>
+#include <android-base/unique_fd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <log/log.h>
+#include <poll.h>
+#include <sys/pidfd.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <vector>
+#if defined(__BIONIC__)
+#include <sys/pidfd.h>
+#else
+// Not available in glibc.
+// See: https://man7.org/linux/man-pages/man2/pidfd_open.2.html#SYNOPSIS
+// This allows the file to compile, but we also check that pidfd_open
+// returns a sensible value in tests.
+#include <sys/syscall.h>
+static int pidfd_open(pid_t pid, unsigned int flags) {
+    return syscall(SYS_pidfd_open, pid, flags);
+}
+#endif
 
-#include <android-base/file.h>
-#include <android-base/properties.h>
-#include <android-base/stringprintf.h>
-#include <android-base/strings.h>
-#include <android-base/unique_fd.h>
-#include <log/log.h>
+#include <vector>
 
 #include "DumpstateInternal.h"
 
@@ -43,71 +58,123 @@ namespace {
 
 static constexpr const char* kSuPath = "/system/xbin/su";
 
-static bool waitpid_with_timeout(pid_t pid, int timeout_ms, int* status) {
-    sigset_t child_mask, old_mask;
-    sigemptyset(&child_mask);
-    sigaddset(&child_mask, SIGCHLD);
+struct ExitStatus {
+    // true: exited, see exit_code_or_signal for exit code, zero means normal
+    // exit.
+    // false: terminated, see exit_code_or_signal for signal that terminated it,
+    // but zero means abnormal exit.
+    bool exited = false;
+    int exit_code_or_signal = 0;
+};
 
-    // block SIGCHLD before we check if a process has exited
-    if (sigprocmask(SIG_BLOCK, &child_mask, &old_mask) == -1) {
-        printf("*** sigprocmask failed: %s\n", strerror(errno));
-        return false;
-    }
-
-    // if the child has exited already, handle and reset signals before leaving
-    pid_t child_pid = waitpid(pid, status, WNOHANG);
-    if (child_pid != pid) {
-        if (child_pid > 0) {
-            printf("*** Waiting for pid %d, got pid %d instead\n", pid, child_pid);
-            sigprocmask(SIG_SETMASK, &old_mask, nullptr);
+// Wait for process `pid` to stop executing, or a timeout in milliseconds.
+//
+// Args:
+// - `pid`: the process ID of the process to wait on.
+// - `timeout_ms`: timeout in milliseconds to give up after.
+// - `ret_on_signal`: whether to treat subprocess death as an error. `false`
+//    mostly, but `true` when we use this wait after we send the process
+//    a signal.
+// - `status`: populated process details.
+//
+// Returns:
+// - `true` if the process terminated normally. status is populated.
+// - `false` otherwise:
+//   - process was terminated by a signal, `status.exit_code_or_signal` is
+//     populated.
+//   - setup has failed, in which case `status.exit_code_or_signal == 0`,
+static bool waitpid_with_timeout(
+        pid_t pid, int timeout_ms, bool ret_on_signal, ExitStatus* status) {
+    // `pidfd_open` should work even if the process that `pid` refers to has
+    // terminated between we created it with `fork` and when we get here.
+    //
+    // Exceptions noted in pidfd_open(2) section NOTES should not apply, listed
+    // here for easy referencing:
+    // - the disposition of SIGCHLD has not been explicitly set to SIG_IGN
+    //   (see sigaction(2));
+    // - the SA_NOCLDWAIT flag was not specified while establishing a handler
+    //   for SIGCHLD or while setting the disposition of that signal to SIG_DFL
+    //   (see sigaction(2)); and
+    // - the zombie process was not reaped elsewhere in the program (e.g.,
+    //   either by an asynchronously executed signal handler or by wait(2)
+    //   or similar in another thread).
+    int fd = pidfd_open(pid, 0);
+    if (fd < 0) {
+        if (errno == ESRCH) {
+            // There is no such PID, presumably this should be OK if the process
+            // is already done. This will not happen when we actually wait
+            // for the process to complete.
+            //
+            // But, we also use this function in calling code to
+            // check if the process has already exited and figure out if
+            // it should be sent TERM and KILL. If the process is no
+            // longer present, we would get ESRCH here, and would conclude that
+            // all is well.
+            status->exited = true;
+            return true;
+        } else {
+            // Based on above, fd should not be equal to `ESRCH`, so any negative
+            // value here is an error.
+            printf("*** pidfd_open failed: %d, %d:%s\n",
+                   fd, errno, strerror(errno));
             return false;
         }
-    } else {
-        sigprocmask(SIG_SETMASK, &old_mask, nullptr);
-        return true;
     }
+    auto close_on_return = android::base::make_scope_guard([fd] { close(fd); });
 
-    // wait for a SIGCHLD
-    timespec ts;
-    ts.tv_sec = MSEC_TO_SEC(timeout_ms);
-    ts.tv_nsec = (timeout_ms % 1000) * 1000000;
-    int ret = TEMP_FAILURE_RETRY(sigtimedwait(&child_mask, nullptr, &ts));
-    int saved_errno = errno;
+    struct pollfd pfd = {
+        .fd = fd,
+        .events = POLLIN,
+    };
 
-    // Set the signals back the way they were.
-    if (sigprocmask(SIG_SETMASK, &old_mask, nullptr) == -1) {
-        printf("*** sigprocmask failed: %s\n", strerror(errno));
-        if (ret == 0) {
+    int ready = 0;
+    do {
+        uint64_t begin_poll_ns = Nanotime();
+        ready = poll(&pfd, 1, timeout_ms);
+        uint64_t end_poll_ns = Nanotime();
+        int wait_duration_ms = (end_poll_ns - begin_poll_ns) / 1000000;
+        // If we get a EINTR, we need to restart the poll.
+        // If we need to continue waiting, the next timeout will be reduced
+        // by the time we spent waiting already. However, we also want to bail
+        // if we used up all the `timeout_ms`.
+        timeout_ms = std::max(timeout_ms - wait_duration_ms, 0);
+    } while (timeout_ms > 0 && (ready == -1 && errno == EINTR));
+
+    if (ready < 0) {
+        // Poll failed, return with error.
+        return false;
+    }
+    if (ready == 0) {
+        // Calling code detects a timeout via errno.
+        errno = ETIMEDOUT;
+        return false;
+    }
+    // ready > 0
+    if (pfd.revents & POLLIN) {
+        siginfo_t info{};
+        // WEXITED: Wait for processes that have exited.
+        // WNOHANG: Don't block (though we know it's ready from poll).
+        if (waitid(P_PIDFD, fd, &info, WEXITED | WNOHANG) == 0) {
+            status->exit_code_or_signal = info.si_status;
+            if (info.si_code == CLD_EXITED) {
+                status->exited = true;
+            } else if (info.si_code == CLD_KILLED || info.si_code == CLD_DUMPED) {
+                status->exited = ret_on_signal;
+            }
+        } else {
             return false;
         }
-    }
-    if (ret == -1) {
-        errno = saved_errno;
-        if (errno == EAGAIN) {
-            errno = ETIMEDOUT;
-        } else {
-            printf("*** sigtimedwait failed: %s\n", strerror(errno));
-        }
-        return false;
-    }
-
-    child_pid = waitpid(pid, status, WNOHANG);
-    if (child_pid != pid) {
-        if (child_pid != -1) {
-            printf("*** Waiting for pid %d, got pid %d instead\n", pid, child_pid);
-        } else {
-            printf("*** waitpid failed: %s\n", strerror(errno));
-        }
-        return false;
     }
     return true;
 }
+
 }  // unnamed namespace
 
 CommandOptions CommandOptions::DEFAULT = CommandOptions::WithTimeout(10).Build();
 CommandOptions CommandOptions::AS_ROOT = CommandOptions::WithTimeout(10).AsRoot().Build();
 
-CommandOptions::CommandOptionsBuilder::CommandOptionsBuilder(int64_t timeout_ms) : values(timeout_ms) {
+CommandOptions::CommandOptionsBuilder::CommandOptionsBuilder(int64_t timeout_ms)
+    : values(timeout_ms) {
 }
 
 CommandOptions::CommandOptionsBuilder& CommandOptions::CommandOptionsBuilder::Always() {
@@ -233,7 +300,9 @@ bool PropertiesHelper::IsUnroot() {
 bool PropertiesHelper::IsParallelRun() {
     if (parallel_run_ == -1) {
         parallel_run_ = android::base::GetBoolProperty("dumpstate.parallel_run",
-                /* default_value = */true) ? 1 : 0;
+                                                       /* default_value = */ true)
+                            ? 1
+                            : 0;
     }
     return parallel_run_ == 1;
 }
@@ -247,7 +316,8 @@ bool PropertiesHelper::IsStrictRun() {
 }
 
 int DumpFileToFd(int out_fd, const std::string& title, const std::string& path) {
-    android::base::unique_fd fd(TEMP_FAILURE_RETRY(open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC)));
+    android::base::unique_fd fd(
+        TEMP_FAILURE_RETRY(open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC)));
     if (fd.get() < 0) {
         int err = errno;
         if (title.empty()) {
@@ -327,6 +397,7 @@ int RunCommandToFd(int fd, const std::string& title, const std::vector<std::stri
     const char* path = args[0];
 
     uint64_t start = Nanotime();
+    // `vfork` avoids process table entry copying vs `fork`, which took significant time.
     pid_t pid = vfork();
 
     /* handle error case */
@@ -363,7 +434,7 @@ int RunCommandToFd(int fd, const std::string& title, const std::vector<std::stri
             // doing that in a fork-safe way is too complex and not worth it
             // (opendir()/readdir() do heap allocations and take locks).
             for (int i = 0; i < 1000; i++) {
-                if (i != STDIN_FILENO && i!= STDOUT_FILENO && i != STDERR_FILENO) {
+                if (i != STDIN_FILENO && i != STDOUT_FILENO && i != STDERR_FILENO) {
                     close(i);
                 }
             }
@@ -395,8 +466,9 @@ int RunCommandToFd(int fd, const std::string& title, const std::vector<std::stri
     }
 
     /* handle parent case */
-    int status;
-    bool ret = waitpid_with_timeout(pid, options.TimeoutInMs(), &status);
+    ExitStatus status{};
+    bool ret = waitpid_with_timeout(
+            pid, options.TimeoutInMs(), /*ret_on_signal=*/false, &status);
 
     uint64_t elapsed = Nanotime() - start;
     if (!ret) {
@@ -413,10 +485,12 @@ int RunCommandToFd(int fd, const std::string& title, const std::vector<std::stri
             MYLOGE("command '%s': Error after %.4fs (killing pid %d)\n", command,
                    static_cast<float>(elapsed) / NANOS_PER_SEC, pid);
         }
+        // We signal and wait for timeouts, in this case we treat notice of process termination
+        // by signal as "expected"
         kill(pid, SIGTERM);
-        if (!waitpid_with_timeout(pid, 5000, nullptr)) {
+        if (!waitpid_with_timeout(pid, 5001, /*ret_on_signal=*/true, &status)) {
             kill(pid, SIGKILL);
-            if (!waitpid_with_timeout(pid, 5000, nullptr)) {
+            if (!waitpid_with_timeout(pid, 5002, /*ret_on_signal=*/true, &status)) {
                 if (!silent)
                     dprintf(fd, "could not kill command '%s' (pid %d) even with SIGKILL.\n",
                             command, pid);
@@ -426,17 +500,19 @@ int RunCommandToFd(int fd, const std::string& title, const std::vector<std::stri
         return -1;
     }
 
-    if (WIFSIGNALED(status)) {
+    if (!status.exited) {
         if (!silent)
-            dprintf(fd, "*** command '%s' failed: killed by signal %d\n", command, WTERMSIG(status));
-        MYLOGE("*** command '%s' failed: killed by signal %d\n", command, WTERMSIG(status));
-    } else if (WIFEXITED(status) && WEXITSTATUS(status) > 0) {
-        status = WEXITSTATUS(status);
-        if (!silent) dprintf(fd, "*** command '%s' failed: exit code %d\n", command, status);
-        MYLOGE("*** command '%s' failed: exit code %d\n", command, status);
+            dprintf(fd, "*** command '%s' failed: killed by signal %d\n", command,
+                    status.exit_code_or_signal);
+        MYLOGE("*** command '%s' failed: killed by signal %d\n", command,
+               status.exit_code_or_signal);
+    } else if (status.exited && status.exit_code_or_signal != 0) {
+        int exit_code = status.exit_code_or_signal;
+        if (!silent) dprintf(fd, "*** command '%s' failed: exit code %d\n", command, exit_code);
+        MYLOGE("*** command '%s' failed: exit code %d\n", command, exit_code);
     }
 
-    return status;
+    return status.exit_code_or_signal;
 }
 
 }  // namespace dumpstate

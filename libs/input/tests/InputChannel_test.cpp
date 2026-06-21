@@ -21,13 +21,19 @@
 #include <errno.h>
 
 #include <android-base/logging.h>
+#include <android-base/result-gmock.h>
 #include <binder/Binder.h>
 #include <binder/Parcel.h>
 #include <gtest/gtest.h>
+#include <input/InputEventBuilders.h>
 #include <input/InputTransport.h>
+#include <sys/ioctl.h>
 #include <utils/StopWatch.h>
 #include <utils/StrongPointer.h>
 #include <utils/Timers.h>
+
+using android::base::testing::Ok;
+using testing::Not;
 
 namespace android {
 
@@ -109,7 +115,7 @@ TEST_F(InputChannelTest, OpenInputChannelPair_ReturnsAPairOfConnectedChannels) {
             << "server channel should be able to send message to client channel";
 
     android::base::Result<InputMessage> clientMsgResult = clientChannel->receiveMessage();
-    ASSERT_TRUE(clientMsgResult.ok())
+    ASSERT_THAT(clientMsgResult, Ok())
             << "client channel should be able to receive message from server channel";
     const InputMessage& clientMsg = *clientMsgResult;
     EXPECT_EQ(serverMsg.header.type, clientMsg.header.type)
@@ -126,7 +132,7 @@ TEST_F(InputChannelTest, OpenInputChannelPair_ReturnsAPairOfConnectedChannels) {
             << "client channel should be able to send message to server channel";
 
     android::base::Result<InputMessage> serverReplyResult = serverChannel->receiveMessage();
-    ASSERT_TRUE(serverReplyResult.ok())
+    ASSERT_THAT(serverReplyResult, Ok())
             << "server channel should be able to receive message from client channel";
     const InputMessage& serverReply = *serverReplyResult;
     EXPECT_EQ(clientReply.header.type, serverReply.header.type)
@@ -167,7 +173,7 @@ TEST_F(InputChannelTest, ProbablyHasInput) {
 
     // Receive (consume) the message.
     android::base::Result<InputMessage> clientMsgResult = receiverChannel->receiveMessage();
-    ASSERT_TRUE(clientMsgResult.ok())
+    ASSERT_THAT(clientMsgResult, Ok())
             << "client channel should be able to receive message from server channel";
     const InputMessage& clientMsg = *clientMsgResult;
     EXPECT_EQ(serverMsg.header.type, clientMsg.header.type)
@@ -252,7 +258,7 @@ TEST_F(InputChannelTest, SendAndReceive_MotionClassification) {
                 << "server channel should be able to send message to client channel";
 
         android::base::Result<InputMessage> clientMsgResult = clientChannel->receiveMessage();
-        ASSERT_TRUE(clientMsgResult.ok())
+        ASSERT_THAT(clientMsgResult, Ok())
                 << "client channel should be able to receive message from server channel";
         const InputMessage& clientMsg = *clientMsgResult;
         EXPECT_EQ(serverMsg.header.type, clientMsg.header.type);
@@ -330,7 +336,7 @@ TEST_F(InputChannelTest, ReceiveAfterCloseMultiThreaded) {
     // There should not be any more events from the client, since the client closed fd after the
     // first key.
     android::base::Result<InputMessage> noEvent = serverChannel->receiveMessage();
-    ASSERT_FALSE(noEvent.ok()) << "Got event " << *noEvent;
+    ASSERT_THAT(noEvent, Not(Ok())) << "Got event " << *noEvent;
 }
 
 /**
@@ -365,13 +371,13 @@ TEST_F(InputChannelTest, ReceiveAfterCloseSingleThreaded) {
 
     // Now try to read the finish message, even though client closed the fd
     android::base::Result<InputMessage> response = readMessage(*serverChannel);
-    ASSERT_FALSE(response.ok());
+    ASSERT_THAT(response, Not(Ok()));
     ASSERT_EQ(response.error().code(), DEAD_OBJECT);
 
     // We can still read the finish event (but in practice, the expectation is that the server will
     // not be doing this after getting DEAD_OBJECT).
     android::base::Result<InputMessage> finishEvent = serverChannel->receiveMessage();
-    ASSERT_TRUE(finishEvent.ok());
+    ASSERT_THAT(finishEvent, Ok());
     ASSERT_EQ(finishEvent->header.type, InputMessage::Type::FINISHED);
 }
 
@@ -388,4 +394,119 @@ TEST_F(InputChannelTest, DuplicateChannelAndAssertEqual) {
     EXPECT_EQ(*serverChannel == *dupChan, true) << "inputchannel should be equal after duplication";
 }
 
+/**
+ * In situations of high load, the channel's socket can be filled. This leads to sendMessage
+ * returning status WOULD_BLOCK. This can result in ANRs when not properly handled. Therefore it is
+ * useful to understand the capacity of these sockets for various important messages, including
+ * finished messages. The specific number of messages is determined by the socket buffer size and
+ * effective size of InputMessages on the socket, which this test determines by sending
+ * messages until sendMessage return a non-OK status such as WOULD_BLOCK.
+ *
+ * Depending on the hardware architecture, kernel, and the type of message, the effective message
+ * size could differ, requiring fewer or more messages to fill the socket's effective capacity.
+ */
+TEST_F(InputChannelTest, FinishedMessageCapacityInSocket) {
+    std::unique_ptr<InputChannel> serverChannel, clientChannel;
+    status_t result =
+            InputChannel::openInputChannelPair("channel name", serverChannel, clientChannel);
+    ASSERT_EQ(OK, result) << "should have successfully opened a channel pair";
+
+    uint32_t seq = 1;
+    for (;;) {
+        InputMessage finishedMessage = createFinishedMessage(seq);
+        status_t status = serverChannel->sendMessage(&finishedMessage);
+        if (status != OK) {
+            break;
+        }
+        seq++;
+    }
+    const uint32_t expected_capacity = 87;
+    ASSERT_EQ(seq, expected_capacity) << "server should have sent " << expected_capacity
+                                      << " finished messages, instead sent " << seq;
+}
+
+/**
+ * Similar to above, but for motion messages.
+ *
+ * Effective capacity depends on `sk_wmem_alloc`. The kernel allocates memory using
+ * power-of-two slab buckets, padding structs to hardware cache lines (SMP_CACHE_BYTES).
+ */
+TEST_F(InputChannelTest, MotionMessageCapacityInSocket) {
+    // Total Footprint = slab_bucket(sk_buff) + slab_bucket(aligned_payload + tail).
+    //
+    // 1. sk_buff bucket: ~232-248 bytes. Allocated from the 256-byte slab bucket.
+    // 2. Data bucket: 168-byte MotionMessage payload + `skb_shared_info` tail.
+    //
+    // Note: In most kernels, the payload is aligned to the L1 cache line,
+    // but the shinfo tail is added as a raw size. However, because the payload is
+    // aligned, the tail still begins on a fresh cache line boundary.
+    //
+    // Memory footprint branches based on alignment and kernel KABI padding:
+    //
+    // - 512-byte Data Bucket (Total Footprint: 768 bytes)
+    //   Condition: 64-byte alignment, standard 320-byte tail.
+    //   Calculation: ALIGN(168, 64) + 320 = 192 + 320 = 512 bytes.
+    //   Allocation: 256 (sk_buff) + 512 (data) = 768 bytes.
+    constexpr int kFootprint768Byte = 768;
+    constexpr uint32_t kCapacity768Byte = 87;
+
+    // - 1024-byte Data Bucket (Total Footprint: 1280 bytes)
+    //   Condition: Padded >320-byte tail (e.g., 344-byte tail due to Android KABI).
+    //   Calculation: ALIGN(168, 64) + 344 = 192 + 344 = 536 bytes.
+    //   Overflow: Since 536 > 512, it overflows into the 1024-byte slab bucket
+    //   Allocation: 256 (sk_buff) + 1024 (data) = 1280 bytes.
+    constexpr int kFootprint1280Byte = 1280;
+    constexpr uint32_t kCapacity1280Byte = 53;
+
+    // Note: 24-byte FinishedMessages maintain a 768-byte footprint globally.
+    // ALIGN(24, 64) + 344 = 64 + 344 = 408 bytes (fits the 512-byte bucket).
+
+    std::unique_ptr<InputChannel> serverChannel, clientChannel;
+    status_t result =
+            InputChannel::openInputChannelPair("channel name", serverChannel, clientChannel);
+    ASSERT_EQ(OK, result) << "should have successfully opened a channel pair";
+
+    int footprint = 0;
+    uint32_t seq = 1;
+    status_t status = OK;
+
+    for (;;) {
+        InputMessage msg = InputMessageBuilder{InputMessage::Type::MOTION, seq}
+                                   .deviceId(0)
+                                   .action(AMOTION_EVENT_ACTION_MOVE)
+                                   .build();
+
+        status = serverChannel->sendMessage(&msg);
+        if (status != OK) {
+            break;
+        }
+
+        // TIOCOUTQ returns the total kernel memory allocated for the socket's write
+        // queue (sk_wmem_alloc). Because this footprint fluctuates based on the
+        // architecture's cache line size and slab allocator rules, we dynamically
+        // measure the first message's footprint to correctly assert the expected
+        // socket capacity and prevent test flakiness across different devices.
+        if (seq == 1) {
+            ASSERT_EQ(0, ioctl(serverChannel->getFd(), TIOCOUTQ, &footprint))
+                    << "Failed to read socket memory footprint";
+        }
+        seq++;
+    }
+
+    ASSERT_EQ(WOULD_BLOCK, status)
+            << "Expected sendMessage to return WOULD_BLOCK when the socket is full";
+
+    if (footprint == kFootprint768Byte) {
+        ASSERT_EQ(seq, kCapacity768Byte);
+    } else if (footprint == kFootprint1280Byte) {
+        ASSERT_EQ(seq, kCapacity1280Byte);
+    } else {
+        // If a future kernel changes the sk_buff layout or slab allocator rules,
+        // we don't want to break the test. We just need to guarantee the socket
+        // can still hold a safe minimum number of messages to prevent dropped inputs.
+        ASSERT_GE(seq, kCapacity1280Byte)
+                << "Unrecognized kernel footprint (" << footprint << " bytes). "
+                << "Socket capacity broke at " << seq << ", which is below the safe minimum";
+    }
+}
 } // namespace android

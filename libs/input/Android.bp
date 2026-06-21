@@ -15,6 +15,7 @@
 // libinput is partially built for the host (used by build time keymap validation tool)
 
 package {
+    default_team: "trendy_team_input_framework",
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
     // all of the 'license_kinds' from "frameworks_native_license"
@@ -43,7 +44,15 @@ aconfig_declarations {
     name: "com.android.input.flags-aconfig",
     package: "com.android.input.flags",
     container: "system",
+    exportable: true,
     srcs: ["input_flags.aconfig"],
+}
+
+rust_aconfig_library {
+    name: "libinput_flags_rust",
+    crate_name: "input_flags",
+    aconfig_declarations: "com.android.input.flags-aconfig",
+    host_supported: true,
 }
 
 cc_aconfig_library {
@@ -231,7 +240,6 @@ cc_library {
         "InputConsumerNoResampling.cpp",
         "InputDevice.cpp",
         "InputEventLabels.cpp",
-        "InputFlags.cpp",
         "InputTransport.cpp",
         "InputVerifier.cpp",
         "KeyCharacterMap.cpp",
@@ -270,9 +278,7 @@ cc_library {
     ],
 
     shared_libs: [
-        "android.companion.virtualdevice.flags-aconfig-cc",
         "com.android.window.flags.window-aconfig_flags_c_lib",
-        "libPlatformProperties",
         "libaconfig_storage_read_api_cc",
         "libbase",
         "libbinder",
@@ -297,6 +303,7 @@ cc_library {
 
     static_libs: [
         "inputconstants-cpp",
+        "libPlatformProperties",
         "libkernelconfigs",
         "libtflite_static",
         "libui-types",
@@ -306,6 +313,7 @@ cc_library {
         "com.android.input.flags-aconfig-cc",
         "iinputflinger_aidl_lib_static",
         "libinput_rust_ffi",
+        "libstatslog_libinput_bundled",
     ],
 
     export_static_lib_headers: [
@@ -324,7 +332,7 @@ cc_library {
                 "motion_predictor_model_prebuilt",
             ],
             static_libs: [
-                "libstatslog_libinput",
+                "libstatspull_lazy",
                 "libstatssocket_lazy",
             ],
         },
@@ -333,48 +341,21 @@ cc_library {
                 "bionic/libc/kernel/android/uapi/",
                 "bionic/libc/kernel/uapi",
             ],
+            static_libs: [
+                "libstatspull-fake",
+                "libstatssocket-fake",
+            ],
         },
     },
 }
 
-cc_library_static {
+cc_atomslog_library_static {
     name: "libstatslog_libinput",
-    generated_sources: ["statslog_libinput.cpp"],
-    generated_headers: ["statslog_libinput.h"],
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
-    export_generated_headers: ["statslog_libinput.h"],
-    shared_libs: [
-        "libcutils",
-        "liblog",
-        "libutils",
-    ],
-    static_libs: [
-        "libstatssocket_lazy",
-    ],
-}
-
-genrule {
-    name: "statslog_libinput.h",
-    tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_libinput.h " +
-        "--module libinput --namespace android,libinput",
-    out: [
-        "statslog_libinput.h",
-    ],
-}
-
-genrule {
-    name: "statslog_libinput.cpp",
-    tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_libinput.cpp " +
-        "--module libinput --namespace android,libinput " +
-        "--importHeader statslog_libinput.h",
-    out: [
-        "statslog_libinput.cpp",
-    ],
+    host_supported: true,
+    atoms_module: "libinput",
+    namespace: "android::libinput",
+    basename: "statslog_libinput",
+    include_default_libs: "headers_only",
 }
 
 cc_defaults {
@@ -393,6 +374,24 @@ cc_fuzz {
     srcs: [
         "PropertyMap.cpp",
         "PropertyMap_fuzz.cpp",
+    ],
+}
+
+cc_atomslog_library_static {
+    name: "libstatslog_input",
+    host_supported: true,
+    atoms_module: "input",
+    namespace: "android::input",
+    basename: "statslog_input",
+    include_default_libs: "headers_only",
+}
+
+cc_library_static {
+    name: "libstatslog_libinput_bundled",
+    host_supported: true,
+    whole_static_libs: [
+        "libstatslog_input",
+        "libstatslog_libinput",
     ],
 }
 

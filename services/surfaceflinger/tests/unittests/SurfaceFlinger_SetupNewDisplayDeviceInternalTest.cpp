@@ -22,6 +22,7 @@
 #include <gui/Surface.h>
 #include <ui/ScreenPartStatus.h>
 
+#include "DisplayDevice.h"
 #include "DisplayHardware/DisplayMode.h"
 
 #include "DisplayTransactionTestHelpers.h"
@@ -228,7 +229,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     // --------------------------------------------------------------------
     // Invocation
 
-    DisplayDeviceState state;
+    std::optional<DisplayDeviceState> stateOpt;
 
     constexpr auto kConnectionTypeOpt = Case::Display::CONNECTION_TYPE::value;
     if constexpr (kConnectionTypeOpt) {
@@ -246,10 +247,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
                                             .setGroup(0)
                                             .build();
 
-        state.physical = {.id = *displayId,
-                          .hwcDisplayId = *hwcDisplayId,
-                          .port = *port,
-                          .activeMode = activeMode};
+        stateOpt = DisplayDeviceState::createPhysical(*displayId, *hwcDisplayId, *port, activeMode);
 
         ui::ColorModes colorModes;
         if constexpr (Case::WideColorSupport::WIDE_COLOR_SUPPORTED) {
@@ -266,8 +264,13 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
         FTL_FAKE_GUARD(kMainThreadContext,
                        mFlinger.mutableDisplayModeController()
                                .registerDisplay(it->second.snapshot(), activeMode->getId(), {}));
+    } else {
+        constexpr uid_t kOwnerUid = 123;
+        stateOpt = DisplayDeviceState::createVirtual(kOwnerUid);
     }
 
+    LOG_ALWAYS_FATAL_IF(!stateOpt);
+    DisplayDeviceState& state = *stateOpt;
     state.isSecure = static_cast<bool>(Case::Display::SECURE);
     state.flags = Case::Display::DISPLAY_FLAGS;
 

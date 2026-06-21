@@ -75,6 +75,9 @@ impl IBinderRpcTest for TestService {
         let ss = [s, s].concat();
         Ok(ss)
     }
+    fn getClientUid(&self) -> Result<i32, Status> {
+        Ok(-1)
+    }
     fn getClientPort(&self) -> Result<i32, Status> {
         Ok(self.port)
     }
@@ -115,7 +118,7 @@ impl IBinderRpcTest for TestService {
     }
     fn nestMe(
         &self,
-        binder: &Strong<(dyn IBinderRpcTest + 'static)>,
+        binder: &Strong<dyn IBinderRpcTest + 'static>,
         count: i32,
     ) -> Result<(), Status> {
         if count < 0 {
@@ -133,7 +136,7 @@ impl IBinderRpcTest for TestService {
             })
             .clone())
     }
-    fn openSession(&self, name: &str) -> Result<Strong<(dyn IBinderRpcSession + 'static)>, Status> {
+    fn openSession(&self, name: &str) -> Result<Strong<dyn IBinderRpcSession + 'static>, Status> {
         let s = BnBinderRpcSession::new_binder(
             MyBinderRpcSession::new(name),
             BinderFeatures::default(),
@@ -171,7 +174,7 @@ impl IBinderRpcTest for TestService {
     }
     fn doCallback(
         &self,
-        _: &Strong<(dyn IBinderRpcCallback + 'static)>,
+        _: &Strong<dyn IBinderRpcCallback + 'static>,
         _: bool,
         _: bool,
         _: &str,
@@ -180,7 +183,7 @@ impl IBinderRpcTest for TestService {
     }
     fn doCallbackAsync(
         &self,
-        _: &Strong<(dyn IBinderRpcCallback + 'static)>,
+        _: &Strong<dyn IBinderRpcCallback + 'static>,
         _: bool,
         _: bool,
         _: &str,

@@ -23,6 +23,7 @@
 #include <ftl/small_map.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
+#include <gui/CornerRadii.h>
 #include <gui/IGraphicBufferConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/SurfaceComposerClient.h>
@@ -67,9 +68,9 @@ protected:
 private:
     BLASTBufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
                             const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-                            int bufferCount, bool controlledByApp, wp<BLASTBufferQueue> bbq)
+                            int bufferCount, bool controlledByApp, const wp<BLASTBufferQueue>& bbq)
           : BufferItemConsumer(producer, consumer, consumerUsage, bufferCount, controlledByApp),
-            mBLASTBufferQueue(std::move(bbq)),
+            mBLASTBufferQueue(bbq),
             mCurrentlyConnected(false),
             mPreviouslyConnected(false) {}
 
@@ -283,6 +284,7 @@ private:
             REQUIRES(mMutex);
 
     uint32_t mTransformHint GUARDED_BY(mMutex);
+    gui::CornerRadii mLastCornerRadii GUARDED_BY(mMutex);
 
     sp<IGraphicBufferConsumer> mConsumer;
     sp<IGraphicBufferProducer> mProducer;

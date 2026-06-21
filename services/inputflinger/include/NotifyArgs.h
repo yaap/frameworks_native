@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include <input/Input.h>
@@ -222,7 +223,7 @@ using NotifyArgs =
                      NotifySensorArgs, NotifySwitchArgs, NotifyDeviceResetArgs,
                      NotifyPointerCaptureChangedArgs, NotifyVibratorStateArgs>;
 
-const char* toString(const NotifyArgs& args);
+const std::string toString(const NotifyArgs& args);
 
 std::ostream& operator<<(std::ostream& out, const NotifyArgs& args);
 

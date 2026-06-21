@@ -28,7 +28,8 @@ class Cache {
 public:
     static void primeShaderCache(SkiaRenderEngine*, PrimeCacheConfig config);
 
-    static void initializeDiskCache();
+    static void initializeGaneshDiskCache();
+    static void initializeGraphiteDiskCache();
 
 private:
     Cache() = default;

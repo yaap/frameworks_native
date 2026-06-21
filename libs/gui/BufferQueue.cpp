@@ -106,14 +106,12 @@ void BufferQueue::ProxyConsumerListener::onSetFrameRate(float frameRate, int8_t 
     }
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 void BufferQueue::ProxyConsumerListener::onSlotCountChanged(int slotCount) {
     sp<ConsumerListener> listener(mConsumerListener.promote());
     if (listener != nullptr) {
         listener->onSlotCountChanged(slotCount);
     }
 }
-#endif
 
 void BufferQueue::createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
         sp<IGraphicBufferConsumer>* outConsumer,

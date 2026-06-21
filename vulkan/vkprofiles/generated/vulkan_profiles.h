@@ -17,7 +17,7 @@
  * This file is ***GENERATED***.  Do Not Edit.
  * See scripts/gen_profiles_solution.py for modifications.
  */
-
+ 
 // clang-format off
 
 #ifndef VULKAN_PROFILES_H_
@@ -117,6 +117,103 @@
 #define VP_ANDROID_16_MINIMUMS_NAME "VP_ANDROID_16_minimums"
 #define VP_ANDROID_16_MINIMUMS_SPEC_VERSION 1
 #define VP_ANDROID_16_MINIMUMS_MIN_API_VERSION VK_MAKE_VERSION(1, 3, 276)
+#endif
+
+#if defined(VK_VERSION_1_1) && \
+    defined(VK_ANDROID_external_memory_android_hardware_buffer) && \
+    defined(VK_EXT_debug_report) && \
+    defined(VK_EXT_host_query_reset) && \
+    defined(VK_EXT_index_type_uint8) && \
+    defined(VK_EXT_queue_family_foreign) && \
+    defined(VK_EXT_scalar_block_layout) && \
+    defined(VK_EXT_separate_stencil_usage) && \
+    defined(VK_EXT_swapchain_colorspace) && \
+    defined(VK_GOOGLE_display_timing) && \
+    defined(VK_KHR_android_surface) && \
+    defined(VK_KHR_bind_memory2) && \
+    defined(VK_KHR_create_renderpass2) && \
+    defined(VK_KHR_dedicated_allocation) && \
+    defined(VK_KHR_descriptor_update_template) && \
+    defined(VK_KHR_device_group) && \
+    defined(VK_KHR_device_group_creation) && \
+    defined(VK_KHR_driver_properties) && \
+    defined(VK_KHR_external_fence) && \
+    defined(VK_KHR_external_fence_capabilities) && \
+    defined(VK_KHR_external_fence_fd) && \
+    defined(VK_KHR_external_memory) && \
+    defined(VK_KHR_external_memory_capabilities) && \
+    defined(VK_KHR_external_memory_fd) && \
+    defined(VK_KHR_external_semaphore) && \
+    defined(VK_KHR_external_semaphore_capabilities) && \
+    defined(VK_KHR_external_semaphore_fd) && \
+    defined(VK_KHR_get_memory_requirements2) && \
+    defined(VK_KHR_get_physical_device_properties2) && \
+    defined(VK_KHR_get_surface_capabilities2) && \
+    defined(VK_KHR_image_format_list) && \
+    defined(VK_KHR_incremental_present) && \
+    defined(VK_KHR_maintenance1) && \
+    defined(VK_KHR_maintenance2) && \
+    defined(VK_KHR_maintenance3) && \
+    defined(VK_KHR_multiview) && \
+    defined(VK_KHR_relaxed_block_layout) && \
+    defined(VK_KHR_sampler_mirror_clamp_to_edge) && \
+    defined(VK_KHR_sampler_ycbcr_conversion) && \
+    defined(VK_KHR_shader_draw_parameters) && \
+    defined(VK_KHR_shader_float16_int8) && \
+    defined(VK_KHR_shader_float_controls) && \
+    defined(VK_KHR_storage_buffer_storage_class) && \
+    defined(VK_KHR_surface) && \
+    defined(VK_KHR_swapchain) && \
+    defined(VK_KHR_variable_pointers) && \
+    defined(VK_KHR_vulkan_memory_model)
+#define VP_ANDROID_vulkan_profile_2025 1
+#define VP_ANDROID_VULKAN_PROFILE_2025_NAME "VP_ANDROID_vulkan_profile_2025"
+#define VP_ANDROID_VULKAN_PROFILE_2025_SPEC_VERSION 2
+#define VP_ANDROID_VULKAN_PROFILE_2025_MIN_API_VERSION VK_MAKE_VERSION(1, 1, 128)
+#endif
+
+#if defined(VK_VERSION_1_4) && \
+    defined(VP_ANDROID_vulkan_profile_2025) && \
+    defined(VK_ANDROID_external_format_resolve) && \
+    defined(VK_EXT_calibrated_timestamps) && \
+    defined(VK_EXT_custom_border_color) && \
+    defined(VK_EXT_debug_utils) && \
+    defined(VK_EXT_descriptor_indexing) && \
+    defined(VK_EXT_device_address_binding_report) && \
+    defined(VK_EXT_device_memory_report) && \
+    defined(VK_EXT_external_memory_acquire_unmodified) && \
+    defined(VK_EXT_graphics_pipeline_library) && \
+    defined(VK_EXT_hdr_metadata) && \
+    defined(VK_EXT_image_2d_view_of_3d) && \
+    defined(VK_EXT_image_compression_control) && \
+    defined(VK_EXT_image_compression_control_swapchain) && \
+    defined(VK_EXT_multisampled_render_to_single_sampled) && \
+    defined(VK_EXT_present_mode_fifo_latest_ready) && \
+    defined(VK_EXT_present_timing) && \
+    defined(VK_EXT_primitive_topology_list_restart) && \
+    defined(VK_EXT_primitives_generated_query) && \
+    defined(VK_EXT_provoking_vertex) && \
+    defined(VK_EXT_shader_stencil_export) && \
+    defined(VK_EXT_surface_maintenance1) && \
+    defined(VK_EXT_swapchain_maintenance1) && \
+    defined(VK_EXT_transform_feedback) && \
+    defined(VK_GOOGLE_surfaceless_query) && \
+    defined(VK_KHR_maintenance7) && \
+    defined(VK_KHR_maintenance8) && \
+    defined(VK_KHR_maintenance9) && \
+    defined(VK_KHR_pipeline_binary) && \
+    defined(VK_KHR_pipeline_library) && \
+    defined(VK_KHR_present_id2) && \
+    defined(VK_KHR_present_wait2) && \
+    defined(VK_KHR_shader_maximal_reconvergence) && \
+    defined(VK_KHR_shader_quad_control) && \
+    defined(VK_KHR_shader_subgroup_uniform_control_flow) && \
+    defined(VK_KHR_swapchain_mutable_format) && \
+    defined(VK_KHR_workgroup_memory_explicit_layout)
+#define VP_ANDROID_17_requirements 1
+#define VP_ANDROID_17_REQUIREMENTS_NAME "VP_ANDROID_17_requirements"
+#define VP_ANDROID_17_REQUIREMENTS_SPEC_VERSION 4
+#define VP_ANDROID_17_REQUIREMENTS_MIN_API_VERSION VK_MAKE_VERSION(1, 4, 335)
 #endif
 
 #if defined(VK_VERSION_1_0) && \

@@ -56,6 +56,12 @@ uint32_t getCode(FuzzedDataProvider& provider) {
 }
 
 void fuzzService(const std::vector<sp<IBinder>>& binders, FuzzedDataProvider&& provider) {
+    // b/468417605 - avoid too-large inputs which may create way too many FDs or be more
+    // likely to time out.
+    if (provider.remaining_bytes() > 10000) {
+        return;
+    }
+
     RandomParcelOptions options{
             .extraBinders = binders,
             .extraFds = {},

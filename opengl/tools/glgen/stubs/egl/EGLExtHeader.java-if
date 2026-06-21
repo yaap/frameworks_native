@@ -18,10 +18,14 @@
 
 package android.opengl;
 
+import android.annotation.FlaggedApi;
 import android.annotation.NonNull;
+import android.hardware.HardwareBuffer;
 import android.hardware.SyncFence;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
+
+import com.android.graphics.egl.flags.Flags;
 
 /**
  * EGL Extensions

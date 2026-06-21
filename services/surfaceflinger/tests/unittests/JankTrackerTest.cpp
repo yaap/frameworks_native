@@ -53,10 +53,11 @@ public:
         JankTracker::removeJankListener(layerId, IInterface::asBinder(mListener), after);
     }
 
-    void addJankData(int32_t layerId, int jankType) {
+    void addJankData(int32_t layerId, int jankTypeLegacy, int jankTypeExperimental) {
         gui::JankData data;
         data.frameVsyncId = mVsyncId++;
-        data.jankType = jankType;
+        data.jankTypeLegacy = jankTypeLegacy;
+        data.jankTypeExperimental = jankTypeExperimental;
         data.frameIntervalNs = 8333333;
         JankTracker::onJankData(layerId, data);
     }
@@ -79,41 +80,46 @@ TEST_F(JankTrackerTest, jankDataIsTrackedAndPropagated) {
     EXPECT_CALL(*mListener.get(), onJankData(SizeIs(3)))
             .WillOnce([](const std::vector<gui::JankData>& jankData) {
                 EXPECT_EQ(jankData[0].frameVsyncId, 1000);
-                EXPECT_EQ(jankData[0].jankType, 1);
+                EXPECT_EQ(jankData[0].jankTypeLegacy, 1);
+                EXPECT_EQ(jankData[0].jankTypeExperimental, 10);
                 EXPECT_EQ(jankData[0].frameIntervalNs, 8333333);
 
                 EXPECT_EQ(jankData[1].frameVsyncId, 1001);
-                EXPECT_EQ(jankData[1].jankType, 2);
+                EXPECT_EQ(jankData[1].jankTypeLegacy, 2);
+                EXPECT_EQ(jankData[1].jankTypeExperimental, 20);
                 EXPECT_EQ(jankData[1].frameIntervalNs, 8333333);
 
                 EXPECT_EQ(jankData[2].frameVsyncId, 1002);
-                EXPECT_EQ(jankData[2].jankType, 3);
+                EXPECT_EQ(jankData[2].jankTypeLegacy, 3);
+                EXPECT_EQ(jankData[2].jankTypeExperimental, 30);
                 EXPECT_EQ(jankData[2].frameIntervalNs, 8333333);
                 return binder::Status::ok();
             });
     EXPECT_CALL(*mListener.get(), onJankData(SizeIs(2)))
             .WillOnce([](const std::vector<gui::JankData>& jankData) {
                 EXPECT_EQ(jankData[0].frameVsyncId, 1003);
-                EXPECT_EQ(jankData[0].jankType, 4);
+                EXPECT_EQ(jankData[0].jankTypeLegacy, 4);
+                EXPECT_EQ(jankData[0].jankTypeExperimental, 40);
                 EXPECT_EQ(jankData[0].frameIntervalNs, 8333333);
 
                 EXPECT_EQ(jankData[1].frameVsyncId, 1004);
-                EXPECT_EQ(jankData[1].jankType, 5);
+                EXPECT_EQ(jankData[1].jankTypeLegacy, 5);
+                EXPECT_EQ(jankData[1].jankTypeExperimental, 50);
                 EXPECT_EQ(jankData[1].frameIntervalNs, 8333333);
 
                 return binder::Status::ok();
             });
 
     addJankListener(123);
-    addJankData(123, 1);
-    addJankData(123, 2);
-    addJankData(123, 3);
+    addJankData(123, 1, 10);
+    addJankData(123, 2, 20);
+    addJankData(123, 3, 30);
     JankTracker::flushJankData(123);
-    addJankData(123, 4);
+    addJankData(123, 4, 40);
     removeJankListener(123, mVsyncId);
-    addJankData(123, 5);
+    addJankData(123, 5, 50);
     JankTracker::flushJankData(123);
-    addJankData(123, 6);
+    addJankData(123, 6, 60);
     JankTracker::flushJankData(123);
     removeJankListener(123, 0);
 
@@ -138,7 +144,7 @@ TEST_F(JankTrackerTest, jankDataIsAutomaticallyFlushedInBatches) {
 
     addJankListener(123);
     for (size_t i = 0; i < kNumberOfJankDataToSend; i++) {
-        addJankData(123, 0);
+        addJankData(123, 0, 0);
     }
 
     flushBackgroundThread();
@@ -160,12 +166,12 @@ TEST_F(JankTrackerTest, jankListenerIsRemovedWhenReturningNullError) {
             .WillOnce(Return(binder::Status::fromExceptionCode(binder::Status::EX_NULL_POINTER)));
 
     addJankListener(123);
-    addJankData(123, 1);
-    addJankData(123, 2);
-    addJankData(123, 3);
+    addJankData(123, 1, 10);
+    addJankData(123, 2, 20);
+    addJankData(123, 3, 30);
     JankTracker::flushJankData(123);
-    addJankData(123, 4);
-    addJankData(123, 5);
+    addJankData(123, 4, 40);
+    addJankData(123, 5, 50);
     JankTracker::flushJankData(123);
     flushBackgroundThread();
 
@@ -175,9 +181,9 @@ TEST_F(JankTrackerTest, jankListenerIsRemovedWhenReturningNullError) {
 TEST_F(JankTrackerTest, jankDataIsDroppedIfNobodyIsListening) {
     ASSERT_EQ(listenerCount(), 0u);
 
-    addJankData(123, 1);
-    addJankData(123, 2);
-    addJankData(123, 3);
+    addJankData(123, 1, 10);
+    addJankData(123, 2, 20);
+    addJankData(123, 3, 30);
     flushBackgroundThread();
 
     EXPECT_EQ(getCollectedJankData(123).size(), 0u);
@@ -225,11 +231,11 @@ TEST_F(JankTrackerTest, multipleLayersAreTrackedIndependently) {
             });
     addJankListener(123);
     addJankListener(321);
-    addJankData(123, 1);
-    addJankData(123, 2);
-    addJankData(123, 3);
-    addJankData(321, 4);
-    addJankData(321, 5);
+    addJankData(123, 1, 10);
+    addJankData(123, 2, 20);
+    addJankData(123, 3, 30);
+    addJankData(321, 4, 40);
+    addJankData(321, 5, 50);
 
     JankTracker::flushJankData(123);
     flushBackgroundThread();

@@ -37,6 +37,10 @@ cc_defaults {
     ] + select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER"), {
         true: ["-DLIBBINDER_BINDER_OBSERVER"],
         default: [],
+    }) + select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER_V2"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER_V2"],
+        false: [],
+        default: [],
     }),
 }
 
@@ -73,11 +77,6 @@ cc_test {
     static_libs: [
         "libfakeservicemanager",
     ],
-    defaults: [
-        "libbinder_client_cache_flag",
-        "libbinder_addservice_cache_flag",
-        "libbinder_remove_cache_static_list_flag",
-    ],
     test_suites: ["general-tests"],
     require_root: true,
 }
@@ -100,15 +99,22 @@ cc_test {
         "libutils",
     ],
     static_libs: [
+        "android.os.binder.flags-aconfig-cc",
         "libfakeservicemanager",
         "libgmock",
     ],
     header_libs: [
         "jni_headers",
+        "libbinder_internal_headers",
     ],
     test_suites: ["general-tests"],
     host_supported: false,
     require_root: true,
+    cflags: select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER_V2"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER_V2"],
+        false: [],
+        default: [],
+    }),
 }
 
 cc_test {
@@ -129,14 +135,45 @@ cc_test {
         "libutils",
     ],
     static_libs: [
+        "android.os.binder.flags-aconfig-cc",
         "libgmock",
     ],
     header_libs: [
         "jni_headers",
+        "libbinder_internal_headers",
     ],
     test_suites: ["general-tests"],
     host_supported: false,
     require_root: false,
+    cflags: select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER_V2"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER_V2"],
+        false: [],
+        default: [],
+    }),
+}
+
+cc_test {
+    name: "binderIPCThreadStateUnitTest",
+    host_supported: true,
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
+    srcs: [
+        "binderIPCThreadStateUnitTest.cpp",
+    ],
+    shared_libs: [
+        "libbinder",
+        "libcutils",
+        "libutils",
+        "liblog",
+    ],
+    static_libs: [
+        "libgmock",
+        "libfakeservicemanager",
+    ],
+    test_suites: ["general-tests"],
 }
 
 // unit test only, which can run on host and doesn't use /dev/binder
@@ -156,6 +193,8 @@ cc_test {
         "binderRecordedTransactionTest.cpp",
         "binderPersistableBundleTest.cpp",
         "binderStatsSpscQueueTest.cpp",
+        "BinderCallsAggregationUnitTest.cpp",
+        "HistogramUnitTest.cpp",
     ],
     shared_libs: [
         "libbinder",
@@ -223,18 +262,22 @@ cc_test {
     shared_libs: [
         "libbase",
         "libbinder",
+        "libbindernetlink",
         "liblog",
         "libprocessgroup",
         "libutils",
     ],
     static_libs: [
+        "android.os.binder.flags-aconfig-cc",
         "libgmock",
         "libselinux",
+        "libfakeservicemanager",
     ],
     test_suites: [
         "general-tests",
         "vts",
     ],
+    host_supported: false,
     require_root: true,
 }
 
@@ -640,6 +683,37 @@ cc_test {
     ],
 }
 
+cc_binary {
+    name: "binder_rpc_test_service_flake_prone",
+    defaults: [
+        "binderRpcTest_service_defaults",
+        "binderRpcTest_static_defaults",
+    ],
+    cflags: [
+        "-DRPC_FLAKE_PRONE=1",
+    ],
+    static_libs: [
+        "libbinder_flake_prone",
+    ],
+}
+
+cc_test {
+    name: "binderRpcTest_flake_prone",
+    defaults: [
+        "binderRpcTest_defaults",
+        "binderRpcTest_static_defaults",
+    ],
+    cflags: [
+        "-DRPC_FLAKE_PRONE=1",
+    ],
+    static_libs: [
+        "libbinder_flake_prone",
+    ],
+    data_bins: [
+        "binder_rpc_test_service_flake_prone",
+    ],
+}
+
 cc_test {
     name: "binderRpcToTrustyTest",
     vendor: true,
@@ -666,6 +740,16 @@ cc_test {
         "libbinder_trusty",
         "libtrusty",
     ],
+
+    test_suites: ["general-tests"],
+    require_root: true,
+}
+
+sh_test {
+    name: "binderRpcOnTrustyTest",
+    src: "binder_rpc_on_trusty_test.sh",
+    filename_from_src: true,
+    test_config_template: "binder_rpc_on_trusty_test_sh.xml",
 
     test_suites: ["general-tests"],
     require_root: true,
@@ -894,8 +978,10 @@ cc_test {
     shared_libs: [
         "libbinder",
         "libutils",
+        "packagemanager_aidl-cpp",
     ],
     static_libs: [
+        "apex_aidl_interface-cpp",
         "libprocpartition",
     ],
 
@@ -909,7 +995,10 @@ cc_test {
 cc_test {
     name: "binderAllocationLimits",
     defaults: ["binder_test_defaults"],
-    srcs: ["binderAllocationLimits.cpp"],
+    srcs: [
+        "binderAllocationLimits.cpp",
+        ":libbinder_observer_sources",
+    ],
     shared_libs: [
         "libbinder",
         "liblog",
@@ -917,6 +1006,13 @@ cc_test {
         "libutils",
         "libutilscallstack",
         "libbase",
+    ],
+    static_libs: [
+        "android.os.binder.flags-aconfig-cc",
+    ],
+    header_libs: [
+        "jni_headers",
+        "libbinder_internal_headers",
     ],
     test_suites: ["device-tests"],
     require_root: true,

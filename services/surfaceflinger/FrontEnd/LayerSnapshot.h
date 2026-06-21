@@ -17,6 +17,7 @@
 #pragma once
 
 #include <PowerAdvisor/Workload.h>
+#include <SkRuntimeEffect.h>
 #include <android/gui/ISystemContentPriorityConstants.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <gui/CornerRadii.h>
@@ -25,8 +26,15 @@
 #include "LayerHierarchy.h"
 #include "RequestedLayerState.h"
 #include "Scheduler/LayerInfo.h"
-#include "android-base/stringprintf.h"
 #include "compositionengine/LayerFE.h"
+
+#include <optional>
+
+struct RenderCommandBuffer;
+
+namespace android::surfaceflinger {
+class ShaderRegistry;
+}
 
 namespace android::surfaceflinger::frontend {
 
@@ -35,26 +43,25 @@ struct RoundedCornerState {
 
     // Rounded rectangle in local layer coordinate space.
     FloatRect cropRect = FloatRect();
-    // Radius of the rounded rectangle for composition
-    gui::CornerRadii radii;
-    // Requested radius of the rounded rectangle
+    // Radius of the rounded rectangle drawn by SurfaceFlinger during composition.
+    gui::CornerRadii sfDrawnRadii;
+    // Radius of the rounded rectangle as requested by the client.
     gui::CornerRadii requestedRadii;
-    // Radius drawn by client for the rounded rectangle
+    // Radius of the rounded rectangle drawn by the client into the buffer.
     gui::CornerRadii clientDrawnRadii;
-    // Radius reported to client based on layerCropRect and bounds
-    gui::CornerRadii croppedRequestedRadii;
+    // Radius of the rounded rectangle reported to client, which may be clipped.
+    gui::CornerRadii reportedRadii;
+    // The radius used as the source for children to inherit from.
+    gui::CornerRadii effectiveRadii;
 
-    bool hasClientDrawnRadius() const { return radii.isEmpty() && !clientDrawnRadii.isEmpty(); }
+    bool disableClientDrawnRadii = false;
+
+    bool hasClientDrawnRadius() const { return !clientDrawnRadii.isEmpty(); }
     bool hasRequestedRadius() const { return !requestedRadii.isEmpty(); }
-    bool hasRoundedCorners() const {
-        return !radii.isEmpty() ||
-                (!clientDrawnRadii.isEmpty() && clientDrawnRadii == requestedRadii);
-    }
+    bool hasSfDrawnRadius() const { return !sfDrawnRadii.isEmpty(); }
+    bool hasEffectiveRadii() const { return !effectiveRadii.isEmpty(); }
 
-    bool operator==(RoundedCornerState const& rhs) const {
-        return cropRect == rhs.cropRect && radii == rhs.radii &&
-                requestedRadii == rhs.requestedRadii && clientDrawnRadii == rhs.clientDrawnRadii;
-    }
+    bool operator==(const RoundedCornerState&) const = default;
 };
 
 // LayerSnapshot stores Layer state used by CompositionEngine and RenderEngine. Composition
@@ -70,7 +77,7 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool isHiddenByPolicyFromParent = false;
     bool isHiddenByPolicyFromRelativeParent = false;
     ftl::Flags<RequestedLayerState::Changes> changes;
-    uint64_t clientChanges = 0;
+    layer_state_t::LayerChangedSet clientChanges;
     // Some consumers of this snapshot (input, layer traces) rely on each snapshot to be unique.
     // For mirrored layers, snapshots will have the same sequence so this unique id provides
     // an alternative identifier when needed.
@@ -117,11 +124,14 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     std::optional<ui::Transform::RotationFlags> transformHint;
     bool handleSkipScreenshotFlag = false;
     int32_t frameRateSelectionPriority = -1;
+    float maxDesiredHdrSdrRatio = 0.f;
     LayerHierarchy::TraversalPath mirrorRootPath;
+    uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
     uint32_t touchCropId;
     gui::Uid uid = gui::Uid::INVALID;
     gui::Pid pid = gui::Pid::INVALID;
     int32_t systemContentPriority = gui::ISystemContentPriorityConstants::Unset;
+    std::optional<FloatRect> mirrorCrop;
     enum class Reachability : uint32_t {
         // Can traverse the hierarchy from a root node and reach this snapshot
         Reachable,
@@ -152,6 +162,16 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     // True when the surfaceDamage is recognized as a small area update.
     bool isSmallDirty = false;
 
+    std::shared_ptr<RenderCommandBuffer> renderCommandBuffer;
+    sp<IBinder> renderResourceToken;
+    // Populated when renderResourceToken changes.
+    std::shared_ptr<IPCServerResourceCache> renderResourceCache;
+
+    sp<IBinder> postProcessShader;
+    std::shared_ptr<std::vector<uint8_t>> postProcessUniforms;
+    layer_state_t::SampleTarget postProcessTarget;
+    sk_sp<SkRuntimeEffect> postProcessEffect;
+
     static bool isOpaqueFormat(PixelFormat format);
     static bool isTransformValid(const ui::Transform& t);
 
@@ -175,7 +195,8 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     Hwc2::IComposerClient::BlendMode getBlendMode(const RequestedLayerState& requested) const;
     friend std::ostream& operator<<(std::ostream& os, const LayerSnapshot& obj);
     void merge(const RequestedLayerState& requested, bool forceUpdate, bool displayChanges,
-               bool forceFullDamage, uint32_t displayRotationFlags);
+               bool forceFullDamage, uint32_t displayRotationFlags,
+               ShaderRegistry* shaderRegistry = nullptr);
     // Returns a char summarizing the composition request
     // This function tries to maintain parity with planner::Plan chars.
     char classifyCompositionForDebug(

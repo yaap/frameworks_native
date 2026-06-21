@@ -69,6 +69,7 @@ LIBNATIVEDISPLAY_PLATFORM {
       android::ASurfaceTexture_routeFromSurfaceTexture*;
       android::ASurfaceTexture_routeRelease*;
       android::SurfaceTexture*;
+      android::LegacySurfaceTexture*;
     };
     ASurfaceTexture_acquireANativeWindow;
     ASurfaceTexture_attachToGLContext;

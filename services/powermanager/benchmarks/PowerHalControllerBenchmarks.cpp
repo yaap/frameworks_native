@@ -19,10 +19,10 @@
 #include <aidl/android/hardware/power/Boost.h>
 #include <aidl/android/hardware/power/Mode.h>
 #include <benchmark/benchmark.h>
-#include <chrono>
 #include <powermanager/PowerHalController.h>
 #include <powermanager/PowerHintSessionWrapper.h>
 #include <testUtil.h>
+#include <chrono>
 
 using aidl::android::hardware::power::Boost;
 using aidl::android::hardware::power::Mode;
@@ -36,9 +36,9 @@ using namespace std::chrono_literals;
 
 // Values from Boost.aidl and Mode.aidl.
 static constexpr int64_t FIRST_BOOST = static_cast<int64_t>(*ndk::enum_range<Boost>().begin());
-static constexpr int64_t LAST_BOOST = static_cast<int64_t>(*(ndk::enum_range<Boost>().end()-1));
+static constexpr int64_t LAST_BOOST = static_cast<int64_t>(*(ndk::enum_range<Boost>().end() - 1));
 static constexpr int64_t FIRST_MODE = static_cast<int64_t>(*ndk::enum_range<Mode>().begin());
-static constexpr int64_t LAST_MODE = static_cast<int64_t>(*(ndk::enum_range<Mode>().end()-1));
+static constexpr int64_t LAST_MODE = static_cast<int64_t>(*(ndk::enum_range<Mode>().end() - 1));
 
 class DurationWrapper : public WorkDuration {
 public:
@@ -55,56 +55,68 @@ static const std::vector<WorkDuration> DURATIONS = {
         DurationWrapper(1000000000L, 4L),
 };
 
-// Delay between oneway method calls to avoid overflowing the binder buffers.
+// Delay between one-way binder calls to avoid overflowing the binder buffers.
 static constexpr std::chrono::microseconds ONEWAY_API_DELAY = 100us;
+
+template <typename T>
+static bool handleBinderResult(benchmark::State& state, HalResult<T> result) {
+    if (result.isFailed()) {
+        state.SkipWithError(result.errorMessage());
+        return false;
+    }
+    // Make sure the delay between binder calls is done outside of the benchmark.
+    state.PauseTiming();
+    testDelaySpin(
+            std::chrono::duration_cast<std::chrono::duration<float>>(ONEWAY_API_DELAY).count());
+    state.ResumeTiming();
+    return true;
+}
+
+template <typename T, class... Args0, class... Args1>
+static bool checkHalSupport(benchmark::State& state, PowerHalController& controller,
+                            HalResult<T> (PowerHalController::*fn)(Args0...), Args1&&... args1) {
+    HalResult<T> result = (controller.*fn)(std::forward<Args1>(args1)...);
+    if (result.isFailed()) {
+        state.SkipWithError(result.errorMessage());
+        return false;
+    } else if (result.isUnsupported()) {
+        ALOGV("Power HAL does not support this operation, skipping test...");
+        state.SkipWithMessage("operation unsupported");
+        return false;
+    }
+    return true;
+}
 
 template <typename T, class... Args0, class... Args1>
 static void runBenchmark(benchmark::State& state, HalResult<T> (PowerHalController::*fn)(Args0...),
                          Args1&&... args1) {
-    PowerHalController initController;
-    HalResult<T> result = (initController.*fn)(std::forward<Args1>(args1)...);
-    if (result.isFailed()) {
-        state.SkipWithError(result.errorMessage());
-        return;
-    } else if (result.isUnsupported()) {
-        ALOGV("Power HAL does not support this operation, skipping test...");
-        state.SkipWithMessage("operation unsupported");
+    // Use a temporary controller to check if the HAL supports the API before running the benchmark.
+    PowerHalController tempController;
+    if (!checkHalSupport(state, tempController, fn, std::forward<Args1>(args1)...)) {
         return;
     }
-
     for (auto _ : state) {
-        PowerHalController controller; // new controller to avoid caching
-        HalResult<T> ret = (controller.*fn)(std::forward<Args1>(args1)...);
-        if (ret.isFailed()) {
-            state.SkipWithError(ret.errorMessage());
+        // Get a new controller each iteration to avoid caching.
+        // The controller creation time must be included in the benchmark.
+        PowerHalController controller;
+        if (!handleBinderResult(state, (controller.*fn)(std::forward<Args1>(args1)...))) {
             break;
         }
-        state.PauseTiming();
-        testDelaySpin(
-                std::chrono::duration_cast<std::chrono::duration<float>>(ONEWAY_API_DELAY).count());
-        state.ResumeTiming();
     }
 }
 
 template <typename T, class... Args0, class... Args1>
 static void runCachedBenchmark(benchmark::State& state,
                                HalResult<T> (PowerHalController::*fn)(Args0...), Args1&&... args1) {
+    // Get a new controller and trigger the API once to warm up the cache.
     PowerHalController controller;
-    // First call out of test, to cache HAL service and isSupported result.
-    HalResult<T> result = (controller.*fn)(std::forward<Args1>(args1)...);
-    if (result.isFailed()) {
-        state.SkipWithError(result.errorMessage());
-        return;
-    } else if (result.isUnsupported()) {
-        ALOGV("Power HAL does not support this operation, skipping test...");
-        state.SkipWithMessage("operation unsupported");
+    if (!checkHalSupport(state, controller, fn, std::forward<Args1>(args1)...)) {
         return;
     }
-
     for (auto _ : state) {
-        HalResult<T> ret = (controller.*fn)(std::forward<Args1>(args1)...);
-        if (ret.isFailed()) {
-            state.SkipWithError(ret.errorMessage());
+        // Reuse warmed up controller to use any cached values.
+        // Only the API binder call must be included in the benchmark.
+        if (!handleBinderResult(state, (controller.*fn)(std::forward<Args1>(args1)...))) {
             break;
         }
     }
@@ -121,7 +133,7 @@ static void runSessionBenchmark(benchmark::State& state,
     int64_t durationNanos = 16666666L;
 
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> result =
-        controller.createHintSession(1, 0, threadIds, durationNanos);
+            controller.createHintSession(1, 0, threadIds, durationNanos);
 
     if (result.isFailed()) {
         state.SkipWithError(result.errorMessage());
@@ -141,15 +153,9 @@ static void runSessionBenchmark(benchmark::State& state,
     }
 
     for (auto _ : state) {
-        ret = (*session.*fn)(std::forward<Args1>(args1)...);
-        if (!ret.isOk()) {
-            state.SkipWithError(ret.errorMessage());
+        if (!handleBinderResult(state, (*session.*fn)(std::forward<Args1>(args1)...))) {
             break;
         }
-        state.PauseTiming();
-        testDelaySpin(
-                std::chrono::duration_cast<std::chrono::duration<float>>(ONEWAY_API_DELAY).count());
-        state.ResumeTiming();
     }
     session->close();
 }
@@ -199,7 +205,7 @@ static void BM_PowerHalControllerBenchmarks_createHintSession(benchmark::State& 
     PowerHalController controller;
 
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> result =
-        controller.createHintSession(tgid, uid, threadIds, durationNanos);
+            controller.createHintSession(tgid, uid, threadIds, durationNanos);
     if (result.isFailed()) {
         state.SkipWithError(result.errorMessage());
         return;

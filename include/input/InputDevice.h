@@ -84,6 +84,14 @@ struct InputDeviceViewBehavior {
      * Empty optional if the device has not specified the default smooth scroll behavior.
      */
     std::optional<bool> shouldSmoothScroll;
+
+    /**
+     * The primary directional motion axis, if defined by the device. This is one of the AXIS_*
+     * constants defined in MotionEvent (AMOTION_EVENT_AXIS_X, AMOTION_EVENT_AXIS_Y, etc.).
+     * Empty optional if the device has not specified a default primary directional
+     * motion axis.
+     */
+    std::optional<int32_t> primaryDirectionalMotionAxis;
 };
 
 /* Types of input device sensors. Keep sync with core/java/android/hardware/Sensor.java */

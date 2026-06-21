@@ -28,6 +28,7 @@
 #include "test_utils.h"
 
 using aidl::android::hardware::vibrator::IVibrationSession;
+using aidl::android::hardware::vibrator::IVibratorManager;
 using aidl::android::hardware::vibrator::VibrationSessionConfig;
 using android::vibrator::HalController;
 
@@ -45,6 +46,7 @@ class MockManagerHalWrapper : public vibrator::ManagerHalWrapper {
 public:
     MOCK_METHOD(void, tryReconnect, (), (override));
     MOCK_METHOD(vibrator::HalResult<void>, ping, (), (override));
+    MOCK_METHOD(std::shared_ptr<IVibratorManager>, getHal, (), (override));
     MOCK_METHOD(vibrator::HalResult<vibrator::ManagerCapabilities>, getCapabilities, (),
                 (override));
     MOCK_METHOD(vibrator::HalResult<std::vector<int32_t>>, getVibratorIds, (), (override));
@@ -135,6 +137,12 @@ TEST_F(VibratorManagerHalControllerTest, TestInit) {
     // Noop when wrapper was already initialized.
     mController->init();
     ASSERT_EQ(1, mConnectCounter);
+}
+
+TEST_F(VibratorManagerHalControllerTest, TestGetHal) {
+    EXPECT_CALL(*mMockHal.get(), getHal()).Times(Exactly(1)).WillRepeatedly(Return(nullptr));
+
+    ASSERT_EQ(nullptr, mController->getHal());
 }
 
 TEST_F(VibratorManagerHalControllerTest, TestApiCallsAreForwardedToHal) {

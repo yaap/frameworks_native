@@ -15,7 +15,9 @@
  */
 
 #include <DisplayHardware/Hal.h>
+#include <aidl/android/hardware/graphics/composer3/LutProperties.h>
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <compositionengine/DisplayColorProfile.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/Output.h>
@@ -24,13 +26,25 @@
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/OutputLayer.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
+#include <cutils/ashmem.h>
+#include <include/private/SkHdrMetadata.h>
+#include <sys/mman.h>
 #include <ui/FloatRect.h>
 #include <ui/HdrRenderTypeUtils.h>
+#include <cmath>
 #include <cstdint>
 #include <limits>
+#include "SkCanvas.h"
+#include "SkColorFilter.h"
+#include "SkImage.h"
+#include "SkPaint.h"
+#include "SkSamplingOptions.h"
 #include "system/graphics-base-v1.0.h"
 
 #include <com_android_graphics_libgui_flags.h>
+#include <renderengine/ColorSpaces.h>
+
+#include "include/core/SkBitmap.h"
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
@@ -58,6 +72,183 @@ FloatRect reduce(const FloatRect& win, const Region& exclude) {
     }
     // Convert through Rect (by rounding) for lack of FloatRegion
     return Region(Rect{win}).subtract(exclude).getBounds().toFloatRect();
+}
+
+std::shared_ptr<gui::DisplayLuts> createLutsFromAgtm(
+        const OutputCompositionState& outputState, const sp<GraphicBuffer>& buffer,
+        const std::vector<std::optional<LutProperties>>& properties, ui::Dataspace dataspace) {
+    std::optional<std::vector<uint8_t>> smpte2094_50;
+    status_t err = buffer->getSmpte2094_50(&smpte2094_50);
+    if (err != OK || !smpte2094_50) {
+        return nullptr;
+    }
+    auto smpte2094_50Data = SkData::MakeWithoutCopy(smpte2094_50->data(), smpte2094_50->size());
+
+    skhdr::AdaptiveGlobalToneMap agtm;
+
+    if (!agtm.parse(smpte2094_50Data.get())) {
+        return nullptr;
+    }
+    const LutProperties* targetProp = nullptr;
+    for (const auto& prop : properties) {
+        if (!prop) continue;
+        if (prop->dimension == LutProperties::Dimension::THREE_D) {
+            targetProp = &(*prop);
+            break;
+        }
+        if (!targetProp) {
+            targetProp = &(*prop);
+        }
+    }
+
+    // We need at least one sampling key but it doesn't really matter unless we try to
+    // score LUT quality.
+    if (!targetProp || targetProp->samplingKeys.empty()) {
+        return nullptr;
+    }
+
+    SFTRACE_NAME("createLutsFromAgtm");
+
+    int32_t size = targetProp->size;
+    auto dimensions = static_cast<int32_t>(targetProp->dimension);
+
+    int32_t numPixels = (targetProp->dimension == LutProperties::Dimension::THREE_D)
+            ? (size * size * size)
+            : size;
+    int32_t totalFloats = numPixels * dimensions;
+
+    size_t totalBytes = static_cast<size_t>(totalFloats) * sizeof(float);
+
+    auto fd = base::unique_fd(ashmem_create_region("AGTM_LUT", totalBytes));
+
+    if (!fd.ok()) {
+        return nullptr;
+    }
+    void* lutData = mmap(nullptr, totalBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd.get(), 0);
+
+    if (lutData == MAP_FAILED) {
+        return nullptr;
+    }
+    float targetHdrSdrRatio = 1.f;
+    if (outputState.sdrWhitePointNits > 0) {
+        targetHdrSdrRatio = outputState.displayBrightnessNits / outputState.sdrWhitePointNits;
+    }
+    float scaleFactor = 1.0f;
+    int32_t transfer = dataspace & HAL_DATASPACE_TRANSFER_MASK;
+    if (transfer == HAL_DATASPACE_TRANSFER_ST2084) {
+        scaleFactor = 10000.0f / 203.0f;
+    } else if (transfer == HAL_DATASPACE_TRANSFER_HLG) {
+        scaleFactor = 1000.0f / 203.0f;
+    }
+
+    auto metadata = skhdr::Metadata::MakeEmpty();
+    metadata.setAdaptiveGlobalToneMap(agtm);
+
+    auto targetCS =
+            renderengine::toSkColorSpace(dataspace, renderengine::ColorSpaceOptions::USE_HLG_OOTF);
+    auto linearCS = targetCS->makeLinearGamma();
+
+    auto colorFilter =
+            metadata.makeToneMapColorFilter(std::log2(targetHdrSdrRatio), targetCS.get());
+
+    // Start with input values for the LUT: linearly spaced 0 to 1 in
+    // linear source gamut
+    SkBitmap linearBitmap;
+    float* linearPixels;
+    {
+        SFTRACE_NAME("fillLinear");
+        linearBitmap.allocPixels(SkImageInfo::Make(numPixels, 1, kRGBA_F32_SkColorType,
+                                                   kPremul_SkAlphaType, linearCS));
+        linearPixels = static_cast<float*>(linearBitmap.getPixels());
+        if (targetProp->dimension == LutProperties::Dimension::THREE_D) {
+            int32_t pixelIndex = 0;
+            for (int32_t x = 0; x < size; x++) {
+                float r = (static_cast<float>(x) / (size - 1)) * scaleFactor;
+                for (int32_t y = 0; y < size; y++) {
+                    float g = (static_cast<float>(y) / (size - 1)) * scaleFactor;
+                    for (int32_t z = 0; z < size; z++) {
+                        float b = (static_cast<float>(x) / (size - 1)) * scaleFactor;
+                        linearPixels[pixelIndex * 4] = r;
+                        linearPixels[pixelIndex * 4 + 1] = g;
+                        linearPixels[pixelIndex * 4 + 2] = b;
+                        linearPixels[pixelIndex * 4 + 3] = 1.0f;
+                        pixelIndex++;
+                    }
+                }
+            }
+        } else {
+            for (int32_t x = 0; x < size; x++) {
+                float gain = (static_cast<float>(x) / (size - 1)) * scaleFactor;
+                linearPixels[x * 4] = gain;
+                linearPixels[x * 4 + 1] = gain;
+                linearPixels[x * 4 + 2] = gain;
+                linearPixels[x * 4 + 3] = 1.0f;
+            }
+        }
+    }
+
+    SkBitmap finalBitmap;
+    {
+        SFTRACE_NAME("fillFinal");
+        // Compute the final color value by running the agtm shader against the
+        // signal values.
+        finalBitmap.allocPixels(SkImageInfo::Make(numPixels, 1, kRGBA_F32_SkColorType,
+                                                  kPremul_SkAlphaType, linearCS));
+        SkCanvas finalCanvas(finalBitmap);
+        SkPaint paint;
+        paint.setColorFilter(colorFilter);
+
+        if (transfer == HAL_DATASPACE_TRANSFER_HLG) {
+            // Bake HLG OOTF with gamma=1.2 by reinterpreting scaled HLG as standard HLG.
+            auto csV1 =
+                    renderengine::toSkColorSpace(dataspace, renderengine::ColorSpaceOptions::None);
+            SkBitmap intermediateBitmap;
+            intermediateBitmap.allocPixels(SkImageInfo::Make(numPixels, 1, kRGBA_F32_SkColorType,
+                                                             kPremul_SkAlphaType, csV1));
+            SkCanvas intermediateCanvas(intermediateBitmap);
+            intermediateCanvas.drawImage(linearBitmap.asImage(), 0, 0, SkSamplingOptions());
+
+            // Reinterpret the result to V2 HLG (standard kHLG)
+            auto csV2 = renderengine::toSkColorSpace(dataspace,
+                                                     renderengine::ColorSpaceOptions::USE_HLG_OOTF);
+            intermediateBitmap.setColorSpace(csV2);
+
+            finalCanvas.drawImage(intermediateBitmap.asImage(), 0, 0, SkSamplingOptions(), &paint);
+        } else {
+            finalCanvas.drawImage(linearBitmap.asImage(), 0, 0, SkSamplingOptions(), &paint);
+        }
+    }
+
+    {
+        SFTRACE_NAME("fillLut");
+        float* finalPixels = static_cast<float*>(finalBitmap.getPixels());
+        auto floatData = static_cast<float*>(lutData);
+        // Now we need to swizzle into the right format for the LUT
+        if (targetProp->dimension == LutProperties::Dimension::THREE_D) {
+            int planeSize = numPixels;
+            for (int idx = 0; idx < planeSize; idx++) {
+                floatData[idx] = finalPixels[idx * 4];
+                floatData[planeSize + idx] = finalPixels[idx * 4 + 1];
+                floatData[2 * planeSize + idx] = finalPixels[idx * 4 + 2];
+            }
+        } else {
+            for (int x = 0; x < size; x++) {
+                float in = linearPixels[x * 4] / scaleFactor;
+                float out = finalPixels[x * 4] / targetHdrSdrRatio;
+                float gain = in > 0.0f ? (out / in) : 1.0f;
+                floatData[x] = gain;
+            }
+        }
+    }
+    munmap(lutData, totalBytes);
+
+    std::vector<int32_t> offsets = {0};
+    std::vector<int32_t> dimensionVector = {dimensions};
+    std::vector<int32_t> sizes = {static_cast<int32_t>(size)};
+    std::vector<int32_t> samplingKeys = {static_cast<int32_t>(targetProp->samplingKeys[0])};
+    return std::make_shared<gui::DisplayLuts>(std::move(fd), std::move(offsets),
+                                              std::move(dimensionVector), std::move(sizes),
+                                              std::move(samplingKeys));
 }
 
 } // namespace
@@ -289,6 +480,20 @@ uint32_t OutputLayer::calculateOutputRelativeBufferTransform(
 void OutputLayer::updateLuts(
         const LayerFECompositionState& layerFEState,
         const std::optional<std::vector<std::optional<LutProperties>>>& properties) {
+    editState().appLuts = layerFEState.luts;
+    editState().generatedLuts = nullptr;
+    editState().smpte2094_50 = std::nullopt;
+
+    if (layerFEState.buffer && properties && !layerFEState.luts &&
+        !FlagManager::getInstance().force_agtm_without_luts()) {
+        layerFEState.buffer->getSmpte2094_50(&editState().smpte2094_50);
+        editState().generatedLuts = createLutsFromAgtm(getOutput().getState(), layerFEState.buffer,
+                                                       *properties, getState().dataspace);
+        if (editState().generatedLuts != nullptr) {
+            return;
+        }
+    }
+
     auto& luts = layerFEState.luts;
     if (!luts) {
         return;
@@ -409,10 +614,8 @@ void OutputLayer::updateCompositionState(
                 getOutput().getState().sdrWhitePointNits;
         float idealizedMaxHeadroom = deviceHeadroom;
 
-        if (FlagManager::getInstance().begone_bright_hlg()) {
-            idealizedMaxHeadroom =
-                    std::min(idealizedMaxHeadroom, getIdealizedMaxHeadroom(state.dataspace));
-        }
+        idealizedMaxHeadroom =
+                std::min(idealizedMaxHeadroom, getIdealizedMaxHeadroom(state.dataspace));
 
         state.dimmingRatio = std::min(idealizedMaxHeadroom / deviceHeadroom, 1.0f);
         state.whitePointNits = getOutput().getState().displayBrightnessNits * state.dimmingRatio;
@@ -426,7 +629,7 @@ void OutputLayer::updateCompositionState(
         // already be adapted to remap 1.0 to the SDR white point in the panel's luminance
         // space.
         if (hdrRenderType == HdrRenderType::DISPLAY_HDR) {
-            if (!FlagManager::getInstance().fp16_client_target() || !isLayerFp16) {
+            if (!isLayerFp16) {
                 layerBrightnessNits *= layerFEState->currentHdrSdrRatio;
             }
         }
@@ -624,10 +827,16 @@ void OutputLayer::writeLutToHWC(HWC2::Layer* hwcLayer,
     Luts luts;
     // if outputIndependentState.luts is nullptr, it means we want to clear the LUTs
     // and we pass an empty Luts object to the HWC.
-    if (outputIndependentState.luts) {
-        auto& lutFileDescriptor = outputIndependentState.luts->getLutFileDescriptor();
-        auto lutOffsets = outputIndependentState.luts->offsets;
-        auto& lutProperties = outputIndependentState.luts->lutProperties;
+
+    std::shared_ptr<gui::DisplayLuts> sourceLuts = outputIndependentState.luts
+            ? outputIndependentState.luts
+            : getState().generatedLuts ? getState().generatedLuts
+                                       : nullptr;
+
+    if (sourceLuts) {
+        auto& lutFileDescriptor = sourceLuts->getLutFileDescriptor();
+        auto lutOffsets = sourceLuts->offsets;
+        auto& lutProperties = sourceLuts->lutProperties;
 
         std::vector<LutProperties> aidlProperties;
         aidlProperties.reserve(lutProperties.size());
@@ -1107,6 +1316,9 @@ void OutputLayer::dump(std::string& out) const {
 
     StringAppendF(&out, "  - Output Layer %p(%s)\n", this, getLayerFE().getDebugName());
     dumpState(out);
+    if (const auto* layerFEState = getLayerFE().getCompositionState()) {
+        layerFEState->dump(out);
+    }
 }
 
 } // namespace impl

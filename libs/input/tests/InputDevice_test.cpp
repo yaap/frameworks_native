@@ -14,16 +14,26 @@
  * limitations under the License.
  */
 
+#include <unordered_map>
+#include <vector>
+
+#include <android-base/file.h>
+#include <android-base/result-gmock.h>
 #include <binder/Binder.h>
 #include <binder/Parcel.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/InputDevice.h>
 #include <input/KeyLayoutMap.h>
 #include <input/Keyboard.h>
 #include <linux/uinput.h>
-#include "android-base/file.h"
 
 namespace android {
+
+using android::base::testing::Ok;
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+using ::testing::Not;
 
 // --- InputDeviceIdentifierTest ---
 
@@ -45,7 +55,7 @@ protected:
                                                                   KEY_LAYOUT);
         ASSERT_FALSE(path.empty());
         base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(path);
-        ASSERT_TRUE(ret.ok()) << "Cannot load KeyLayout at " << path;
+        ASSERT_THAT(ret, Ok()) << "Cannot load KeyLayout at " << path;
         mKeyMap.keyLayoutMap = std::move(*ret);
         mKeyMap.keyLayoutFile = path;
     }
@@ -60,7 +70,7 @@ protected:
         ASSERT_FALSE(path.empty()) << "KeyCharacterMap for " << name << " not found";
         base::Result<std::shared_ptr<KeyCharacterMap>> ret =
                 KeyCharacterMap::load(path, KeyCharacterMap::Format::BASE);
-        ASSERT_TRUE(ret.ok()) << "Cannot load KeyCharacterMap at " << path;
+        ASSERT_THAT(ret, Ok()) << "Cannot load KeyCharacterMap at " << path;
         mKeyMap.keyCharacterMap = *ret;
         mKeyMap.keyCharacterMapFile = path;
     }
@@ -87,7 +97,7 @@ TEST_F(InputDeviceKeyMapTest, keyCharacterMapWithOverlayParcelingTest) {
     std::string overlayPath = base::GetExecutableDirectory() + "/data/german.kcm";
     base::Result<std::shared_ptr<KeyCharacterMap>> overlay =
             KeyCharacterMap::load(overlayPath, KeyCharacterMap::Format::OVERLAY);
-    ASSERT_TRUE(overlay.ok()) << "Cannot load KeyCharacterMap at " << overlayPath;
+    ASSERT_THAT(overlay, Ok()) << "Cannot load KeyCharacterMap at " << overlayPath;
     mKeyMap.keyCharacterMap->combine(*overlay->get());
     mKeyMap.keyCharacterMap->writeToParcel(&parcel);
     parcel.setDataPosition(0);
@@ -101,13 +111,13 @@ TEST_F(InputDeviceKeyMapTest, keyCharacterMapApplyMultipleOverlaysTest) {
     std::string germanOverlayPath = base::GetExecutableDirectory() + "/data/german.kcm";
     base::Result<std::shared_ptr<KeyCharacterMap>> frenchOverlay =
             KeyCharacterMap::load(frenchOverlayPath, KeyCharacterMap::Format::OVERLAY);
-    ASSERT_TRUE(frenchOverlay.ok()) << "Cannot load KeyCharacterMap at " << frenchOverlayPath;
+    ASSERT_THAT(frenchOverlay, Ok()) << "Cannot load KeyCharacterMap at " << frenchOverlayPath;
     base::Result<std::shared_ptr<KeyCharacterMap>> englishOverlay =
             KeyCharacterMap::load(englishOverlayPath, KeyCharacterMap::Format::OVERLAY);
-    ASSERT_TRUE(englishOverlay.ok()) << "Cannot load KeyCharacterMap at " << englishOverlayPath;
+    ASSERT_THAT(englishOverlay, Ok()) << "Cannot load KeyCharacterMap at " << englishOverlayPath;
     base::Result<std::shared_ptr<KeyCharacterMap>> germanOverlay =
             KeyCharacterMap::load(germanOverlayPath, KeyCharacterMap::Format::OVERLAY);
-    ASSERT_TRUE(germanOverlay.ok()) << "Cannot load KeyCharacterMap at " << germanOverlayPath;
+    ASSERT_THAT(germanOverlay, Ok()) << "Cannot load KeyCharacterMap at " << germanOverlayPath;
 
     // Apply the French overlay
     mKeyMap.keyCharacterMap->combine(*frenchOverlay->get());
@@ -135,7 +145,7 @@ TEST_F(InputDeviceKeyMapTest, keyCharacterMapApplyOverlayTest) {
     std::string frenchOverlayPath = base::GetExecutableDirectory() + "/data/french.kcm";
     base::Result<std::shared_ptr<KeyCharacterMap>> frenchOverlay =
             KeyCharacterMap::load(frenchOverlayPath, KeyCharacterMap::Format::OVERLAY);
-    ASSERT_TRUE(frenchOverlay.ok()) << "Cannot load KeyCharacterMap at " << frenchOverlayPath;
+    ASSERT_THAT(frenchOverlay, Ok()) << "Cannot load KeyCharacterMap at " << frenchOverlayPath;
 
     // Apply the French overlay
     mKeyMap.keyCharacterMap->combine(*frenchOverlay->get());
@@ -150,24 +160,71 @@ TEST_F(InputDeviceKeyMapTest, keyCharacterMapApplyOverlayTest) {
     ASSERT_NE(mapKeyResult, OK) << "Mapping exists for KEY_E for " << frenchOverlayPath;
 }
 
+TEST_F(InputDeviceKeyMapTest, keyCharacterMapApplyKeyRemappingTest) {
+    std::unordered_map<int32_t, int32_t> keyRemapping;
+    keyRemapping[AKEYCODE_A] = AKEYCODE_B;
+    keyRemapping[AKEYCODE_C] = AKEYCODE_D;
+    keyRemapping[AKEYCODE_E] = AKEYCODE_E; // Remapping to itself.
+
+    mKeyMap.keyCharacterMap->setKeyRemapping(keyRemapping);
+
+    ASSERT_EQ(AKEYCODE_B, mKeyMap.keyCharacterMap->applyKeyRemapping(AKEYCODE_A));
+    ASSERT_EQ(AKEYCODE_D, mKeyMap.keyCharacterMap->applyKeyRemapping(AKEYCODE_C));
+    ASSERT_EQ(AKEYCODE_E, mKeyMap.keyCharacterMap->applyKeyRemapping(AKEYCODE_E));
+    // F is not in the remapping, so it should map to itself.
+    ASSERT_EQ(AKEYCODE_F, mKeyMap.keyCharacterMap->applyKeyRemapping(AKEYCODE_F));
+}
+
+TEST_F(InputDeviceKeyMapTest, keyCharacterMapFindKeyCodesMappedToKeyCodeTest) {
+    std::unordered_map<int32_t, int32_t> keyRemapping;
+    keyRemapping[AKEYCODE_A] = AKEYCODE_B;
+    keyRemapping[AKEYCODE_C] = AKEYCODE_D;
+    keyRemapping[AKEYCODE_E] = AKEYCODE_E; // Remapping to itself.
+
+    mKeyMap.keyCharacterMap->setKeyRemapping(keyRemapping);
+
+    std::vector<int32_t> fromKeyCodesToB =
+            mKeyMap.keyCharacterMap->findKeyCodesMappedToKeyCode(AKEYCODE_B);
+    ASSERT_THAT(fromKeyCodesToB, ElementsAre(AKEYCODE_A));
+
+    std::vector<int32_t> fromKeyCodesToD =
+            mKeyMap.keyCharacterMap->findKeyCodesMappedToKeyCode(AKEYCODE_D);
+    ASSERT_THAT(fromKeyCodesToD, ElementsAre(AKEYCODE_C));
+
+    std::vector<int32_t> fromKeyCodesToE =
+            mKeyMap.keyCharacterMap->findKeyCodesMappedToKeyCode(AKEYCODE_E);
+    ASSERT_THAT(fromKeyCodesToE, ElementsAre(AKEYCODE_E));
+
+    std::vector<int32_t> fromKeyCodesToF =
+            mKeyMap.keyCharacterMap->findKeyCodesMappedToKeyCode(AKEYCODE_F);
+    ASSERT_THAT(fromKeyCodesToF, IsEmpty());
+}
+
+TEST_F(InputDeviceKeyMapTest, keyCharacterMapEmptyRemappingTest) {
+    mKeyMap.keyCharacterMap->setKeyRemapping({});
+
+    ASSERT_EQ(AKEYCODE_A, mKeyMap.keyCharacterMap->applyKeyRemapping(AKEYCODE_A));
+    ASSERT_THAT(mKeyMap.keyCharacterMap->findKeyCodesMappedToKeyCode(AKEYCODE_B), IsEmpty());
+}
+
 TEST_F(InputDeviceKeyMapTest, keyCharacterMapBadAxisLabel) {
     std::string klPath = base::GetExecutableDirectory() + "/data/bad_axis_label.kl";
 
     base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(klPath);
-    ASSERT_FALSE(ret.ok()) << "Should not be able to load KeyLayout at " << klPath;
+    ASSERT_THAT(ret, Not(Ok())) << "Should not be able to load KeyLayout at " << klPath;
 }
 
 TEST_F(InputDeviceKeyMapTest, keyCharacterMapBadLedLabel) {
     std::string klPath = base::GetExecutableDirectory() + "/data/bad_led_label.kl";
 
     base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(klPath);
-    ASSERT_FALSE(ret.ok()) << "Should not be able to load KeyLayout at " << klPath;
+    ASSERT_THAT(ret, Not(Ok())) << "Should not be able to load KeyLayout at " << klPath;
 }
 
 TEST(InputDeviceKeyLayoutTest, HidUsageCodesFallbackMapping) {
     std::string klPath = base::GetExecutableDirectory() + "/data/hid_fallback_mapping.kl";
     base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(klPath);
-    ASSERT_TRUE(ret.ok()) << "Unable to load KeyLayout at " << klPath;
+    ASSERT_THAT(ret, Ok()) << "Unable to load KeyLayout at " << klPath;
     const std::shared_ptr<KeyLayoutMap>& keyLayoutMap = *ret;
 
     static constexpr std::array<int32_t, 5> hidUsageCodesWithoutFallback = {0x0c0067, 0x0c0070,
@@ -205,7 +262,7 @@ TEST(InputDeviceKeyLayoutTest, DoesNotLoadWhenRequiredKernelConfigIsMissing) {
 #endif
     std::string klPath = base::GetExecutableDirectory() + "/data/kl_with_required_fake_config.kl";
     base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(klPath);
-    ASSERT_FALSE(ret.ok()) << "Should not be able to load KeyLayout at " << klPath;
+    ASSERT_THAT(ret, Not(Ok())) << "Should not be able to load KeyLayout at " << klPath;
     // We assert error message here because it's used by 'validatekeymaps' tool
     ASSERT_EQ("Missing kernel config", ret.error().message());
 }
@@ -216,7 +273,7 @@ TEST(InputDeviceKeyLayoutTest, LoadsWhenRequiredKernelConfigIsPresent) {
 #endif
     std::string klPath = base::GetExecutableDirectory() + "/data/kl_with_required_real_config.kl";
     base::Result<std::shared_ptr<KeyLayoutMap>> ret = KeyLayoutMap::load(klPath);
-    ASSERT_TRUE(ret.ok()) << "Cannot load KeyLayout at " << klPath;
+    ASSERT_THAT(ret, Ok()) << "Cannot load KeyLayout at " << klPath;
     const std::shared_ptr<KeyLayoutMap>& map = *ret;
     ASSERT_NE(nullptr, map) << "Map should be valid because CONFIG_UHID should always be present";
 }

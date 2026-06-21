@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 
+#define ATRACE_TAG ATRACE_TAG_GRAPHICS
+
 #include <RenderEngineBench.h>
 #include <android-base/file.h>
 #include <benchmark/benchmark.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <com_android_graphics_surfaceflinger_flags.h>
+#include <common/trace.h>
 #include <ftl/enum.h>
 #include <gui/SurfaceComposerClient.h>
 #include <log/log.h>
@@ -26,6 +29,7 @@
 #include <renderengine/LayerSettings.h>
 #include <renderengine/RenderEngine.h>
 #include <renderengine/impl/ExternalTexture.h>
+#include <utils/Timers.h>
 
 #include <mutex>
 #include <sstream>
@@ -41,6 +45,13 @@ using namespace android::renderengine;
  * adb shell /data/benchmarktest/librenderengine_bench/librenderengine_bench
  *
  * (64-bit devices: out directory contains benchmarktest64 instead of benchmarktest)
+ */
+
+// To reduce timing variance, consider playing with these options (SLOW):
+/**
+ * time adb shell /data/benchmarktest64/librenderengine_bench/librenderengine_bench \
+ * --benchmark_enable_random_interleaving=true --benchmark_repetitions=10 --benchmark_min_time=5s \
+ * --benchmark_report_aggregates_only=true
  */
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -141,7 +152,7 @@ static std::shared_ptr<ExternalTexture> copyBuffer(RenderEngine& re,
  * outside of the for loop is excluded from the timing measurements.
  */
 static void benchDrawLayers(RenderEngine& re, const std::vector<LayerSettings>& layers,
-                            benchmark::State& benchState, const char* saveFileName) {
+                            benchmark::State& benchState) {
     auto [width, height] = getDisplaySize();
     auto outputBuffer = allocateBuffer(re, width, height);
 
@@ -152,20 +163,57 @@ static void benchDrawLayers(RenderEngine& re, const std::vector<LayerSettings>& 
             .maxLuminance = 500,
     };
 
-    // This loop starts and stops the timer.
-    for (auto _ : benchState) {
-        sp<Fence> waitFence =
-                re.drawLayers(display, layers, outputBuffer, base::unique_fd()).get().value();
-        waitFence->waitForever(LOG_TAG);
+    {
+        SFTRACE_FORMAT("Warming up %s", benchState.name().c_str());
+        // Sets Skia's cache limits
+        re.onActiveDisplaySizeChanged(display.physicalDisplay.getSize());
+        // Ensures shaders / pipelines are compiled
+        re.drawLayers(display, layers, outputBuffer, base::unique_fd())
+                .get()
+                .value()
+                ->waitForever(LOG_TAG);
     }
 
-    if (renderenginebench::save() && saveFileName) {
+    size_t iterations = 0;
+    nsecs_t cpuDurationSum = 0;
+    nsecs_t gpuDurationSum = 0;
+    {
+        SFTRACE_FORMAT("Timing %s", benchState.name().c_str());
+        // This loop starts and stops the timer.
+        for (auto _ : benchState) {
+            nsecs_t start = systemTime(SYSTEM_TIME_MONOTONIC);
+
+            sp<Fence> waitFence =
+                    re.drawLayers(display, layers, outputBuffer, base::unique_fd()).get().value();
+            nsecs_t cpuWorkDone = systemTime(SYSTEM_TIME_MONOTONIC);
+
+            waitFence->waitForever(LOG_TAG);
+            nsecs_t gpuWorkDone = waitFence->getSignalTime();
+
+            nsecs_t cpuDuration = cpuWorkDone - start;
+            nsecs_t gpuDuration = gpuWorkDone - cpuWorkDone;
+            constexpr double kNsPerSec = 1000000000.0;
+            benchState.SetIterationTime((cpuDuration + gpuDuration) / kNsPerSec);
+
+            iterations++;
+            cpuDurationSum += cpuDuration;
+            gpuDurationSum += gpuDuration;
+        }
+    }
+
+    constexpr double kNsPerMicrosec = 1000.0;
+    benchState.counters["cpuDurationMean"] = (cpuDurationSum / kNsPerMicrosec) / iterations;
+    benchState.counters["gpuDurationMean"] = (gpuDurationSum / kNsPerMicrosec) / iterations;
+
+    if (renderenginebench::save()) {
         // Copy to a CPU-accessible buffer so we can encode it.
         outputBuffer = copyBuffer(re, outputBuffer, GRALLOC_USAGE_SW_READ_OFTEN, "to_encode");
 
+        std::string name = benchState.name();
+        std::replace(name.begin(), name.end(), '/', '-');
         std::string outFile = base::GetExecutableDirectory();
         outFile.append("/");
-        outFile.append(saveFileName);
+        outFile.append(name);
         outFile.append(".jpg");
         renderenginebench::encodeToJpeg(outFile.c_str(), outputBuffer->getBuffer());
     }
@@ -218,7 +266,7 @@ void BM_homescreen(benchmark::State& benchState, const RenderEngineCreationArgs&
             .alpha = half(1.0f),
     };
     auto layers = std::vector<LayerSettings>{layer};
-    benchDrawLayers(*re, layers, benchState, "homescreen");
+    benchDrawLayers(*re, layers, benchState);
 }
 
 void BM_homescreen_blur(benchmark::State& benchState,
@@ -254,7 +302,114 @@ void BM_homescreen_blur(benchmark::State& benchState,
     };
 
     auto layers = std::vector<LayerSettings>{layer, blurLayer};
-    benchDrawLayers(*re, layers, benchState, "homescreen_blurred");
+    benchDrawLayers(*re, layers, benchState);
+}
+
+void BM_region_blur(benchmark::State& benchState, const RenderEngineCreationArgs& creationArgs) {
+    auto re = RenderEngine::create(creationArgs);
+
+    auto [width, height] = getDisplaySize();
+    auto srcBuffer = createTexture(*re, kHomescreenPath);
+
+    const FloatRect layerRect(0, 0, width, height);
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = layerRect,
+                    },
+            .source =
+                    PixelSource{
+                            .buffer =
+                                    Buffer{
+                                            .buffer = srcBuffer,
+                                    },
+                    },
+            .alpha = half(1.0f),
+    };
+
+    int blurSize = 300;
+    int blurOffset = 200;
+    LayerSettings blurRegion{
+            .geometry =
+                    Geometry{
+                            .boundaries = layerRect,
+                    },
+            .alpha = 1.0f,
+            .skipContentDraw = true,
+            .blurRegions = std::vector<BlurRegion>({BlurRegion{
+                    .blurRadius = 30,
+                    .cornerRadiusTLX = 1.0f,
+                    .cornerRadiusTLY = 1.0f,
+                    .cornerRadiusTRX = 2.0f,
+                    .cornerRadiusTRY = 2.0f,
+                    .cornerRadiusBLX = 3.0f,
+                    .cornerRadiusBLY = 3.0f,
+                    .cornerRadiusBRX = 4.0f,
+                    .cornerRadiusBRY = 4.0f,
+                    .alpha = 1.0f,
+                    .left = blurOffset,
+                    .top = blurOffset,
+                    .right = blurOffset + blurSize,
+                    .bottom = blurOffset + blurSize,
+            }}),
+    };
+
+    auto layers = std::vector<LayerSettings>{layer, blurRegion};
+    benchDrawLayers(*re, layers, benchState);
+}
+
+void BM_region_blur_8_radii(benchmark::State& benchState,
+                            const RenderEngineCreationArgs& creationArgs) {
+    auto re = RenderEngine::create(creationArgs);
+
+    auto [width, height] = getDisplaySize();
+    auto srcBuffer = createTexture(*re, kHomescreenPath);
+
+    const FloatRect layerRect(0, 0, width, height);
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = layerRect,
+                    },
+            .source =
+                    PixelSource{
+                            .buffer =
+                                    Buffer{
+                                            .buffer = srcBuffer,
+                                    },
+                    },
+            .alpha = half(1.0f),
+    };
+
+    int blurSize = 300;
+    int blurOffset = 200;
+    LayerSettings blurRegion{
+            .geometry =
+                    Geometry{
+                            .boundaries = layerRect,
+                    },
+            .alpha = 1.0f,
+            .skipContentDraw = true,
+            .blurRegions = std::vector<BlurRegion>({BlurRegion{
+                    .blurRadius = 30,
+                    .cornerRadiusTLX = 1.0f,
+                    .cornerRadiusTLY = 2.0f,
+                    .cornerRadiusTRX = 3.0f,
+                    .cornerRadiusTRY = 4.0f,
+                    .cornerRadiusBLX = 5.0f,
+                    .cornerRadiusBLY = 6.0f,
+                    .cornerRadiusBRX = 7.0f,
+                    .cornerRadiusBRY = 8.0f,
+                    .alpha = 1.0f,
+                    .left = blurOffset,
+                    .top = blurOffset,
+                    .right = blurOffset + blurSize,
+                    .bottom = blurOffset + blurSize,
+            }}),
+    };
+
+    auto layers = std::vector<LayerSettings>{layer, blurRegion};
+    benchDrawLayers(*re, layers, benchState);
 }
 
 void BM_homescreen_edgeExtension(benchmark::State& benchState,
@@ -287,7 +442,7 @@ void BM_homescreen_edgeExtension(benchmark::State& benchState,
                                         /* right  */ false, /* top */ true, /* bottom */ false),
     };
     auto layers = std::vector<LayerSettings>{layer};
-    benchDrawLayers(*re, layers, benchState, "homescreen_edge_extension");
+    benchDrawLayers(*re, layers, benchState);
 }
 
 std::string GenerateBenchmarkVariantName(const char* benchmarkName,
@@ -320,8 +475,15 @@ void RegisterBenchmarkIfValid(Lambda&& benchmarkFn, const char* benchmarkName,
         return;
     }
 
-    benchmark::RegisterBenchmark(GenerateBenchmarkVariantName(benchmarkName, reCreationArgs),
-                                 benchmarkFn, reCreationArgs, benchmarkArgs...);
+    auto bm = benchmark::RegisterBenchmark(GenerateBenchmarkVariantName(benchmarkName,
+                                                                        reCreationArgs),
+                                           benchmarkFn, reCreationArgs, benchmarkArgs...);
+    // CPU time of the main thread is used by default to determine the number of iterations to run a
+    // benchmark case. This is invalid for RenderEngine for two reasons: we always use the threaded
+    // wrapping class to move RE's CPU work to a dedicated thread, and we want to measure GPU work
+    // as well.
+    bm->UseManualTime();
+    bm->Unit(benchmark::kMicrosecond);
 }
 
 #define REGISTER_BM_IF_VALID(benchmarkFn, reCreationArgs, ...) \
@@ -347,11 +509,15 @@ void registerBenchmarks() {
             argBuilder.setSkiaBackend(skiaBackend);
 
             // BM_homescreen_blur
+            // BM_region_blur
+            // BM_region_blur_8_radii
             for (RenderEngine::BlurAlgorithm blurAlgorithm :
                  ftl::enum_range<RenderEngine::BlurAlgorithm>()) {
                 if (blurAlgorithm == RenderEngine::BlurAlgorithm::None) continue;
                 argBuilder.setBlurAlgorithm(blurAlgorithm);
                 REGISTER_BM_IF_VALID(BM_homescreen_blur, argBuilder.build());
+                REGISTER_BM_IF_VALID(BM_region_blur, argBuilder.build());
+                REGISTER_BM_IF_VALID(BM_region_blur_8_radii, argBuilder.build());
             }
             argBuilder.setBlurAlgorithm(RenderEngine::BlurAlgorithm::None);
 

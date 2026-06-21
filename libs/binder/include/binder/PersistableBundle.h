@@ -57,6 +57,7 @@ public:
     void putDouble(const String16& key, double value);
     void putString(const String16& key, const String16& value);
     void putBooleanVector(const String16& key, const std::vector<bool>& value);
+    void putByteVector(const String16& key, const std::vector<uint8_t>& value);
     void putIntVector(const String16& key, const std::vector<int32_t>& value);
     void putLongVector(const String16& key, const std::vector<int64_t>& value);
     void putDoubleVector(const String16& key, const std::vector<double>& value);
@@ -74,6 +75,7 @@ public:
     bool getDouble(const String16& key, double* out) const;
     bool getString(const String16& key, String16* out) const;
     bool getBooleanVector(const String16& key, std::vector<bool>* out) const;
+    bool getByteVector(const String16& key, std::vector<uint8_t>* out) const;
     bool getIntVector(const String16& key, std::vector<int32_t>* out) const;
     bool getLongVector(const String16& key, std::vector<int64_t>* out) const;
     bool getDoubleVector(const String16& key, std::vector<double>* out) const;
@@ -87,6 +89,7 @@ public:
     std::set<String16> getDoubleKeys() const;
     std::set<String16> getStringKeys() const;
     std::set<String16> getBooleanVectorKeys() const;
+    std::set<String16> getByteVectorKeys() const;
     std::set<String16> getIntVectorKeys() const;
     std::set<String16> getLongVectorKeys() const;
     std::set<String16> getDoubleVectorKeys() const;
@@ -94,7 +97,9 @@ public:
     std::set<String16> getPersistableBundleKeys() const;
 
     friend bool operator==(const PersistableBundle& lhs, const PersistableBundle& rhs) {
-        return (lhs.mBoolMap == rhs.mBoolMap && lhs.mIntMap == rhs.mIntMap &&
+        return (lhs.mBoolMap == rhs.mBoolMap &&
+                lhs.mByteVectorMap == rhs.mByteVectorMap &&
+                lhs.mIntMap == rhs.mIntMap &&
                 lhs.mLongMap == rhs.mLongMap && lhs.mDoubleMap == rhs.mDoubleMap &&
                 lhs.mStringMap == rhs.mStringMap && lhs.mBoolVectorMap == rhs.mBoolVectorMap &&
                 lhs.mIntVectorMap == rhs.mIntVectorMap &&
@@ -118,6 +123,7 @@ private:
     std::map<String16, double> mDoubleMap;
     std::map<String16, String16> mStringMap;
     std::map<String16, std::vector<bool>> mBoolVectorMap;
+    std::map<String16, std::vector<uint8_t>> mByteVectorMap;
     std::map<String16, std::vector<int32_t>> mIntVectorMap;
     std::map<String16, std::vector<int64_t>> mLongVectorMap;
     std::map<String16, std::vector<double>> mDoubleVectorMap;

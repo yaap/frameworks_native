@@ -770,6 +770,29 @@ TEST_P(BinderRpc, SendTooLargeVector) {
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 }
 
+TEST_P(BinderRpc, PerSessionClientUid_Success) {
+    if (socketType() != SocketType::UNIX_RAW && socketType() != SocketType::UNIX) {
+        GTEST_SKIP() << "UID verification is only supported for UNIX sockets.";
+    }
+
+    auto proc = createRpcTestSocketServerProcess({});
+    uid_t uid = getuid();
+    int32_t remoteUid;
+    EXPECT_OK(proc.rootIface->getClientUid(&remoteUid));
+    EXPECT_EQ(uid, static_cast<uid_t>(remoteUid));
+}
+
+TEST_P(BinderRpc, PerSessionClientUid_Failure) {
+    if (socketType() != SocketType::VSOCK && socketType() != SocketType::INET) {
+        GTEST_SKIP() << "This test is for INET or VSOCK sockets only.";
+    }
+
+    auto proc = createRpcTestSocketServerProcess({});
+    int32_t remoteUid;
+    EXPECT_OK(proc.rootIface->getClientUid(&remoteUid));
+    EXPECT_EQ(-1, remoteUid);
+}
+
 TEST_P(BinderRpc, SessionWithIncomingThreadpoolDoesntLeak) {
     if (clientOrServerSingleThreaded()) {
         GTEST_SKIP() << "This test requires multiple threads";
@@ -1322,8 +1345,6 @@ TEST_P(BinderRpcAccessor, InjectAndGetServiceHappyPath) {
 TEST_P(BinderRpcAccessor, InjectNoAccessorProvided) {
     const String16 kInstanceName("doesnt_matter_nothing_checks");
 
-    bool isProviderDeleted = false;
-
     auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
                                        [&](const String16&) -> sp<IBinder> { return nullptr; });
     EXPECT_FALSE(receipt.expired());
@@ -1367,9 +1388,6 @@ TEST_P(BinderRpcAccessor, InjectNoSockaddrProvided) {
 
     auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
-
-    bool isProviderDeleted = false;
-    bool isAccessorDeleted = false;
 
     auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
                                        [&](const String16& name) -> sp<IBinder> {
@@ -1828,7 +1846,6 @@ inline void getServiceTest(BinderRpcTestProcessSession& proc,
         GTEST_SKIP() << "Test disabled because Binder was built as a static library";
     }
 
-    constexpr size_t kNumThreads = 10;
     bool isDeleted = false;
 
     AccessorProviderData* data =
@@ -2255,6 +2272,16 @@ TEST_P(BinderRpc, MinThreadsPerBinderSaturation) {
 
     // force the decref
     saturateThreadPool(kMinThreadsPerBinder, proc.rootIface);
+}
+
+TEST_P(BinderRpc, Extensions) {
+    auto proc = createRpcTestSocketServerProcess({});
+
+    sp<IBinder> retrieved;
+    EXPECT_EQ(OK, proc.rootBinder->getExtension(&retrieved));
+    ASSERT_NE(retrieved, nullptr);
+    EXPECT_NE(proc.rootBinder, retrieved);
+    EXPECT_EQ(IBinderRpcTest::descriptor, retrieved->getInterfaceDescriptor());
 }
 
 class BinderRpcServerOnly : public ::testing::TestWithParam<std::tuple<RpcSecurity, uint32_t>> {

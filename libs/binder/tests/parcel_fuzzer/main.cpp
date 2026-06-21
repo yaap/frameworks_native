@@ -177,6 +177,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         (void)android::ProcessState::self();
         (void)android::hardware::ProcessState::self();
         ALOGE("Logging creates a socked + a pmsg FD");
+        syslog(LOG_ERR, "syslog opens a DGRAM socket.");
     });
 
     struct rlimit limit{};

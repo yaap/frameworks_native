@@ -104,7 +104,8 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
     perfetto::protos::LayerState proto;
     auto& layer = resolvedComposerState.state;
     proto.set_layer_id(resolvedComposerState.layerId);
-    proto.set_what(layer.what);
+    // TODO: Fix the proto maybe eventually someday
+    proto.set_what(*reinterpret_cast<const uint64_t*>(layer.what.data()));
 
     if (layer.what & layer_state_t::ePositionChanged) {
         proto.set_x(layer.x);
@@ -385,7 +386,7 @@ QueuedTransactionState TransactionProtoParser::fromProto(
     t.states.reserve(static_cast<size_t>(layerCount));
     for (int i = 0; i < layerCount; i++) {
         ResolvedComposerState s;
-        s.state.what = 0;
+        s.state.what.reset();
         fromProto(proto.layer_changes(i), s);
         t.states.emplace_back(s);
     }
@@ -446,30 +447,33 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
                                        ResolvedComposerState& resolvedComposerState) {
     auto& layer = resolvedComposerState.state;
     resolvedComposerState.layerId = proto.layer_id();
-    layer.what |= proto.what();
+    layer_state_t::LayerChangedSet protoWhat;
+    uint64_t protoValue = proto.what();
+    memcpy(protoWhat.data(), &protoValue, sizeof(uint64_t));
+    layer.what |= protoWhat;
 
-    if (proto.what() & layer_state_t::ePositionChanged) {
+    if (protoWhat & layer_state_t::ePositionChanged) {
         layer.x = proto.x();
         layer.y = proto.y();
     }
-    if (proto.what() & layer_state_t::eLayerChanged) {
+    if (protoWhat & layer_state_t::eLayerChanged) {
         layer.z = proto.z();
     }
-    if (proto.what() & layer_state_t::eLayerStackChanged) {
+    if (protoWhat & layer_state_t::eLayerStackChanged) {
         layer.layerStack.id = proto.layer_stack();
     }
-    if (proto.what() & layer_state_t::eFlagsChanged) {
+    if (protoWhat & layer_state_t::eFlagsChanged) {
         layer.flags = proto.flags();
         layer.mask = proto.mask();
     }
-    if (proto.what() & layer_state_t::eMatrixChanged) {
+    if (protoWhat & layer_state_t::eMatrixChanged) {
         const perfetto::protos::LayerState_Matrix22& matrixProto = proto.matrix();
         layer.matrix.dsdx = matrixProto.dsdx();
         layer.matrix.dsdy = matrixProto.dsdy();
         layer.matrix.dtdx = matrixProto.dtdx();
         layer.matrix.dtdy = matrixProto.dtdy();
     }
-    if (proto.what() & layer_state_t::eCornerRadiusChanged) {
+    if (protoWhat & layer_state_t::eCornerRadiusChanged) {
         const perfetto::protos::LayerState_CornerRadii& radiiProto = proto.corner_radii();
         layer.cornerRadii.topLeft.x = radiiProto.tl();
         layer.cornerRadii.topRight.x = radiiProto.tr();
@@ -478,7 +482,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         // TODO(b/430109627): Remove usage of deprecated corner_radius field
         layer.cornerRadii.topLeft.x = proto.corner_radius();
     }
-    if (proto.what() & layer_state_t::eClientDrawnCornerRadiusChanged) {
+    if (protoWhat & layer_state_t::eClientDrawnCornerRadiusChanged) {
         const perfetto::protos::LayerState_CornerRadii& radiiProto =
                 proto.client_drawn_corner_radii();
         layer.clientDrawnCornerRadii.topLeft.x = radiiProto.tl();
@@ -486,38 +490,38 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.clientDrawnCornerRadii.bottomLeft.x = radiiProto.bl();
         layer.clientDrawnCornerRadii.bottomRight.y = radiiProto.br();
     }
-    if (proto.what() & layer_state_t::eBackgroundBlurRadiusChanged) {
+    if (protoWhat & layer_state_t::eBackgroundBlurRadiusChanged) {
         layer.backgroundBlurRadius = proto.background_blur_radius();
     }
-    if (proto.what() & layer_state_t::eBackgroundBlurScaleChanged) {
+    if (protoWhat & layer_state_t::eBackgroundBlurScaleChanged) {
         layer.backgroundBlurScale = proto.background_blur_radius();
     }
 
-    if (proto.what() & layer_state_t::eAlphaChanged) {
+    if (protoWhat & layer_state_t::eAlphaChanged) {
         layer.color.a = proto.alpha();
     }
 
-    if (proto.what() & layer_state_t::eColorChanged) {
+    if (protoWhat & layer_state_t::eColorChanged) {
         const perfetto::protos::LayerState_Color3& colorProto = proto.color();
         layer.color.r = colorProto.r();
         layer.color.g = colorProto.g();
         layer.color.b = colorProto.b();
     }
-    if (proto.what() & layer_state_t::eTransparentRegionChanged) {
+    if (protoWhat & layer_state_t::eTransparentRegionChanged) {
         Region transparentRegion;
         LayerProtoHelper::readFromProto(proto.transparent_region(), transparentRegion);
         layer.updateTransparentRegion(transparentRegion);
     }
-    if (proto.what() & layer_state_t::eBufferTransformChanged) {
+    if (protoWhat & layer_state_t::eBufferTransformChanged) {
         layer.bufferTransform = proto.transform();
     }
-    if (proto.what() & layer_state_t::eTransformToDisplayInverseChanged) {
+    if (protoWhat & layer_state_t::eTransformToDisplayInverseChanged) {
         layer.transformToDisplayInverse = proto.transform_to_display_inverse();
     }
-    if (proto.what() & layer_state_t::eCropChanged) {
+    if (protoWhat & layer_state_t::eCropChanged) {
         LayerProtoHelper::readFromProto(proto.crop(), layer.crop);
     }
-    if (proto.what() & layer_state_t::eBufferChanged) {
+    if (protoWhat & layer_state_t::eBufferChanged) {
         const perfetto::protos::LayerState_BufferData& bufferProto = proto.buffer_data();
         layer.bufferData =
                 std::make_shared<fake::BufferData>(bufferProto.buffer_id(), bufferProto.width(),
@@ -536,14 +540,14 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.bufferData->dequeueTime = -1;
     }
 
-    if (proto.what() & layer_state_t::eApiChanged) {
+    if (protoWhat & layer_state_t::eApiChanged) {
         layer.api = proto.api();
     }
 
-    if (proto.what() & layer_state_t::eColorTransformChanged) {
+    if (protoWhat & layer_state_t::eColorTransformChanged) {
         LayerProtoHelper::readFromProto(proto.color_transform(), layer.colorTransform);
     }
-    if (proto.what() & layer_state_t::eBlurRegionsChanged) {
+    if (protoWhat & layer_state_t::eBlurRegionsChanged) {
         layer.blurRegions.reserve(static_cast<size_t>(proto.blur_regions_size()));
         for (int i = 0; i < proto.blur_regions_size(); i++) {
             android::BlurRegion region;
@@ -552,15 +556,15 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         }
     }
 
-    if (proto.what() & layer_state_t::eReparent) {
+    if (protoWhat & layer_state_t::eReparent) {
         resolvedComposerState.parentId = proto.parent_id();
     }
-    if (proto.what() & layer_state_t::eRelativeLayerChanged) {
+    if (protoWhat & layer_state_t::eRelativeLayerChanged) {
         resolvedComposerState.relativeParentId = proto.relative_parent_id();
         layer.z = proto.z();
     }
 
-    if ((proto.what() & layer_state_t::eInputInfoChanged) && proto.has_window_info_handle()) {
+    if ((protoWhat & layer_state_t::eInputInfoChanged) && proto.has_window_info_handle()) {
         gui::WindowInfo inputInfo;
         const perfetto::protos::LayerState_WindowInfo& windowInfoProto = proto.window_info_handle();
 
@@ -584,7 +588,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
 
         *layer.editWindowInfo() = inputInfo;
     }
-    if (proto.what() & layer_state_t::eBackgroundColorChanged) {
+    if (protoWhat & layer_state_t::eBackgroundColorChanged) {
         layer.bgColor.a = proto.bg_color_alpha();
         layer.bgColorDataspace = static_cast<ui::Dataspace>(proto.bg_color_dataspace());
         const perfetto::protos::LayerState_Color3& colorProto = proto.color();
@@ -592,45 +596,44 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.bgColor.g = colorProto.g();
         layer.bgColor.b = colorProto.b();
     }
-    if (proto.what() & layer_state_t::eColorSpaceAgnosticChanged) {
+    if (protoWhat & layer_state_t::eColorSpaceAgnosticChanged) {
         layer.colorSpaceAgnostic = proto.color_space_agnostic();
     }
-    if (proto.what() & layer_state_t::eShadowRadiusChanged) {
+    if (protoWhat & layer_state_t::eShadowRadiusChanged) {
         layer.shadowRadius = proto.shadow_radius();
     }
-    if (proto.what() & layer_state_t::eFrameRateSelectionPriority) {
+    if (protoWhat & layer_state_t::eFrameRateSelectionPriority) {
         layer.frameRateSelectionPriority = proto.frame_rate_selection_priority();
     }
-    if (proto.what() & layer_state_t::eFrameRateChanged) {
+    if (protoWhat & layer_state_t::eFrameRateChanged) {
         layer.frameRate = proto.frame_rate();
         layer.frameRateCompatibility = static_cast<int8_t>(proto.frame_rate_compatibility());
         layer.changeFrameRateStrategy = static_cast<int8_t>(proto.change_frame_rate_strategy());
     }
-    if (proto.what() & layer_state_t::eFixedTransformHintChanged) {
+    if (protoWhat & layer_state_t::eFixedTransformHintChanged) {
         layer.fixedTransformHint =
                 static_cast<ui::Transform::RotationFlags>(proto.fixed_transform_hint());
     }
-    if (proto.what() & layer_state_t::eAutoRefreshChanged) {
+    if (protoWhat & layer_state_t::eAutoRefreshChanged) {
         layer.autoRefresh = proto.auto_refresh();
     }
-    if (proto.what() & layer_state_t::eTrustedOverlayChanged) {
+    if (protoWhat & layer_state_t::eTrustedOverlayChanged) {
         layer.trustedOverlay = proto.is_trusted_overlay() ? gui::TrustedOverlay::ENABLED
                                                           : gui::TrustedOverlay::UNSET;
     }
-    if (proto.what() & layer_state_t::eBufferCropChanged) {
+    if (protoWhat & layer_state_t::eBufferCropChanged) {
         LayerProtoHelper::readFromProto(proto.buffer_crop(), layer.bufferCrop);
     }
-    if (proto.what() & layer_state_t::eDestinationFrameChanged) {
+    if (protoWhat & layer_state_t::eDestinationFrameChanged) {
         LayerProtoHelper::readFromProto(proto.destination_frame(), layer.destinationFrame);
     }
-    if (proto.what() & layer_state_t::eDropInputModeChanged) {
+    if (protoWhat & layer_state_t::eDropInputModeChanged) {
         layer.dropInputMode = static_cast<gui::DropInputMode>(proto.drop_input_mode());
     }
-    if (proto.what() & layer_state_t::eSystemContentPriorityChanged) {
+    if (protoWhat & layer_state_t::eSystemContentPriorityChanged) {
         layer.systemContentPriority = proto.system_content_priority();
     }
-    if ((proto.what() & layer_state_t::eBoxShadowSettingsChanged) &&
-        proto.has_box_shadow_settings()) {
+    if ((protoWhat & layer_state_t::eBoxShadowSettingsChanged) && proto.has_box_shadow_settings()) {
         const auto& protoSettings = proto.box_shadow_settings();
         for (int i = 0; i < protoSettings.box_shadows_size(); i++) {
             const auto& protoParams = protoSettings.box_shadows(i);
@@ -643,7 +646,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
             layer.boxShadowSettings.boxShadows.push_back(params);
         }
     }
-    if ((proto.what() & layer_state_t::eBorderSettingsChanged) && proto.has_border_settings()) {
+    if ((protoWhat & layer_state_t::eBorderSettingsChanged) && proto.has_border_settings()) {
         const auto& protoSettings = proto.border_settings();
         layer.borderSettings.strokeWidth = protoSettings.stroke_width();
         layer.borderSettings.color = protoSettings.color();

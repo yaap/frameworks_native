@@ -40,6 +40,7 @@ cc_binary {
     shared_libs: [
         "android.frameworks.automotive.display@1.0",
         "android.hardware.graphics.bufferqueue@2.0",
+        "libbufferqueueconverter",
         "libgui",
         "libhidlbase",
         "liblog",
@@ -52,7 +53,7 @@ cc_binary {
     ],
 
     cflags: [
-        "-DLOG_TAG=\"AutomotiveDisplayService\""
+        "-DLOG_TAG=\"AutomotiveDisplayService\"",
     ],
 
     vintf_fragment_modules: [

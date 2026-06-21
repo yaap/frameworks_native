@@ -447,23 +447,6 @@ TEST(ServiceNotifications, NoPermissionsRegister) {
     EXPECT_EQ(sm->registerForNotifications("foofoo", cb).exceptionCode(), Status::EX_SECURITY);
 }
 
-TEST(GetService, IsolatedCantRegister) {
-    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
-
-    EXPECT_CALL(*access, getCallingContext())
-            .WillOnce(Return(Access::CallingContext{
-                    .uid = AID_ISOLATED_START,
-            }));
-    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
-
-    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
-
-    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
-
-    EXPECT_EQ(sm->registerForNotifications("foofoo", cb).exceptionCode(),
-        Status::EX_SECURITY);
-}
-
 TEST(ServiceNotifications, NoPermissionsUnregister) {
     std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
 
@@ -573,4 +556,254 @@ TEST(ServiceNotifications, GetMultipleNotification) {
 
     EXPECT_THAT(cb->registrations, ElementsAre("asdfasdf", "asdfasdf"));
     EXPECT_THAT(cb->registrations, ElementsAre("asdfasdf", "asdfasdf"));
+}
+
+// Tests for isolated app notification security.
+// Isolated apps should only receive notifications if the service
+// explicitly allows it via the 'allowIsolated' flag.
+// These tests cover:
+// 0. Registration Allowed: Verifying registration is not rejected immediately.
+// 1. Deferred Path: Registering before the service starts.
+// 2. Immediate Path: Registering after the service is already running.
+// 3. Mixed Clients: Verifying granular filtering.
+// 4. Dynamic/Restart: Verifying permission re-evaluation on service restart.
+
+// Case 0: Registration Allowed.
+//
+// Verifies that isolated apps can call registerForNotifications without
+// immediate rejection. The actual notification dispatch is filtered later.
+TEST(IsolatedServiceNotifications, RegistrationAllowed) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            }));
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+
+    EXPECT_TRUE(sm->registerForNotifications("foofoo", cb).isOk());
+}
+
+// Case 1: Deferred Path (Register -> Add).
+//
+// The isolated app registers *before* the service starts.
+// The notification is dispatched inside addService().
+TEST(IsolatedServiceNotifications, DeferredAllowed) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            }))                                          // registerForNotifications
+            .WillOnce(Return(Access::CallingContext{})); // addService
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(*access, canAdd(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+    sp<IBinder> binder = getBinder();
+
+    EXPECT_TRUE(sm->registerForNotifications("foo", cb).isOk());
+    EXPECT_TRUE(sm->addService("foo", binder, true /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre("foo"));
+    EXPECT_THAT(cb->binders, ElementsAre(binder));
+}
+
+// Case 1b: Deferred Path (Register -> Add) [Negative Case].
+//
+// The isolated app registers *before* the service starts.
+// The service is added with allowIsolated=false.
+// The notification should be blocked.
+TEST(IsolatedServiceNotifications, DeferredDenied) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            }))                                          // registerForNotifications
+            .WillOnce(Return(Access::CallingContext{})); // addService
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(*access, canAdd(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+    sp<IBinder> binder = getBinder();
+
+    EXPECT_TRUE(sm->registerForNotifications("foo", cb).isOk());
+    EXPECT_TRUE(sm->addService("foo", binder, false /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre());
+    EXPECT_THAT(cb->binders, ElementsAre());
+}
+
+// Case 2: Immediate Path (Add -> Register).
+//
+// The service is *already running* when the isolated app registers.
+// The notification is dispatched immediately inside registerForNotifications().
+TEST(IsolatedServiceNotifications, ImmediateAllowed) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{})) // addService
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            })); // registerForNotifications
+    EXPECT_CALL(*access, canAdd(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+    sp<IBinder> binder = getBinder();
+
+    EXPECT_TRUE(sm->addService("foo", binder, true /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+    EXPECT_TRUE(sm->registerForNotifications("foo", cb).isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre("foo"));
+    EXPECT_THAT(cb->binders, ElementsAre(binder));
+}
+
+// Case 2b: Immediate Path (Add -> Register) [Negative Case].
+//
+// The service is *already running* with allowIsolated=false.
+// The notification should be blocked immediately.
+TEST(IsolatedServiceNotifications, ImmediateDenied) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{})) // addService
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            })); // registerForNotifications
+    EXPECT_CALL(*access, canAdd(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+    sp<IBinder> binder = getBinder();
+
+    EXPECT_TRUE(sm->addService("foo", binder, false /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+    EXPECT_TRUE(sm->registerForNotifications("foo", cb).isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre());
+    EXPECT_THAT(cb->binders, ElementsAre());
+}
+
+// Case 3: Mixed Clients.
+//
+// Verifies that the filtering logic is granular.
+// An isolated app (blocked) and a normal app (allowed) both register.
+// Only the normal app should receive the notification.
+TEST(IsolatedServiceNotifications, MixedClients) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            // register isolated
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            }))
+            // register non-isolated
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_APP_START,
+            }))
+            .WillOnce(Return(Access::CallingContext{})); // addService
+
+    EXPECT_CALL(*access, canFind(_, _)).WillRepeatedly(Return(true));
+    EXPECT_CALL(*access, canAdd(_, _)).WillOnce(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cbIsolated = sp<CallbackHistorian>::make();
+    sp<CallbackHistorian> cbNonIsolated = sp<CallbackHistorian>::make();
+    sp<IBinder> binder = getBinder();
+
+    EXPECT_TRUE(sm->registerForNotifications("foo", cbIsolated).isOk());
+    EXPECT_TRUE(sm->registerForNotifications("foo", cbNonIsolated).isOk());
+
+    EXPECT_TRUE(sm->addService("foo", binder, false /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    EXPECT_THAT(cbIsolated->registrations, ElementsAre());
+    EXPECT_THAT(cbNonIsolated->registrations, ElementsAre("foo"));
+}
+
+// Case 4: Dynamic/Restart Scenario.
+//
+// Verifies that the check happens at *dispatch time*, not registration time.
+// This tests that a listener persists across service restarts and that permissions
+// are re-evaluated each time the service is registered.
+//
+// We simulate a service restart by calling addService() again with the same name.
+// ServiceManager overwrites the existing service entry, effectively treating it as a new instance.
+//
+// 1. Service starts (allowIsolated=true) -> Notification to isolated app sent.
+// 2. Service "restarts" (replaced by new instance with allowIsolated=false)
+//    -> Notification blocked.
+// 3. Service "restarts" (replaced by new instance with allowIsolated=true)
+//    -> Notification sent.
+TEST(IsolatedServiceNotifications, ServiceRestart) {
+    std::unique_ptr<MockAccess> access = std::make_unique<NiceMock<MockAccess>>();
+
+    EXPECT_CALL(*access, getCallingContext())
+            .WillOnce(Return(Access::CallingContext{
+                    .uid = AID_ISOLATED_START,
+            }))                                          // register
+            .WillOnce(Return(Access::CallingContext{}))  // addService 1
+            .WillOnce(Return(Access::CallingContext{}))  // addService 2
+            .WillOnce(Return(Access::CallingContext{})); // addService 3
+
+    EXPECT_CALL(*access, canFind(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(*access, canAdd(_, _)).WillRepeatedly(Return(true));
+
+    sp<ServiceManager> sm = sp<ServiceManager>::make(std::move(access));
+
+    sp<CallbackHistorian> cb = sp<CallbackHistorian>::make();
+    sp<IBinder> binder1 = getBinder();
+    sp<IBinder> binder2 = getBinder();
+    sp<IBinder> binder3 = getBinder();
+
+    // 1. Register
+    EXPECT_TRUE(sm->registerForNotifications("foo", cb).isOk());
+
+    // 2. Add Service (Allowed) -> Expect Callback
+    EXPECT_TRUE(sm->addService("foo", binder1, true /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre("foo"));
+    EXPECT_THAT(cb->binders, ElementsAre(binder1));
+
+    // 3. Add Service (Disallowed) -> Expect NO Callback
+    EXPECT_TRUE(sm->addService("foo", binder2, false /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    // Should still only have the first notification
+    EXPECT_THAT(cb->registrations, ElementsAre("foo"));
+    EXPECT_THAT(cb->binders, ElementsAre(binder1));
+
+    // 4. Add Service (Allowed) -> Expect Callback
+    EXPECT_TRUE(sm->addService("foo", binder3, true /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT)
+                        .isOk());
+
+    EXPECT_THAT(cb->registrations, ElementsAre("foo", "foo"));
+    EXPECT_THAT(cb->binders, ElementsAre(binder1, binder3));
 }

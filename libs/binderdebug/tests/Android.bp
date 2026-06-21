@@ -33,7 +33,14 @@ cc_test {
         "libbinder",
         "libutils",
     ],
-    static_libs: ["libbinderdebug"],
-    cflags: ["-Wall", "-Werror"],
+    static_libs: [
+        "libbinderdebug_for_test",
+        "libgmock",
+    ],
+    cflags: [
+        "-DBINDER_DEBUG_TEST",
+        "-Wall",
+        "-Werror",
+    ],
     require_root: true,
 }

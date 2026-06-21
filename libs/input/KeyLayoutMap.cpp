@@ -266,13 +266,33 @@ std::optional<AxisInfo> KeyLayoutMap::mapAxis(int32_t scanCode) const {
         return std::nullopt;
     }
 
-    const AxisInfo& axisInfo = it->second;
+    AxisInfo axisInfo = it->second;
+
+    // Apply remapping for the primary axis.
+    auto remapIt = mAxisRemapping.find(axisInfo.axis);
+    if (remapIt != mAxisRemapping.end()) {
+        axisInfo.axis = remapIt->second;
+    }
+
+    // Apply remapping for the high axis (used in split mode).
+    if (axisInfo.mode == AxisInfo::MODE_SPLIT) {
+        remapIt = mAxisRemapping.find(axisInfo.highAxis);
+        if (remapIt != mAxisRemapping.end()) {
+            axisInfo.highAxis = remapIt->second;
+        }
+    }
+
     ALOGD_IF(DEBUG_MAPPING,
              "mapAxis: scanCode=%d ~ Result mode=%d, axis=%d, highAxis=%d, "
              "splitValue=%d, flatOverride=%d.",
              scanCode, axisInfo.mode, axisInfo.axis, axisInfo.highAxis, axisInfo.splitValue,
              axisInfo.flatOverride);
     return axisInfo;
+}
+
+void KeyLayoutMap::setAxisRemapping(const std::unordered_map<int32_t, int32_t>& axisRemapping) {
+    mAxisRemapping = {axisRemapping.begin(), axisRemapping.end()};
+    ALOGD_IF(DEBUG_MAPPING, "setAxisRemapping: Set %zu axis remappings.", mAxisRemapping.size());
 }
 
 std::optional<int32_t> KeyLayoutMap::findScanCodeForLed(int32_t ledCode) const {

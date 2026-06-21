@@ -86,8 +86,6 @@ cc_defaults {
     // See README.md: "Dumpstate philosophy: exec not link"
     // Do not add things here - keep dumpstate as simple as possible and exec where possible.
     shared_libs: [
-        "android.hardware.dumpstate@1.0",
-        "android.hardware.dumpstate@1.1",
         "android.hardware.dumpstate-V1-ndk",
         "android.os.flags-aconfig-cc-host",
         "libziparchive",
@@ -141,6 +139,7 @@ cc_binary {
     required: [
         "alloctop",
         "atrace",
+        "bpftool",
         "bugreport_procdump",
         "default_screenshot",
         "dmabuf_dump",

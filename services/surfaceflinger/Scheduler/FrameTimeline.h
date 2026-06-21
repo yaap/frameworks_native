@@ -24,6 +24,9 @@
 #include <optional>
 #include <string>
 
+#include <android/gui/ISystemContentPriorityConstants.h>
+#include <common/FlagManager.h>
+#include <ftl/static_vector.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/JankInfo.h>
 #include <gui/LayerMetadata.h>
@@ -107,10 +110,8 @@ struct TimelineItem {
 struct JankClassificationThresholds {
     // The various thresholds for App and SF. If the actual timestamp falls within the threshold
     // compared to prediction, we treat it as on time.
-    nsecs_t presentThresholdLegacy =
+    nsecs_t presentThreshold =
             std::chrono::duration_cast<std::chrono::nanoseconds>(2ms).count();
-    nsecs_t presentThresholdExtended =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(4ms).count();
     nsecs_t deadlineThreshold = std::chrono::duration_cast<std::chrono::nanoseconds>(0ms).count();
     nsecs_t startThreshold = std::chrono::duration_cast<std::chrono::nanoseconds>(2ms).count();
 };
@@ -155,6 +156,40 @@ private:
     std::atomic<int64_t> mTraceCookie = 0;
 };
 
+/*
+ * Helper class to hold two values for a variable, and use one of them based on a flag.
+ * This is used to experiment with new jank classification.
+ */
+template <typename T>
+class Experimental {
+public:
+    explicit Experimental(T value) : mLegacyValue(value), mExperimentalValue(value) {}
+    T& legacy() { return mLegacyValue; }
+    T& experimental() { return mExperimentalValue; }
+
+    T value() const {
+        const bool useExperimental =
+                FlagManager::getInstance().use_experimental_jank_classification();
+        if (useExperimental) {
+            return mExperimentalValue;
+        }
+        return mLegacyValue;
+    }
+
+    T altValue() const {
+        const bool useExperimental =
+                FlagManager::getInstance().use_experimental_jank_classification();
+        if (useExperimental) {
+            return mLegacyValue;
+        }
+        return mExperimentalValue;
+    }
+
+private:
+    T mLegacyValue;
+    T mExperimentalValue;
+};
+
 class SurfaceFrame {
 public:
     enum class PresentState {
@@ -169,7 +204,8 @@ public:
                  int32_t layerId, std::string layerName, std::string debugName,
                  PredictionState predictionState, TimelineItem&& predictions,
                  std::shared_ptr<TimeStats> timeStats, JankClassificationThresholds thresholds,
-                 TraceCookieCounter* traceCookieCounter, bool isBuffer, GameMode);
+                 TraceCookieCounter* traceCookieCounter, bool isBuffer, GameMode,
+                 int32_t systemContentPriority);
     ~SurfaceFrame() = default;
 
     bool isSelfJanky() const;
@@ -178,6 +214,7 @@ public:
     // Used by both SF and FrameTimeline.
     std::optional<int32_t> getJankType() const;
     std::optional<JankSeverityType> getJankSeverityType() const;
+    std::optional<float> getJankSeverityScore() const;
 
     // Functions called by SF
     int64_t getToken() const { return mToken; };
@@ -216,12 +253,14 @@ public:
     // Sets the actual present time, appropriate metadata and classifies the jank.
     // displayRefreshRate, displayDeadlineDelta, and displayPresentDelta are propagated from the
     // display frame.
-    void onPresent(nsecs_t presentTime, int32_t displayFrameJankType, Fps refreshRate,
+    void onPresent(nsecs_t presentTime, int32_t displayFrameJankTypeLegacy,
+                   int32_t displayFrameJankTypeExperimental, Fps refreshRate,
                    Fps displayFrameRenderRate, nsecs_t displayDeadlineDelta,
-                   nsecs_t displayPresentDelta);
+                   nsecs_t displayPresentJitter);
     // Sets the frame as none janky as there was no real display frame.
     void onCommitNotComposited(Fps refreshRate, Fps displayFrameRenderRate);
     // All the timestamps are dumped relative to the baseTime
+    template <typename Period>
     void dump(std::string& result, const std::string& indent, nsecs_t baseTime) const;
     // Dumps only the layer, token, is buffer, jank metadata, prediction and present states.
     std::string miniDump() const;
@@ -243,22 +282,64 @@ public:
     nsecs_t getDropTime() const;
     bool getIsBuffer() const;
 
+    void setPreviousSurfaceFrame(const std::weak_ptr<SurfaceFrame>&);
+
+    struct PreviousFrameData {
+        enum class Status {
+            Valid,
+            OutOfOrder,
+            Unknown,
+            FrameHistoryTooLong,
+        };
+        Status status;
+        TimelineItem predictions;
+        TimelineItem actuals;
+        nsecs_t vsyncResyncedJitter;
+
+        static PreviousFrameData unknown() { return PreviousFrameData{Status::Unknown, {}, {}, 0}; }
+        static PreviousFrameData tooFarBack() {
+            return PreviousFrameData{Status::FrameHistoryTooLong, {}, {}, 0};
+        }
+        static PreviousFrameData outOfOrder() {
+            return PreviousFrameData{Status::OutOfOrder, {}, {}, 0};
+        }
+        static PreviousFrameData create(TimelineItem predictions, TimelineItem actuals,
+                                        nsecs_t vsyncResyncedJitter) {
+            return PreviousFrameData{Status::Valid, predictions, actuals, vsyncResyncedJitter};
+        }
+    };
+    PreviousFrameData previousFrameDataLocked() const REQUIRES(mMutex);
+
     // For prediction expired frames, this delta is subtracted from the actual end time to get a
     // start time decent enough to see in traces.
     // TODO(b/172587309): Remove this when we have actual start times.
     static constexpr nsecs_t kPredictionExpiredStartTimeDelta =
             std::chrono::duration_cast<std::chrono::nanoseconds>(2ms).count();
 
+    // Used for finding the previously presented frame in case of render thread animations.
+    // 10 was chosen to cover up to 80ms on UI thread delay on 120hz.
+    static constexpr int32_t kMaxPreviousFrames = 10;
+
 private:
+    // Friend class for testing
+    friend class android::scheduler::FrameTimelineTest;
+
     void tracePredictions(int64_t displayFrameToken, nsecs_t monoBootOffset,
                           bool filterFramesBeforeTraceStarts) const;
     void traceActuals(int64_t displayFrameToken, nsecs_t monoBootOffset,
                       bool filterFramesBeforeTraceStarts) const;
-    void classifyJankLocked(int32_t displayFrameJankType, const Fps& refreshRate,
-                            Fps displayFrameRenderRate, nsecs_t* outDeadlineDelta) REQUIRES(mMutex);
+    void classifyJankLocked(int32_t displayFrameJankTypeLegacy,
+                            int32_t displayFrameJankTypeExperimental, const Fps& refreshRate,
+                            Fps displayFrameRenderRate, nsecs_t* outDeadlineDelta,
+                            nsecs_t* outPresentDelay) REQUIRES(mMutex);
+    void classifyJankLegacyLocked(int32_t displayFrameJankTypeLegacy, const Fps& refreshRate,
+                                  Fps displayFrameRenderRate, nsecs_t* outDeadlineDelta,
+                                  nsecs_t* outPresentDelay) REQUIRES(mMutex);
 
     const int64_t mToken;
     const int32_t mInputEventId;
+    const nsecs_t mVsyncResyncedJitter;
+    const nsecs_t mDequeueBufferDuration;
     const pid_t mOwnerPid;
     const uid_t mOwnerUid;
     const std::string mLayerName;
@@ -274,9 +355,9 @@ private:
     nsecs_t mDropTime GUARDED_BY(mMutex) = 0;
     mutable std::mutex mMutex;
     // Bitmask for the type of jank
-    int32_t mJankType GUARDED_BY(mMutex) = JankType::None;
+    Experimental<int32_t> mJankType GUARDED_BY(mMutex) = Experimental<int32_t>{JankType::None};
     // Enum for the severity of jank
-    JankSeverityType mJankSeverityType GUARDED_BY(mMutex) = JankSeverityType::None;
+    JankSeverityType mJankSeverityTypeLegacy GUARDED_BY(mMutex) = JankSeverityType::None;
     // Indicates if this frame was composited by the GPU or not
     bool mGpuComposition GUARDED_BY(mMutex) = false;
     // Refresh rate for this frame.
@@ -284,10 +365,12 @@ private:
     // Rendering rate for this frame.
     std::optional<Fps> mRenderRate GUARDED_BY(mMutex);
     // Enum for the type of present
-    FramePresentMetadata mFramePresentMetadata GUARDED_BY(mMutex) =
-            FramePresentMetadata::UnknownPresent;
+    Experimental<FramePresentMetadata> mFramePresentMetadata GUARDED_BY(mMutex) =
+            Experimental<FramePresentMetadata>{FramePresentMetadata::UnknownPresent};
     // Enum for the type of finish
-    FrameReadyMetadata mFrameReadyMetadata GUARDED_BY(mMutex) = FrameReadyMetadata::UnknownFinish;
+    Experimental<FrameReadyMetadata> mFrameReadyMetadata GUARDED_BY(mMutex) =
+            Experimental<FrameReadyMetadata>{FrameReadyMetadata::UnknownFinish};
+
     // Time when the previous buffer from the same layer was latched by SF, togther with the
     // expected present time for that buffer. This is used in checking for BufferStuffing where
     // the current buffer is expected to be ready but the previous buffer was latched instead.
@@ -300,6 +383,23 @@ private:
     bool mIsBuffer;
     // GameMode from the layer. Used in metrics.
     GameMode mGameMode = GameMode::Unsupported;
+    int32_t mSystemContentPriority = gui::ISystemContentPriorityConstants::Unset;
+
+    std::weak_ptr<SurfaceFrame> mPreviousSurfaceFrame GUARDED_BY(mMutex);
+
+    // Alternative jank classification, Experimental for now.
+    nsecs_t mPresentDelay GUARDED_BY(mMutex) = 0;
+    float mJankDebugMetadata GUARDED_BY(mMutex) = 0.0f;
+    nsecs_t mExpectedPresentDelta GUARDED_BY(mMutex) = 0;
+    nsecs_t mActualPresentDelta GUARDED_BY(mMutex) = 0;
+    JankSeverityType mJankSeverity GUARDED_BY(mMutex) = JankSeverityType::None;
+    float mJankScore GUARDED_BY(mMutex) = 0.0f;
+};
+
+struct FrameTimelineDisplayState {
+    bool poweredOn = true;
+    bool modeChangeInProgress = false;
+    bool powerModeChangeInProgress = false;
 };
 
 /*
@@ -319,8 +419,8 @@ public:
     // Debug name is the human-readable debugging string for dumpsys.
     virtual std::shared_ptr<SurfaceFrame> createSurfaceFrameForToken(
             const FrameTimelineInfo& frameTimelineInfo, pid_t ownerPid, uid_t ownerUid,
-            int32_t layerId, std::string layerName, std::string debugName, bool isBuffer,
-            GameMode) = 0;
+            int32_t layerId, std::string layerName, std::string debugName, bool isBuffer, GameMode,
+            int32_t systemContentPriority) = 0;
 
     // Adds a new SurfaceFrame to the current DisplayFrame. Frames from multiple layers can be
     // composited into one display frame.
@@ -328,8 +428,8 @@ public:
 
     // The first function called by SF for the current DisplayFrame. Fetches SF predictions based on
     // the token and sets the actualSfWakeTime for the current DisplayFrame.
-    virtual void setSfWakeUp(int64_t token, nsecs_t wakeupTime, Fps refreshRate,
-                             Fps renderRate) = 0;
+    virtual void setSfWakeUp(int64_t token, nsecs_t wakeupTime, Fps refreshRate, Fps renderRate,
+                             FrameTimelineDisplayState displayState = {}) = 0;
 
     // Sets the sfPresentTime and finalizes the current DisplayFrame. Tracks the
     // given present fence until it's signaled, and updates the present timestamps of all presented
@@ -361,6 +461,11 @@ public:
 
     // Restores the max number of display frames to default. Called by SF backdoor.
     virtual void reset() = 0;
+
+    // Called when a layer is destroyed. Used for data cleanup.
+    virtual void onLayerDestroyed(int32_t layerId) = 0;
+
+    virtual std::string dumpStateForTesting() = 0;
 };
 
 namespace impl {
@@ -379,10 +484,10 @@ private:
 
     void flushTokens(nsecs_t flushTime) REQUIRES(mMutex);
 
-    std::map<int64_t, TimelineItem> mPredictions GUARDED_BY(mMutex);
+    static constexpr size_t kMaxTokens = 500;
+    ftl::StaticVector<std::pair<int64_t, TimelineItem>, kMaxTokens> mPredictions GUARDED_BY(mMutex);
     int64_t mCurrentToken GUARDED_BY(mMutex);
     mutable std::mutex mMutex;
-    static constexpr size_t kMaxTokens = 500;
 };
 
 class FrameTimeline : public android::scheduler::FrameTimeline {
@@ -412,6 +517,7 @@ public:
         // SurfaceFrame is janky.
         void dumpJank(std::string& result, nsecs_t baseTime, int displayFrameCount) const;
         // Dumpsys interface - dumps all data irrespective of jank
+        template <typename Period>
         void dumpAll(std::string& result, nsecs_t baseTime) const;
         // Emits a packet for perfetto tracing. The function body will be executed only if tracing
         // is enabled. monoBootOffset is the difference between SYSTEM_TIME_BOOTTIME
@@ -421,9 +527,11 @@ public:
                       bool filterFramesBeforeTraceStarts) const;
         // Sets the token, vsyncPeriod, predictions and SF start time.
         void onSfWakeUp(int64_t token, Fps refreshRate, Fps renderRate,
-                        std::optional<TimelineItem> predictions, nsecs_t wakeUpTime);
+                        std::optional<TimelineItem> predictions, nsecs_t wakeUpTime,
+                        FrameTimelineDisplayState displayState);
         // Sets the appropriate metadata and classifies the jank.
-        void onPresent(nsecs_t signalTime, nsecs_t previousPresentTime);
+        void onPresent(nsecs_t signalTime, nsecs_t previousPredictedPresentTime,
+                       nsecs_t previousActualPresentTime);
         // Flushes all the surface frames as those were not generating any actual display frames.
         void onCommitNotComposited();
         // Adds the provided SurfaceFrame to the current display frame.
@@ -442,15 +550,18 @@ public:
         TimelineItem getActuals() const { return mSurfaceFlingerActuals; };
         TimelineItem getPredictions() const { return mSurfaceFlingerPredictions; };
         FrameStartMetadata getFrameStartMetadata() const { return mFrameStartMetadata; };
-        FramePresentMetadata getFramePresentMetadata() const { return mFramePresentMetadata; };
+        FramePresentMetadata getFramePresentMetadata() const {
+            return mFramePresentMetadata.value();
+        };
         FrameReadyMetadata getFrameReadyMetadata() const { return mFrameReadyMetadata; };
-        int32_t getJankType() const { return mJankType; }
-        JankSeverityType getJankSeverityType() const { return mJankSeverityType; }
+        int32_t getJankType() const { return mJankType.value(); }
+        JankSeverityType getJankSeverityType() const { return mJankSeverityTypeLegacy; }
         const std::vector<std::shared_ptr<SurfaceFrame>>& getSurfaceFrames() const {
             return mSurfaceFrames;
         }
 
     private:
+        template <typename Period>
         void dump(std::string& result, nsecs_t baseTime) const;
         void tracePredictions(pid_t surfaceFlingerPid, nsecs_t monoBootOffset,
                               bool filterFramesBeforeTraceStarts) const;
@@ -460,7 +571,8 @@ public:
                              nsecs_t previousActualPresentTime,
                              bool filterFramesBeforeTraceStarts) const;
         void classifyJank(nsecs_t& deadlineDelta, nsecs_t& deltaToVsync,
-                          nsecs_t previousPresentTime);
+                          nsecs_t previousPredictedPresentTime, nsecs_t previousActualPresentTime);
+        void classifyJankLegacy(nsecs_t presentDelay, nsecs_t previousActualPresentTime);
 
         int64_t mToken = FrameTimelineInfo::INVALID_VSYNC_ID;
 
@@ -479,13 +591,14 @@ public:
 
         PredictionState mPredictionState = PredictionState::None;
         // Bitmask for the type of jank
-        int32_t mJankType = JankType::None;
+        Experimental<int32_t> mJankType{JankType::None};
         // Enum for the severity of jank
-        JankSeverityType mJankSeverityType = JankSeverityType::None;
+        JankSeverityType mJankSeverityTypeLegacy = JankSeverityType::None;
         // A valid gpu fence indicates that the DisplayFrame was composited by the GPU
         std::shared_ptr<FenceTime> mGpuFence = FenceTime::NO_FENCE;
         // Enum for the type of present
-        FramePresentMetadata mFramePresentMetadata = FramePresentMetadata::UnknownPresent;
+        Experimental<FramePresentMetadata> mFramePresentMetadata{
+                FramePresentMetadata::UnknownPresent};
         // Enum for the type of finish
         FrameReadyMetadata mFrameReadyMetadata = FrameReadyMetadata::UnknownFinish;
         // Enum for the type of start
@@ -499,6 +612,15 @@ public:
         // Using a reference here because the counter is owned by FrameTimeline, which outlives
         // DisplayFrame.
         TraceCookieCounter& mTraceCookieCounter;
+
+        // Alternative jank classification, Experimental for now.
+        nsecs_t mPresentDelay = 0;
+        float mJankDebugMetadata = 0.0f;
+        FrameTimelineDisplayState mDisplayState = {};
+        nsecs_t mExpectedPresentDelta = 0;
+        nsecs_t mActualPresentDelta = 0;
+        JankSeverityType mJankSeverity = JankSeverityType::None;
+        float mJankScore = 0.0f;
     };
 
     FrameTimeline(std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid,
@@ -509,10 +631,11 @@ public:
     scheduler::TokenManager* getTokenManager() override { return &mTokenManager; }
     std::shared_ptr<SurfaceFrame> createSurfaceFrameForToken(
             const FrameTimelineInfo& frameTimelineInfo, pid_t ownerPid, uid_t ownerUid,
-            int32_t layerId, std::string layerName, std::string debugName, bool isBuffer,
-            GameMode) override;
+            int32_t layerId, std::string layerName, std::string debugName, bool isBuffer, GameMode,
+            int32_t systemContentPriority) override;
     void addSurfaceFrame(std::shared_ptr<scheduler::SurfaceFrame> surfaceFrame) override;
-    void setSfWakeUp(int64_t token, nsecs_t wakeupTime, Fps refreshRate, Fps renderRate) override;
+    void setSfWakeUp(int64_t token, nsecs_t wakeupTime, Fps refreshRate, Fps renderRate,
+                     FrameTimelineDisplayState displayState = {}) override;
     void setSfPresent(nsecs_t sfPresentTime, const std::shared_ptr<FenceTime>& presentFence,
                       const std::shared_ptr<FenceTime>& gpuFence = FenceTime::NO_FENCE) override;
     void onCommitNotComposited() override;
@@ -521,6 +644,8 @@ public:
     float computeFps(const std::unordered_set<int32_t>& layerIds) override;
     void generateFrameStats(int32_t layer, size_t count, FrameStats* outStats) const override;
     void reset() override;
+    void onLayerDestroyed(int32_t layerId) override;
+    std::string dumpStateForTesting() override;
 
     // Sets up the perfetto tracing backend and data source.
     void onBootFinished() override;
@@ -529,6 +654,9 @@ public:
     void registerDataSource();
 
     static constexpr char kFrameTimelineDataSource[] = "android.surfaceflinger.frametimeline";
+
+    static constexpr Fps kThresholdFpsForAnimation = 20_Hz;
+    static constexpr float kDeltaFramesRatioThreshold = 0.30f;
 
 private:
     // Friend class for testing
@@ -562,6 +690,9 @@ private:
     // display frame, this is a good starting size for the vector so that we can avoid the
     // internal vector resizing that happens with push_back.
     static constexpr uint32_t kNumSurfaceFramesInitial = 10;
+
+    std::unordered_map<int32_t /*layerId*/, std::weak_ptr<SurfaceFrame>> mPreviousSurfaceFrames
+            GUARDED_BY(mMutex);
 };
 
 } // namespace impl

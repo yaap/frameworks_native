@@ -18,6 +18,7 @@
 
 #include <aidl/com/android/server/inputflinger/IInputFlingerRust.h>
 #include <android/binder_auto_utils.h>
+#include <jni.h>
 #include <utils/Mutex.h>
 #include <memory>
 #include <mutex>
@@ -39,7 +40,7 @@ using IInputThreadCallback =
 class InputFilterCallbacks : public IInputFilter::BnInputFilterCallbacks {
 public:
     explicit InputFilterCallbacks(InputListenerInterface& listener,
-                                  InputFilterPolicyInterface& policy, JNIEnv* env);
+                                  InputFilterPolicyInterface& policy, JavaVM* vm);
     ~InputFilterCallbacks() override = default;
 
     uint32_t getModifierState();
@@ -48,7 +49,7 @@ public:
 private:
     InputListenerInterface& mNextListener;
     InputFilterPolicyInterface& mPolicy;
-    JNIEnv* mJniEnv;
+    JavaVM* mVm;
     mutable std::mutex mLock;
     struct StickyModifierState {
         uint32_t modifierState;

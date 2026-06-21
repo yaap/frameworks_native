@@ -19,6 +19,7 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 #include <android/gui/ISurfaceComposer.h>
+#include <binder/Binder.h>
 #include <gtest/gtest.h>
 #include <gui/AidlUtil.h>
 #include <gui/Surface.h>
@@ -217,7 +218,8 @@ TEST_F(CredentialsTest, SetDesiredDisplayConfigsTest) {
     ASSERT_EQ(res, NO_ERROR);
     gui::DisplayModeSpecs setSpecs;
     std::function<status_t()> condition = [=]() {
-        return SurfaceComposerClient::setDesiredDisplayModeSpecs(display, specs);
+        sp<IBinder> applyToken = sp<BBinder>::make();
+        return SurfaceComposerClient::setDesiredDisplayModeSpecs(applyToken, {specs});
     };
     ASSERT_NO_FATAL_FAILURE(checkWithPrivileges<status_t>(condition, NO_ERROR, PERMISSION_DENIED));
 }

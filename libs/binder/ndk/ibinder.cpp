@@ -58,7 +58,8 @@ static const char* kNdkTrace = "AIDL::ndk::";
 static const char* kServerTrace = "::server";
 static const char* kClientTrace = "::client";
 static const char* kSeparator = "::";
-static const char* kUnknownCode = "name=?_code=";
+static const char* kUnknownCode = "#";
+static const char* kBackendType = "ndk";
 
 namespace ABBinderTag {
 
@@ -229,6 +230,9 @@ bool AIBinder::associateClass(const AIBinder_Class* clazz) {
 ABBinder::ABBinder(const AIBinder_Class* clazz, void* userData)
     : AIBinder(clazz), BBinder(), mUserData(userData) {
     LOG_ALWAYS_FATAL_IF(clazz == nullptr, "clazz == nullptr");
+    if (clazz->mTransactionCodeData.names != nullptr) {
+        BBinder::setTransactionCodeMap(&clazz->mTransactionCodeData);
+    }
 }
 ABBinder::~ABBinder() {
     getClass()->onDestroy(mUserData);
@@ -267,17 +271,6 @@ status_t ABBinder::dump(int fd, const ::android::Vector<String16>& args) {
 
 status_t ABBinder::onTransact(transaction_code_t code, const Parcel& data, Parcel* reply,
                               binder_flags_t flags) {
-    std::string sectionName;
-    bool tracingEnabled = get_trace_enabled_tags() & ATRACE_TAG_AIDL;
-    if (tracingEnabled) {
-        sectionName = getTraceSectionName(getClass(), code, true /*isServer*/);
-        trace_begin(ATRACE_TAG_AIDL, sectionName.c_str());
-    }
-
-    scope_guard guard = make_scope_guard([&]() {
-        if (tracingEnabled) trace_end(ATRACE_TAG_AIDL);
-    });
-
     if (isUserCommand(code)) {
         if (getClass()->writeHeader && !data.checkInterface(this)) {
             return STATUS_BAD_TYPE;
@@ -347,6 +340,12 @@ void ABBinder::addDeathRecipient(const ::android::sp<AIBinder_DeathRecipient>& /
     LOG_ALWAYS_FATAL("Should not reach this. Can't linkToDeath local binders.");
 }
 
+void ABBinder::addFrozenStateChangeCallback(
+        const ::android::sp<AIBinder_FrozenStateChangeCallback>& /* recipient */,
+        void* /* cookie */) {
+    LOG_ALWAYS_FATAL("Should not reach this. Can't addFrozenStateChangeCallback local binders.");
+}
+
 ABpBinder::ABpBinder(const ::android::sp<::android::IBinder>& binder)
     : AIBinder(nullptr /*clazz*/), mRemote(binder) {
     LOG_ALWAYS_FATAL_IF(binder == nullptr, "binder == nullptr");
@@ -355,6 +354,12 @@ ABpBinder::ABpBinder(const ::android::sp<::android::IBinder>& binder)
 ABpBinder::~ABpBinder() {
     for (auto& recip : mDeathRecipients) {
         sp<AIBinder_DeathRecipient> strongRecip = recip.recipient.promote();
+        if (strongRecip) {
+            strongRecip->pruneThisTransferEntry(getBinder(), recip.cookie);
+        }
+    }
+    for (auto& recip : mFrozenStateChangeCallbacks) {
+        sp<AIBinder_FrozenStateChangeCallback> strongRecip = recip.recipient.promote();
         if (strongRecip) {
             strongRecip->pruneThisTransferEntry(getBinder(), recip.cookie);
         }
@@ -402,6 +407,12 @@ void ABpBinder::addDeathRecipient(const ::android::sp<AIBinder_DeathRecipient>& 
                                   void* cookie) {
     std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
     mDeathRecipients.emplace_back(recipient, cookie);
+}
+
+void ABpBinder::addFrozenStateChangeCallback(
+        const ::android::sp<AIBinder_FrozenStateChangeCallback>& recipient, void* cookie) {
+    std::lock_guard<std::mutex> l(mFrozenStateChangeCallbacksMutex);
+    mFrozenStateChangeCallbacks.emplace_back(recipient, cookie);
 }
 
 struct AIBinder_Weak {
@@ -458,31 +469,32 @@ AIBinder_Class::AIBinder_Class(const char* interfaceDescriptor, AIBinder_Class_o
       onDestroy(onDestroy),
       onTransact(onTransact),
       mInterfaceDescriptor(interfaceDescriptor),
-      mWideInterfaceDescriptor(interfaceDescriptor) {}
+      mWideInterfaceDescriptor(interfaceDescriptor),
+      mTransactionCodeData{sizeof(android::TransactionCodeData), kBackendType, nullptr, 0} {}
 
 bool AIBinder_Class::setTransactionCodeMap(const char* const* transactionCodeMap, size_t length) {
-    if (mTransactionCodeToFunction != nullptr) {
+    if (mTransactionCodeData.names != nullptr) {
         ALOGE("mTransactionCodeToFunction is already set!");
         return false;
     }
-    mTransactionCodeToFunction = transactionCodeMap;
-    mTransactionCodeToFunctionLength = length;
+    mTransactionCodeData.names = transactionCodeMap;
+    mTransactionCodeData.count = length;
     return true;
 }
 
 const char* AIBinder_Class::getFunctionName(transaction_code_t code) const {
-    if (mTransactionCodeToFunction == nullptr) {
+    if (mTransactionCodeData.names == nullptr) {
         ALOGE("mTransactionCodeToFunction is not set!");
         return nullptr;
     }
 
     if (code < FIRST_CALL_TRANSACTION ||
-        code - FIRST_CALL_TRANSACTION >= mTransactionCodeToFunctionLength) {
+        code - FIRST_CALL_TRANSACTION >= mTransactionCodeData.count) {
         ALOGE("Function name for requested code not found!");
         return nullptr;
     }
 
-    return mTransactionCodeToFunction[code - FIRST_CALL_TRANSACTION];
+    return mTransactionCodeData.names[code - FIRST_CALL_TRANSACTION];
 }
 
 AIBinder_Class* AIBinder_Class_define(const char* interfaceDescriptor,
@@ -514,7 +526,7 @@ void AIBinder_Class_setTransactionCodeToFunctionNameMap(
                         "transactionCodeToFunction already set?");
 }
 
-const char* AIBinder_Class_getFunctionName(AIBinder_Class* clazz, transaction_code_t code) {
+const char* AIBinder_Class_getFunctionName(const AIBinder_Class* clazz, transaction_code_t code) {
     LOG_ALWAYS_FATAL_IF(
             clazz == nullptr,
             "Valid clazz is needed to get function name for requested transaction code");
@@ -540,17 +552,11 @@ const char* AIBinder_Class_getDescriptor(const AIBinder_Class* clazz) {
     return clazz->getInterfaceDescriptorUtf8();
 }
 
-AIBinder_DeathRecipient::TransferDeathRecipient::~TransferDeathRecipient() {
-    if (mOnUnlinked != nullptr) {
-        mOnUnlinked(mCookie);
-    }
-}
-
 void AIBinder_DeathRecipient::TransferDeathRecipient::binderDied(const wp<IBinder>& who) {
     LOG_ALWAYS_FATAL_IF(who != mWho, "%p (%p) vs %p (%p)", who.unsafe_get(), who.get_refs(),
                         mWho.unsafe_get(), mWho.get_refs());
 
-    mOnDied(mCookie);
+    mOnCallback(mCookie);
 
     sp<AIBinder_DeathRecipient> recipient = mParentRecipient.promote();
     sp<IBinder> strongWho = who.promote();
@@ -572,46 +578,31 @@ AIBinder_DeathRecipient::AIBinder_DeathRecipient(AIBinder_DeathRecipient_onBinde
 }
 
 void AIBinder_DeathRecipient::pruneThisTransferEntry(const sp<IBinder>& who, void* cookie) {
-    std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
-    mDeathRecipients.erase(std::remove_if(mDeathRecipients.begin(), mDeathRecipients.end(),
-                                          [&](const sp<TransferDeathRecipient>& tdr) {
-                                              auto tdrWho = tdr->getWho();
-                                              return tdrWho != nullptr && tdrWho.promote() == who &&
-                                                     cookie == tdr->getCookie();
-                                          }),
-                           mDeathRecipients.end());
-}
-
-void AIBinder_DeathRecipient::pruneDeadTransferEntriesLocked() {
-    mDeathRecipients.erase(std::remove_if(mDeathRecipients.begin(), mDeathRecipients.end(),
-                                          [](const sp<TransferDeathRecipient>& tdr) {
-                                              return tdr->getWho() == nullptr;
-                                          }),
-                           mDeathRecipients.end());
+    mDeathRecipients.pruneThisTransferEntry(who, cookie);
 }
 
 binder_status_t AIBinder_DeathRecipient::linkToDeath(const sp<IBinder>& binder, void* cookie) {
     LOG_ALWAYS_FATAL_IF(binder == nullptr, "binder == nullptr");
 
-    std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
+    std::lock_guard<std::mutex> l(mDeathRecipients.mMutex);
 
     if (mOnUnlinked && cookie &&
-        std::find_if(mDeathRecipients.begin(), mDeathRecipients.end(),
+        std::find_if(mDeathRecipients.mList.begin(), mDeathRecipients.mList.end(),
                      [&cookie](android::sp<TransferDeathRecipient> recipient) {
                          return recipient->getCookie() == cookie;
-                     }) != mDeathRecipients.end()) {
+                     }) != mDeathRecipients.mList.end()) {
         ALOGE("Attempting to AIBinder_linkToDeath with the same cookie with an onUnlink callback. "
               "This will cause the onUnlinked callback to be called multiple times with the same "
               "cookie, which is usually not intended.");
     }
     if (!mOnUnlinked && cookie) {
         ALOGW("AIBinder_linkToDeath is being called with a non-null cookie and no onUnlink "
-              "callback set. This might not be intended. AIBinder_DeathRecipient_setOnUnlinked "
-              "should be called first.");
+              "callback set. Use AIBinder_DeathRecipient_setOnUnlinked to manage the lifetime "
+              "of the cookie. This will become an abort.");
     }
 
     sp<TransferDeathRecipient> recipient =
-            new TransferDeathRecipient(binder, cookie, this, mOnDied, mOnUnlinked);
+            sp<TransferDeathRecipient>::make(binder, cookie, this, mOnDied, mOnUnlinked);
 
     status_t status = binder->linkToDeath(recipient, cookie, 0 /*flags*/);
     if (status != STATUS_OK) {
@@ -620,22 +611,22 @@ binder_status_t AIBinder_DeathRecipient::linkToDeath(const sp<IBinder>& binder, 
         return PruneStatusT(status);
     }
 
-    mDeathRecipients.push_back(recipient);
+    mDeathRecipients.mList.push_back(recipient);
 
-    pruneDeadTransferEntriesLocked();
+    mDeathRecipients.pruneDeadTransferEntriesLocked();
     return STATUS_OK;
 }
 
 binder_status_t AIBinder_DeathRecipient::unlinkToDeath(const sp<IBinder>& binder, void* cookie) {
     LOG_ALWAYS_FATAL_IF(binder == nullptr, "binder == nullptr");
 
-    std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
+    std::lock_guard<std::mutex> l(mDeathRecipients.mMutex);
 
-    for (auto it = mDeathRecipients.rbegin(); it != mDeathRecipients.rend(); ++it) {
+    for (auto it = mDeathRecipients.mList.rbegin(); it != mDeathRecipients.mList.rend(); ++it) {
         sp<TransferDeathRecipient> recipient = *it;
 
         if (recipient->getCookie() == cookie && recipient->getWho() == binder) {
-            mDeathRecipients.erase(it.base() - 1);
+            mDeathRecipients.mList.erase(it.base() - 1);
 
             status_t status = binder->unlinkToDeath(recipient, cookie, 0 /*flags*/);
             if (status != ::android::OK) {
@@ -653,6 +644,82 @@ void AIBinder_DeathRecipient::setOnUnlinked(AIBinder_DeathRecipient_onBinderUnli
     mOnUnlinked = onUnlinked;
 }
 
+void AIBinder_FrozenStateChangeCallback::TransferFrozenStateChangeCallback::onStateChanged(
+        const wp<IBinder>& who, State state) {
+    LOG_ALWAYS_FATAL_IF(who != mWho, "%p (%p) vs %p (%p)", who.unsafe_get(), who.get_refs(),
+                        mWho.unsafe_get(), mWho.get_refs());
+
+    mOnCallback(mCookie, state == State::FROZEN);
+
+    // sp<AIBinder_FrozenStateChangeCallback> recipient = mParentRecipient.promote();
+    // sp<IBinder> strongWho = who.promote();
+
+    // For frozen state callbacks, we don't automatically remove them on state change.
+    // They are removed when the AIBinder is deleted or explicitly unlinked.
+    // pruneThisTransferEntry handles cleanup on AIBinder deletion.
+}
+
+AIBinder_FrozenStateChangeCallback::AIBinder_FrozenStateChangeCallback(
+        AIBinder_FrozenStateChangeCallback_onStateChanged onStateChanged,
+        AIBinder_FrozenStateChangeCallback_onBinderUnlinked onUnlinked)
+    : mOnStateChanged(onStateChanged), mOnUnlinked(onUnlinked) {
+    LOG_ALWAYS_FATAL_IF(onStateChanged == nullptr, "onStateChanged == nullptr");
+}
+
+void AIBinder_FrozenStateChangeCallback::pruneThisTransferEntry(const sp<IBinder>& who,
+                                                                void* cookie) {
+    mFrozenStateChangeCallbacks.pruneThisTransferEntry(who, cookie);
+}
+
+binder_status_t AIBinder_FrozenStateChangeCallback::addFrozenStateChangeCallback(
+        const sp<IBinder>& binder, void* cookie) {
+    LOG_ALWAYS_FATAL_IF(binder == nullptr, "binder == nullptr");
+    if (mOnUnlinked == nullptr) {
+        ALOGE("onUnlinked callback is not set");
+        return STATUS_INVALID_OPERATION;
+    }
+
+    std::lock_guard<std::mutex> l(mFrozenStateChangeCallbacks.mMutex);
+
+    sp<TransferFrozenStateChangeCallback> callback = sp<TransferFrozenStateChangeCallback>::make(
+            binder, cookie, this, mOnStateChanged, mOnUnlinked);
+
+    status_t status = binder->addFrozenStateChangeCallback(callback);
+    if (status != STATUS_OK) {
+        return PruneStatusT(status);
+    }
+
+    mFrozenStateChangeCallbacks.mList.push_back(callback);
+
+    mFrozenStateChangeCallbacks.pruneDeadTransferEntriesLocked();
+    return STATUS_OK;
+}
+
+binder_status_t AIBinder_FrozenStateChangeCallback::removeFrozenStateChangeCallback(
+        const sp<IBinder>& binder, void* cookie) {
+    LOG_ALWAYS_FATAL_IF(binder == nullptr, "binder == nullptr");
+
+    std::lock_guard<std::mutex> l(mFrozenStateChangeCallbacks.mMutex);
+
+    for (auto it = mFrozenStateChangeCallbacks.mList.rbegin();
+         it != mFrozenStateChangeCallbacks.mList.rend(); ++it) {
+        sp<TransferFrozenStateChangeCallback> callback = *it;
+
+        if (callback->getCookie() == cookie && callback->getWho() == binder) {
+            mFrozenStateChangeCallbacks.mList.erase(it.base() - 1);
+
+            status_t status = binder->removeFrozenStateChangeCallback(callback);
+            if (status != ::android::OK) {
+                ALOGE("%s: removed reference to frozen state change callback but unlink failed: %s",
+                      __func__, statusToString(status).c_str());
+            }
+            return PruneStatusT(status);
+        }
+    }
+
+    return STATUS_NAME_NOT_FOUND;
+}
+
 // start of C-API methods
 
 AIBinder* AIBinder_new(const AIBinder_Class* clazz, void* args) {
@@ -663,7 +730,7 @@ AIBinder* AIBinder_new(const AIBinder_Class* clazz, void* args) {
 
     void* userData = clazz->onCreate(args);
 
-    sp<AIBinder> ret = new ABBinder(clazz, userData);
+    sp<AIBinder> ret = sp<ABBinder>::make(clazz, userData);
     ABBinderTag::attach(ret->getBinder());
 
     AIBinder_incStrong(ret.get());
@@ -938,6 +1005,54 @@ void AIBinder_DeathRecipient_delete(AIBinder_DeathRecipient* recipient) {
 
     recipient->decStrong(nullptr);
 }
+
+AIBinder_FrozenStateChangeCallback* AIBinder_FrozenStateChangeCallback_new(
+        AIBinder_FrozenStateChangeCallback_onStateChanged onStateChanged,
+        AIBinder_FrozenStateChangeCallback_onBinderUnlinked onUnlinked) {
+    if (onStateChanged == nullptr) {
+        ALOGE("%s: requires non-null onStateChanged parameter.", __func__);
+        return nullptr;
+    }
+    auto ret = new AIBinder_FrozenStateChangeCallback(onStateChanged, onUnlinked);
+    ret->incStrong(nullptr);
+    return ret;
+}
+
+void AIBinder_FrozenStateChangeCallback_delete(
+        AIBinder_FrozenStateChangeCallback* callback) {
+    if (callback == nullptr) {
+        return;
+    }
+
+    callback->decStrong(nullptr);
+}
+
+binder_status_t AIBinder_addFrozenStateChangeCallback(
+        AIBinder* binder, AIBinder_FrozenStateChangeCallback* callback, void* cookie) {
+    if (binder == nullptr || callback == nullptr) {
+        ALOGE("%s: Must provide binder (%p) and callback (%p)", __func__, binder, callback);
+        return STATUS_UNEXPECTED_NULL;
+    }
+
+    binder_status_t ret = callback->addFrozenStateChangeCallback(binder->getBinder(), cookie);
+    if (ret == STATUS_OK) {
+        binder->addFrozenStateChangeCallback(callback, cookie);
+    }
+    return ret;
+}
+
+binder_status_t AIBinder_removeFrozenStateChangeCallback(
+        AIBinder* binder, AIBinder_FrozenStateChangeCallback* callback, void* cookie) {
+    if (binder == nullptr || callback == nullptr) {
+        ALOGE("%s: Must provide binder (%p) and callback (%p)", __func__, binder, callback);
+        return STATUS_UNEXPECTED_NULL;
+    }
+
+    // returns binder_status_t
+    return callback->removeFrozenStateChangeCallback(binder->getBinder(), cookie);
+}
+
+
 
 binder_status_t AIBinder_getExtension(AIBinder* binder, AIBinder** outExt) {
     if (binder == nullptr || outExt == nullptr) {

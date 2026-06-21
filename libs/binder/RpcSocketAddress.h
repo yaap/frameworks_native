@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/un.h>
 
+#include <binder/unique_fd.h>
 #include "vm_sockets.h"
 
 namespace android {
@@ -34,6 +35,36 @@ public:
     virtual std::string toString() const = 0;
     virtual const sockaddr* addr() const = 0;
     virtual size_t addrSize() const = 0;
+
+    static status_t getPeerUid(android::binder::borrowed_fd fd, const sockaddr* addr,
+                               size_t addrLen, std::optional<uid_t>* outUid) {
+        *outUid = std::nullopt;
+        if (addrLen < sizeof(sa_family_t)) return BAD_VALUE;
+        if (addr->sa_family != AF_UNIX) {
+            return OK;
+        }
+
+#ifdef __linux__
+        ucred creds{};
+        socklen_t len = sizeof(creds);
+        if (getsockopt(fd.get(), SOL_SOCKET, SO_PEERCRED, &creds, &len) < 0) {
+            /* Sepolicy denial will return EACCES in case of missing getopt
+             * permission. Knowing client UID is not essential so treat
+             * this as a warning for backward compatibility
+             */
+            if (errno == EACCES) {
+                ALOGW("Permission denied while retrieving peer UID, ignoring it");
+                return OK;
+            }
+            return -errno;
+        }
+        *outUid = creds.uid;
+        return OK;
+#else
+        (void)fd;
+        return OK;
+#endif
+    }
 };
 
 class UnixSocketAddress : public RpcSocketAddress {

@@ -176,7 +176,6 @@ public:
     // * NO_INIT - the BufferQueue has been abandoned.
     virtual status_t getReleasedBuffers(uint64_t* slotMask) = 0;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     // getReleasedBuffersExtended for each slot, sets slotMask[slot] to 1 if it
     // corresponds to a released buffer slot. In particular, a released buffer
     // is one that has been released by the BufferQueue but has not yet been
@@ -187,7 +186,6 @@ public:
     // Return of a value other than NO_ERROR means an error has occurred:
     // * NO_INIT - the BufferQueue has been abandoned.
     virtual status_t getReleasedBuffersExtended(std::vector<bool>* slotMask) = 0;
-#endif
 
     // setDefaultBufferSize is used to set the size of buffers returned by dequeueBuffer when a
     // width and height of zero is requested. Default is 1x1.
@@ -196,7 +194,6 @@ public:
     // * BAD_VALUE - either w or h was zero
     virtual status_t setDefaultBufferSize(uint32_t w, uint32_t h) = 0;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     // allowUnlimitedSlots allows the producer to set the upper bound on slots.
     //
     // Must be called before the producer is connected. If the producer
@@ -214,7 +211,6 @@ public:
     //                       * setMaxBufferCount has been called and shrunk the
     //                         BufferQueue.
     virtual status_t allowUnlimitedSlots(bool allowUnlimitedSlots) = 0;
-#endif
 
     // setMaxBufferCount sets the maximum value for the number of buffers used in the BufferQueue
     // (the initial default is NUM_BUFFER_SLOTS). If a call to setMaxAcquiredBufferCount (by the

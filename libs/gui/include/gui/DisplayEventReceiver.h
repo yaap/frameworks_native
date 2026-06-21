@@ -142,9 +142,7 @@ public:
      * To receive ModeChanged and/or FrameRateOverrides events specify this in
      * the constructor. Other events start being delivered immediately.
      */
-    explicit DisplayEventReceiver(gui::ISurfaceComposer::VsyncSource vsyncSource =
-                                          gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
-                                  EventRegistrationFlags eventRegistration = {},
+    explicit DisplayEventReceiver(EventRegistrationFlags eventRegistration = {},
                                   const sp<IBinder>& layerHandle = nullptr);
 
     /*
@@ -204,7 +202,7 @@ public:
 private:
     sp<IDisplayEventConnection> mEventConnection;
     std::unique_ptr<gui::BitTube> mDataChannel;
-    std::optional<status_t> mInitError;
+    status_t mInitError = NO_INIT;
     bool mSurfaceflingerAlive;
 };
 

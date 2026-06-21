@@ -41,11 +41,15 @@ class TransactionState {
 public:
     explicit TransactionState() = default;
     TransactionState(TransactionState const& other) = default;
+    TransactionState(TransactionState&& other) = default;
     TransactionState(uint64_t id, uint32_t flags, int64_t desiredPresentTime, bool isAutoTimestamp)
           : mId(id),
             mFlags(flags),
             mDesiredPresentTime(desiredPresentTime),
             mIsAutoTimestamp(isAutoTimestamp) {}
+
+    TransactionState& operator=(TransactionState const& other) = default;
+    TransactionState& operator=(TransactionState&& other) = default;
 
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(const Parcel* parcel);

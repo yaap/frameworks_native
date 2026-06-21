@@ -147,6 +147,13 @@ TEST(Parcel, DebugReadAllFds) {
     EXPECT_EQ(ret[1], STDIN_FILENO);
 }
 
+TEST(Parcel, SetDataTooLarge) {
+    Parcel p;
+    uint8_t data[1] = {0};
+    size_t tooLarge = static_cast<size_t>(INT32_MAX) + 1;
+    ASSERT_EQ(android::BAD_VALUE, p.setData(data, tooLarge));
+}
+
 TEST(Parcel, AppendFromEmpty) {
     Parcel p1;
     Parcel p2;
@@ -207,6 +214,20 @@ TEST(Parcel, AppendWithBadDataPos) {
     p2.setDataPosition(10000);
 
     EXPECT_EQ(android::BAD_VALUE, p2.appendFrom(&p1, 0, 8));
+}
+
+TEST(Parcel, AppendFromBadRange) {
+    Parcel p1;
+    Parcel p2;
+    p2.writeInt32(1);
+    p2.writeInt32(2);
+
+    // Offset out of bounds
+    ASSERT_EQ(android::BAD_VALUE, p1.appendFrom(&p2, 100, 4));
+    // Length out of bounds
+    ASSERT_EQ(android::BAD_VALUE, p1.appendFrom(&p2, 0, 100));
+    // Offset + length out of bounds
+    ASSERT_EQ(android::BAD_VALUE, p1.appendFrom(&p2, 4, 8));
 }
 
 TEST(Parcel, HasBinders) {
@@ -298,6 +319,35 @@ TEST(Parcel, AppendWithBinderPartial) {
     ASSERT_EQ(b2, p2.readStrongBinder());
 }
 
+TEST(Parcel, AppendFromPartialObjectList) {
+    sp<IBinder> b1 = sp<BBinder>::make();
+    sp<IBinder> b2 = sp<BBinder>::make();
+    sp<IBinder> b3 = sp<BBinder>::make();
+
+    Parcel p1;
+    p1.writeInt32(1);
+    p1.writeStrongBinder(b1);
+    size_t offset = p1.dataPosition();
+    p1.writeInt32(2);
+    p1.writeStrongBinder(b2);
+    size_t len = p1.dataPosition() - offset;
+    p1.writeInt32(3);
+    p1.writeStrongBinder(b3);
+
+    ASSERT_EQ(3, p1.objectsCount());
+
+    Parcel p2;
+    p2.writeInt32(0);
+    ASSERT_EQ(OK, p2.appendFrom(&p1, offset, len));
+
+    ASSERT_EQ(1, p2.objectsCount());
+
+    p2.setDataPosition(0);
+    ASSERT_EQ(0, p2.readInt32());
+    ASSERT_EQ(2, p2.readInt32());
+    ASSERT_EQ(b2, p2.readStrongBinder());
+}
+
 TEST(Parcel, AppendWithFd) {
     unique_fd fd1 = unique_fd(dup(0));
     unique_fd fd2 = unique_fd(dup(0));
@@ -365,6 +415,35 @@ TEST(Parcel, AppendOverObject) {
 
     p1.setDataPosition(8);
     ASSERT_EQ(PERMISSION_DENIED, p1.appendFrom(&p2, 0, p2.dataSize()));
+}
+
+TEST(Parcel, WriteObjectUnsortedThenValidate) {
+    Parcel p;
+    sp<IBinder> b1 = sp<BBinder>::make();
+    sp<IBinder> b2 = sp<BBinder>::make();
+
+    p.setDataCapacity(100);
+
+    // Write an object at a later position, so the parcel is not empty.
+    p.setDataPosition(50);
+    ASSERT_EQ(OK, p.writeStrongBinder(b1));
+    ASSERT_EQ(1, p.objectsCount());
+
+    // Write another object at the beginning. This makes the object offset
+    // list unsorted ([50, 0]). The internal mObjectsSorted flag should
+    // become false.
+    p.setDataPosition(0);
+    ASSERT_EQ(OK, p.writeStrongBinder(b2));
+    ASSERT_EQ(2, p.objectsCount());
+
+    // Now, try to read across the boundary of the object at offset 0.
+    // This forces validateReadData to sort the object list and detect
+    // the collision.
+    p.setDataPosition(4);
+    int64_t val;
+    // Reading an int64 from offset 4 would read bytes 4-11. The object
+    // at offset 0 occupies more than 4 bytes, so this is an invalid read.
+    ASSERT_EQ(PERMISSION_DENIED, p.readInt64(&val));
 }
 
 // Tests a second operation results in a parcel at the same location as it

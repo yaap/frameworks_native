@@ -464,6 +464,15 @@ prop {
     prop_name: "ro.surface_flinger.enable_sdr_dimming"
 }
 
+# Allow hole punching for layers without rounded corners
+prop {
+    api_name: "force_hole_punch"
+    type: Boolean
+    scope: Internal
+    access: Readonly
+    prop_name: "ro.surface_flinger.force_hole_punch"
+}
+
 # Ignores Camera layers when calculating HDR coverage information
 prop {
     api_name: "ignore_hdr_camera_layers"
@@ -516,4 +525,24 @@ prop {
     scope: Public
     access: Readonly
     prop_name: "ro.surface_flinger.game_default_frame_rate_override"
+}
+
+# The timeout for resync triggered by transaction, in nanoseconds.
+# If the timeout is 0, resync will not be triggered by transaction.
+prop {
+    api_name: "resync_on_tx_timeout"
+    type: Long
+    scope: Public
+    access: Readonly
+    prop_name: "ro.surface_flinger.resync_on_tx_timeout"
+}
+
+# The timeout for resync triggered by choreographer, in nanoseconds.
+# If the timeout is 0, resync will not be triggered by choreographer.
+prop {
+    api_name: "resync_on_choreographer_timeout"
+    type: Long
+    scope: Public
+    access: Readonly
+    prop_name: "ro.surface_flinger.resync_on_choreographer_timeout"
 }

@@ -16,6 +16,7 @@
 
 #include <TestEventMatchers.h>
 #include <android-base/logging.h>
+#include <android-base/result-gmock.h>
 #include <attestation/HmacKeyManager.h>
 #include <ftl/enum.h>
 #include <gmock/gmock.h>
@@ -26,7 +27,9 @@
 #include <input/InputTransport.h>
 
 using android::base::Result;
+using android::base::testing::Ok;
 using ::testing::Matcher;
+using ::testing::Not;
 
 namespace android {
 
@@ -218,7 +221,7 @@ Result<InputPublisher::ConsumerResponse> receiveConsumerResponse(
 
 void verifyFinishedSignal(InputPublisher& publisher, uint32_t seq, nsecs_t publishTime) {
     Result<InputPublisher::ConsumerResponse> result = receiveConsumerResponse(publisher, TIMEOUT);
-    ASSERT_TRUE(result.ok()) << "receiveConsumerResponse returned " << result.error().message();
+    ASSERT_THAT(result, Ok()) << "receiveConsumerResponse returned " << result.error().message();
     ASSERT_TRUE(std::holds_alternative<InputPublisher::Finished>(*result));
     const InputPublisher::Finished& finish = std::get<InputPublisher::Finished>(*result);
     ASSERT_EQ(seq, finish.seq)
@@ -691,7 +694,7 @@ void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeBatchedMotionMo
     ASSERT_FALSE(noEvent.has_value()) << "Got unexpected event: " << *noEvent;
 
     Result<InputPublisher::ConsumerResponse> result = mPublisher->receiveConsumerResponse();
-    ASSERT_FALSE(result.ok());
+    ASSERT_THAT(result, Not(Ok()));
     ASSERT_EQ(WOULD_BLOCK, result.error().code());
 
     // We shouldn't be calling mConsumer on the UI thread, but in this situation, the looper
@@ -834,7 +837,7 @@ TEST_F(InputPublisherAndConsumerNoResamplingTest, SendTimeline) {
     sendMessage(LooperMessage::CALL_REPORT_TIMELINE);
 
     Result<InputPublisher::ConsumerResponse> result = receiveConsumerResponse(*mPublisher, TIMEOUT);
-    ASSERT_TRUE(result.ok()) << "receiveConsumerResponse should return OK";
+    ASSERT_THAT(result, Ok()) << "receiveConsumerResponse should return OK";
     ASSERT_TRUE(std::holds_alternative<InputPublisher::Timeline>(*result));
     const InputPublisher::Timeline& timeline = std::get<InputPublisher::Timeline>(*result);
     ASSERT_EQ(inputEventId, timeline.inputEventId);

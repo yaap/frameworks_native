@@ -1,0 +1,33 @@
+package {
+    default_applicable_licenses: ["frameworks_native_license"],
+}
+
+rust_binary {
+    name: "aisealhostservice",
+    srcs: ["src/main.rs"],
+    edition: "2021",
+    prefer_rlib: true,
+    init_rc: ["aisealhostservice.rc"],
+    rustlibs: [
+        "aisealhostservice_aidl-rust",
+        "aiseal_internal_service_aidl-rust",
+        "android.os.permissions_aidl-rust",
+        "android.system.virtualizationcommon-rust",
+        "android.system.virtualizationservice-rust",
+        "libandroid_logger",
+        "libanyhow",
+        "libbinder_rs",
+        "liblog_rust",
+        "libmicrodroid_payload_config",
+        "librustutils",
+        "libserde",
+        "libserde_json",
+        "libvmclient",
+        "libvsock",
+        "libzip",
+        "packagemanager_aidl-rust",
+    ],
+    shared_libs: [
+        "libselinux",
+    ],
+}

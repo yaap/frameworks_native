@@ -1,0 +1,50 @@
+rust_defaults {
+    name: "hidservice_defaults",
+    rustlibs: [
+        "android.hardware.hid-rust",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "libtokio",
+        "libtokio_stream",
+        "libanyhow",
+    ],
+    shared_libs: [
+        "libcutils",
+    ],
+}
+
+rust_binary {
+    name: "hidservice",
+    srcs: ["rust/service.rs"],
+    defaults: ["hidservice_defaults"],
+    init_rc: ["hidservice.rc"],
+    rustlibs: [
+        "libandroid_hardware_input_flags_rust",
+        "libhidservice",
+    ],
+    prefer_rlib: true,
+}
+
+rust_library {
+    name: "libhidservice",
+    crate_name: "hidservice",
+    crate_root: "rust/lib.rs",
+    defaults: ["hidservice_defaults"],
+}
+
+rust_fuzz {
+    name: "hidservice_fuzzer",
+    srcs: ["rust/service_fuzzer.rs"],
+    defaults: [
+        "service_fuzzer_defaults_rs",
+    ],
+    rustlibs: [
+        "libhidservice",
+        "libbinder_rs",
+        "libbinder_random_parcel_rs",
+        "android.hardware.hid-rust",
+    ],
+}

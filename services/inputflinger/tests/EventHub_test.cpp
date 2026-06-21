@@ -17,15 +17,21 @@
 #include "EventHub.h"
 
 #include "UinputDevice.h"
+#include "android/keycodes.h"
+#include "linux/input-event-codes.h"
+
+#include <chrono>
+#include <string>
 
 #include <gtest/gtest.h>
 #include <inttypes.h>
+#include <input/KeyCode.h>
 #include <linux/uinput.h>
 #include <log/log.h>
-#include <chrono>
 
 #define TAG "EventHub_test"
 
+using android::KeyCode;
 using android::createUinputDevice;
 using android::EventHub;
 using android::EventHubInterface;
@@ -208,6 +214,61 @@ TEST_F(EventHubTest, InputEvent_TimestampIsMonotonic) {
     }
 }
 
+TEST_F(EventHubTest, MapKey) {
+    auto mappedKey = mEventHub->mapKey(mDeviceId, BTN_SOUTH, 0, 0);
+
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_A);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_A);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+
+    mappedKey = mEventHub->mapKey(mDeviceId, BTN_EAST, 0, 0);
+
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_B);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_B);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+}
+
+TEST_F(EventHubTest, MapKey_withKeyRemapping) {
+    mEventHub->setKeyRemapping(mDeviceId,
+                               {{AKEYCODE_BUTTON_A, AKEYCODE_BUTTON_X},
+                                {AKEYCODE_BUTTON_B, AKEYCODE_BUTTON_Y}});
+
+    auto mappedKey = mEventHub->mapKey(mDeviceId, BTN_SOUTH, 0, 0);
+
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_X);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_A);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+
+    mappedKey = mEventHub->mapKey(mDeviceId, BTN_EAST, 0, 0);
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_Y);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_B);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+
+    mEventHub->setKeyRemapping(mDeviceId, {{AKEYCODE_BUTTON_A, AKEYCODE_BUTTON_L1}});
+
+    mappedKey = mEventHub->mapKey(mDeviceId, BTN_SOUTH, 0, 0);
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_L1);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_A);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+
+    mappedKey = mEventHub->mapKey(mDeviceId, BTN_EAST, 0, 0);
+    ASSERT_TRUE(mappedKey);
+    ASSERT_EQ(mappedKey->keyCode, AKEYCODE_BUTTON_B);
+    ASSERT_EQ(mappedKey->originalKeyCode, KeyCode::BUTTON_B);
+    ASSERT_EQ(mappedKey->metaState, 0);
+    ASSERT_EQ(mappedKey->flags, 0u);
+}
+
 // --- BitArrayTest ---
 class BitArrayTest : public testing::Test {
 protected:
@@ -279,4 +340,29 @@ TEST_F(BitArrayTest, AnyBit_InvalidBitIndex) {
     ASSERT_FALSE(mBitmaskMulti.any(256, 256));
     ASSERT_FALSE(mBitmaskMulti.any(257, 258));
     ASSERT_FALSE(mBitmaskMulti.any(0, 0));
+}
+
+TEST_F(BitArrayTest, DumpSetIndices) {
+    android::BitArray<32> arr;
+    arr.loadFromBuffer({0x80000004UL});
+    ASSERT_EQ("2, 31", arr.dumpSetIndices(", ", [](int i) { return std::to_string(i); }));
+}
+
+TEST_F(BitArrayTest, DumpSetIndices_EmptySet) {
+    android::BitArray<32> empty;
+    empty.loadFromBuffer({0x00000000UL});
+    ASSERT_EQ("<none>", empty.dumpSetIndices(", ", [](int i) { return std::to_string(i); }));
+}
+
+TEST_F(BitArrayTest, ToVector) {
+    android::BitArray<70> bitArray;
+    bitArray.set(1, true);
+    bitArray.set(33, true);
+    bitArray.set(65, true);
+
+    std::vector<uint32_t> vec = bitArray.toVector();
+    ASSERT_EQ(3u, vec.size());
+    EXPECT_EQ(1u << 1, vec[0]);
+    EXPECT_EQ(1u << 1, vec[1]);
+    EXPECT_EQ(1u << 1, vec[2]);
 }

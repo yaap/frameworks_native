@@ -18,13 +18,6 @@ flag {
 } # bq_consumer_attach_callback
 
 flag {
-  name: "cursor_plane_compatibility"
-  namespace: "desktop_display"
-  description: "configure cursor surface to meet cursor plane buffer requirements"
-  bug: "352067404"
-} # cursor_plane_compatibility
-
-flag {
   name: "frametimestamps_previousrelease"
   namespace: "core_graphics"
   description: "Controls a fence fixup for timestamp apis"
@@ -48,30 +41,6 @@ flag {
 } # bq_extendedallocate
 
 flag {
-  name: "wb_consumer_base_owns_bq"
-  namespace: "core_graphics"
-  description: "ConsumerBase-based classes now own their own bufferqueue"
-  bug: "340933754"
-  is_fixed_read_only: true
-} # wb_consumer_base_owns_bq
-
-flag {
-  name: "wb_platform_api_improvements"
-  namespace: "core_graphics"
-  description: "Simple improvements to Surface and ConsumerBase classes"
-  bug: "340933794"
-  is_fixed_read_only: true
-} # wb_platform_api_improvements
-
-flag {
-    name: "wb_stream_splitter"
-    namespace: "core_graphics"
-    description: "Removes IGBP/IGBCs from Camera3StreamSplitter as part of BufferQueue refactors"
-    bug: "340933206"
-    is_fixed_read_only: true
-} # wb_stream_splitter
-
-flag {
   name: "wb_ring_buffer"
   namespace: "core_graphics"
   description: "Remove slot dependency in the Ring Buffer Consumer."
@@ -88,20 +57,12 @@ flag {
 } # wb_libcameraservice
 
 flag {
-  name: "wb_unlimited_slots"
+  name: "wb_surfacetexture"
   namespace: "core_graphics"
-  description: "Adds APIs and updates the implementation of bufferqueues to have a user-defined slot count."
-  bug: "341359814"
+  description: "Updates the implementation of SurfaceTexture to avoid a ConsumerBase override."
+  bug: "447613760"
   is_fixed_read_only: true
-} # wb_unlimited_slots
-
-flag {
-  name: "bq_producer_throttles_only_async_mode"
-  namespace: "core_graphics"
-  description: "BufferQueueProducer only CPU throttle on queueBuffer() in async mode."
-  bug: "359252619"
-  is_fixed_read_only: true
-} # bq_producer_throttles_only_async_mode
+} # wb_surfacetexture
 
 flag {
   name: "bq_gl_fence_cleanup"
@@ -129,3 +90,89 @@ flag {
   }
 } # default_scaling_mode_freeze
 
+flag {
+  name: "remove_controlled_by_app"
+  namespace: "core_graphics"
+  description: "ControlledByApp is inconsistent and weird, nuke it from orbit"
+  bug: "447611028"
+  is_fixed_read_only: true
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "bq_producer_backpressure_control"
+  namespace: "core_graphics"
+  description: "BufferQueueProducer API to control CPU throttling."
+  bug: "359252619"
+  is_exported: true
+} # bq_producer_backpressure_control
+
+flag {
+  name: "consumer_present_modes"
+  namespace: "core_graphics"
+  description: "Support different present mode for Vulkan extensions. go/llvulkanp"
+  bug: "435624004"
+} # consumer_present_modes
+
+flag {
+  name: "surface_texture_updateteximage_stop_early"
+  namespace: "core_graphics"
+  description: "SurfaceTexture should not cycle buffers when disconnected and UpdateTexImage is called, and it should always return INVALID_OPERATION."
+  bug: "452084143"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+  is_fixed_read_only: true
+} # surface_texture_updateteximage_stop_early
+
+flag {
+  name: "out_of_process_rendering"
+  namespace: "window_surfaces"
+  description: "Enable out of process rendering"
+  bug: "448153717"
+} # out_of_process_rendering
+
+flag {
+  name: "allocate_buffer_priority_inheritance"
+  namespace: "core_graphics"
+  description: "Inherit caller priority when BBQ allocates buffers"
+  bug: "479828540"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "composition_shaders"
+  namespace: "core_graphics"
+  description: "Enable composition shaders"
+  bug: "321775340"
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "wb_aaos"
+  namespace: "core_graphics"
+  description: "Remove usage of IGBPs in Android Automotive OS."
+  bug: "340933948"
+  is_fixed_read_only: true
+} # wb_aaos
+
+flag {
+  name: "wb_biometrics"
+  namespace: "biometrics_framework"
+  description: "Remove usage of IGBPs in Biometrics."
+  bug: "340933948"
+  is_fixed_read_only: true
+} # wb_biometrics
+
+flag {
+  name: "debug_gpu_present_times"
+  namespace: "core_graphics"
+  description: "Add traces for debugging GPU present times"
+  bug: "450351988"
+} # debug_gpu_present_times

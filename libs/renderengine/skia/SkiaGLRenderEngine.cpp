@@ -27,7 +27,7 @@
 #include <include/gpu/ganesh/GrTypes.h>
 #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
 #include <include/gpu/ganesh/gl/GrGLInterface.h>
-#include <log/log_main.h>
+#include <log/log.h>
 #include <sync/sync.h>
 #include <ui/DebugUtils.h>
 
@@ -36,6 +36,7 @@
 #include <memory>
 #include <numeric>
 
+#include <common/Panopticon.h>
 #include "GLExtensions.h"
 #include "compat/SkiaGpuContext.h"
 
@@ -304,7 +305,7 @@ SkiaRenderEngine::Contexts SkiaGLRenderEngine::createContexts() {
     auto glesVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     auto size = glesVersion ? strlen(glesVersion) : -1;
 
-    auto& cache = persistentCache(glesVersion, size);
+    GrContextOptions::PersistentCache& cache = ganeshPersistentCache(glesVersion, size);
 
     SkiaRenderEngine::Contexts contexts;
     contexts.first = SkiaGpuContext::MakeGL_Ganesh(glInterface, cache);
@@ -342,9 +343,9 @@ bool SkiaGLRenderEngine::useProtectedContextImpl(GrProtected isProtected) {
     return eglMakeCurrent(mEGLDisplay, surface, surface, context) == EGL_TRUE;
 }
 
-void SkiaGLRenderEngine::waitFence(SkiaGpuContext*, base::borrowed_fd fenceFd) {
+void SkiaGLRenderEngine::waitFenceImpl(SkiaGpuContext*, base::borrowed_fd fenceFd) {
     if (fenceFd.get() >= 0 && !waitGpuFence(fenceFd)) {
-        SFTRACE_NAME("SkiaGLRenderEngine::waitFence");
+        SFTRACE_NAME("SkiaGLRenderEngine::waitFenceImpl");
         sync_wait(fenceFd.get(), -1);
     }
 }
@@ -354,6 +355,7 @@ base::unique_fd SkiaGLRenderEngine::flushAndSubmit(SkiaGpuContext* context,
     sk_sp<GrDirectContext> grContext = context->grDirectContext();
     {
         SFTRACE_NAME("flush surface");
+        auto slice = panopticon::slice(panopticon::SliceType::CG_Skia_flush);
         grContext->flush(dstSurface.get());
     }
     base::unique_fd drawFence = flushGL();
@@ -364,6 +366,7 @@ base::unique_fd SkiaGLRenderEngine::flushAndSubmit(SkiaGpuContext* context,
     } else {
         SFTRACE_BEGIN("Submit(sync=false)");
     }
+    auto slice = panopticon::slice(panopticon::SliceType::CG_Skia_submit);
     bool success = grContext->submit(requireSync ? GrSyncCpu::kYes : GrSyncCpu::kNo);
     SFTRACE_END();
     if (!success) {

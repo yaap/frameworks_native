@@ -23,6 +23,7 @@
 #include "InputReaderContext.h"
 #include "NotifyArgs.h"
 #include "input/Input.h"
+#include "input/InputDevice.h"
 
 #include "include/gestures.h"
 
@@ -34,6 +35,13 @@ class RelativeModeGestureConverter {
 public:
     RelativeModeGestureConverter(InputReaderContext& readerContext, DeviceId deviceId);
 
+    std::string dump() const;
+
+    [[nodiscard]] std::list<NotifyArgs> reset(nsecs_t when);
+
+    void populateMotionRanges(InputDeviceInfo& info, double pointerMovementPerMm,
+                              double scrollTicksPerMm) const;
+
     [[nodiscard]] std::list<NotifyArgs> handleGesture(nsecs_t when, nsecs_t readTime,
                                                       nsecs_t gestureStartTime,
                                                       const Gesture& gesture);
@@ -42,12 +50,22 @@ private:
     [[nodiscard]] std::list<NotifyArgs> handleMove(nsecs_t when, nsecs_t readTime,
                                                    nsecs_t gestureStartTime,
                                                    const Gesture& gesture);
+    [[nodiscard]] std::list<NotifyArgs> handleButtonsChange(nsecs_t when, nsecs_t readTime,
+                                                            const Gesture& gesture);
+    [[nodiscard]] std::list<NotifyArgs> handleScroll(nsecs_t when, nsecs_t readTime,
+                                                     const Gesture& gesture);
 
     NotifyMotionArgs makeMotionArgs(nsecs_t when, nsecs_t readTime, int32_t action,
+                                    int32_t actionButton, int32_t buttonState,
                                     const PointerCoords* pointerCoords);
 
     const DeviceId mDeviceId;
     InputReaderContext& mReaderContext;
+
+    // The current button state according to the gestures library, but converted into MotionEvent
+    // button values (AMOTION_EVENT_BUTTON_...).
+    int32_t mButtonState = 0;
+    nsecs_t mDownTime = 0;
 
     static constexpr uint32_t SOURCE = AINPUT_SOURCE_MOUSE_RELATIVE;
 };

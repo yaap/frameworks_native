@@ -432,15 +432,21 @@ void InputProcessor::notifyMotion(const NotifyMotionArgs& args) {
         if (!sendToMotionClassifier) {
             mQueuedListener.notifyMotion(args);
         } else {
-            NotifyMotionArgs newArgs(args);
-            const MotionClassification newClassification = mMotionClassifier->classify(newArgs);
+            const MotionClassification newClassification = mMotionClassifier->classify(args);
             LOG_ALWAYS_FATAL_IF(args.classification != MotionClassification::NONE &&
                                         newClassification != MotionClassification::NONE,
                                 "Conflicting classifications %s (new) and %s (old)!",
                                 motionClassificationToString(newClassification),
                                 motionClassificationToString(args.classification));
-            newArgs.classification = newClassification;
-            mQueuedListener.notifyMotion(newArgs);
+            // Avoid making a copy if the NotifyMotionArgs classification did
+            // not change after classification. This is a performance optimization.
+            if (args.classification != newClassification) {
+                NotifyMotionArgs newArgs(args);
+                newArgs.classification = newClassification;
+                mQueuedListener.notifyMotion(newArgs);
+            } else {
+                mQueuedListener.notifyMotion(args);
+            }
         }
     } // release lock
     mQueuedListener.flush();

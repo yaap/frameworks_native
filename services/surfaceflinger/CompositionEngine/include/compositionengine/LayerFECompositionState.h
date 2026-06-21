@@ -126,6 +126,9 @@ struct LayerFECompositionState {
     // Background blur content scale factor, between 0.0 and 1.0
     float backgroundBlurScale{1.0f};
 
+    // If true, the layer is sampling the background (e.g. for post-processing)
+    bool isTextureSamplingBehind{false};
+
     // The transform from layer local coordinates to composition coordinates
     ui::Transform geomLayerTransform;
 
@@ -187,6 +190,11 @@ struct LayerFECompositionState {
     Region surfaceDamage;
     uint64_t frameNumber = 0;
 
+    // Most recent frameId for the RenderCommandBuffer path when using
+    // compositor side rendering. Mostly passed through here as a way to
+    // check diffs when caching.
+    uint64_t renderCommandBufferFrameId;
+
     // The handle to use for a sideband stream for this layer
     sp<NativeHandle> sidebandStream;
     // If true, this sideband layer has a frame update
@@ -230,7 +238,7 @@ struct LayerFECompositionState {
     bool dimmingEnabled{true};
 
     float currentHdrSdrRatio = 1.f;
-    float desiredHdrSdrRatio = 1.f;
+    float desiredHdrSdrRatio = 0.f;
 
     // A picture profile handle refers to a PictureProfile configured on the display, which is a
     // set of parameters that configures the picture processing hardware that is used to enhance
@@ -243,6 +251,8 @@ struct LayerFECompositionState {
     gui::CachingHint cachingHint = gui::CachingHint::Enabled;
 
     std::shared_ptr<gui::DisplayLuts> luts;
+
+    uint64_t permissions = 0;
 
     virtual ~LayerFECompositionState();
 

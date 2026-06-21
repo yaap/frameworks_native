@@ -62,7 +62,13 @@ __attribute__((weak, warn_unused_result)) const char* AIBinder_getCallingSid() _
  * This must be called before the object is sent to another process.
  * Aborts on invalid values. Not thread safe.
  *
- * This overrides the setting in ABinderProcess_disableBackgroundScheduling.
+ * This also sometimes causes scheduling inversion in system processes when they
+ * get stuck at this lower priority, so it's best to disable this in
+ * high-throughput or latency-sensitive processes in the direct path of input,
+ * especially if their priorities are managed separately anyway.
+ *
+ * This overrides the setting in ABinderProcess_disableBackgroundScheduling
+ * during the binder transactions to this binder.
  *
  * \param binder local server binder to set the policy for
  * \param policy scheduler policy as defined in linux UAPI

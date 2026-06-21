@@ -52,10 +52,8 @@ BinderTest::BinderTest() {
     mISurfaceComposerAidl = waitForService<gui::ISurfaceComposer>(String16("SurfaceFlingerAIDL"));
     mISurfaceComposer = waitForService<ISurfaceComposer>(String16("SurfaceFlinger"));
     mISurfaceComposerAidl->createConnection(&mISurfaceComposerClient);
-    mISurfaceComposerAidl
-            ->createDisplayEventConnection(gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
-                                           gui::ISurfaceComposer::EventRegistration(0), {},
-                                           &mConnection);
+    mISurfaceComposerAidl->createDisplayEventConnection(gui::ISurfaceComposer::EventRegistration(0),
+                                                        {}, &mConnection);
 }
 
 void BinderTest::SetUp() {

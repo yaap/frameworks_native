@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
-#include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
-#include <android/hardware/configstore/1.1/types.h>
-#include <configstore/Utils.h>
 #include <utils/Log.h>
 
 #include <log/log.h>
@@ -28,8 +24,6 @@
 
 namespace android {
 namespace sysprop {
-using namespace android::hardware::configstore;
-using namespace android::hardware::configstore::V1_0;
 using android::hardware::graphics::common::V1_2::Dataspace;
 using android::hardware::graphics::common::V1_2::PixelFormat;
 using android::ui::DisplayPrimaries;
@@ -41,8 +35,7 @@ int64_t vsync_event_phase_offset_ns(int64_t defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getInt64<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::vsyncEventPhaseOffsetNs>(
-            defaultValue);
+    return defaultValue;
 }
 
 int64_t vsync_sf_event_phase_offset_ns(int64_t defaultValue) {
@@ -50,8 +43,7 @@ int64_t vsync_sf_event_phase_offset_ns(int64_t defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getInt64<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::vsyncSfEventPhaseOffsetNs>(
-            defaultValue);
+    return defaultValue;
 }
 
 bool use_context_priority(bool defaultValue) {
@@ -59,8 +51,7 @@ bool use_context_priority(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::useContextPriority>(
-            defaultValue);
+    return defaultValue;
 }
 
 int64_t max_frame_buffer_acquired_buffers(int64_t defaultValue) {
@@ -68,8 +59,7 @@ int64_t max_frame_buffer_acquired_buffers(int64_t defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getInt64<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::maxFrameBufferAcquiredBuffers>(
-            defaultValue);
+    return defaultValue;
 }
 
 int32_t max_graphics_width(int32_t defaultValue) {
@@ -93,8 +83,7 @@ bool has_wide_color_display(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasWideColorDisplay>(
-            defaultValue);
+    return defaultValue;
 }
 
 bool running_without_sync_framework(bool defaultValue) {
@@ -102,7 +91,7 @@ bool running_without_sync_framework(bool defaultValue) {
     if (temp.has_value()) {
         return !(*temp);
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasSyncFramework>(defaultValue);
+    return defaultValue;
 }
 
 bool has_HDR_display(bool defaultValue) {
@@ -110,7 +99,7 @@ bool has_HDR_display(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasHDRDisplay>(defaultValue);
+    return defaultValue;
 }
 
 int64_t present_time_offset_from_vsync_ns(int64_t defaultValue) {
@@ -118,8 +107,7 @@ int64_t present_time_offset_from_vsync_ns(int64_t defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getInt64<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::presentTimeOffsetFromVSyncNs>(
-            defaultValue);
+    return defaultValue;
 }
 
 bool force_hwc_copy_for_virtual_displays(bool defaultValue) {
@@ -127,8 +115,7 @@ bool force_hwc_copy_for_virtual_displays(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::useHwcForRGBtoYUV>(
-            defaultValue);
+    return defaultValue;
 }
 
 int64_t max_virtual_display_dimension(int64_t defaultValue) {
@@ -136,8 +123,7 @@ int64_t max_virtual_display_dimension(int64_t defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getUInt64<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::maxVirtualDisplaySize>(
-            defaultValue);
+    return defaultValue;
 }
 
 bool use_vr_flinger(bool defaultValue) {
@@ -145,7 +131,7 @@ bool use_vr_flinger(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::useVrFlinger>(defaultValue);
+    return defaultValue;
 }
 
 bool start_graphics_allocator_service(bool defaultValue) {
@@ -153,8 +139,7 @@ bool start_graphics_allocator_service(bool defaultValue) {
     if (temp.has_value()) {
         return *temp;
     }
-    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::startGraphicsAllocatorService>(
-            defaultValue);
+    return defaultValue;
 }
 
 SurfaceFlingerProperties::primary_display_orientation_values primary_display_orientation(
@@ -163,36 +148,7 @@ SurfaceFlingerProperties::primary_display_orientation_values primary_display_ori
     if (temp.has_value()) {
         return *temp;
     }
-    auto configDefault = DisplayOrientation::ORIENTATION_0;
-    switch (defaultValue) {
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_90:
-            configDefault = DisplayOrientation::ORIENTATION_90;
-            break;
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_180:
-            configDefault = DisplayOrientation::ORIENTATION_180;
-            break;
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_270:
-            configDefault = DisplayOrientation::ORIENTATION_270;
-            break;
-        default:
-            configDefault = DisplayOrientation::ORIENTATION_0;
-            break;
-    }
-    DisplayOrientation result =
-            getDisplayOrientation<V1_1::ISurfaceFlingerConfigs,
-                                  &V1_1::ISurfaceFlingerConfigs::primaryDisplayOrientation>(
-                    configDefault);
-    switch (result) {
-        case DisplayOrientation::ORIENTATION_90:
-            return SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_90;
-        case DisplayOrientation::ORIENTATION_180:
-            return SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_180;
-        case DisplayOrientation::ORIENTATION_270:
-            return SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_270;
-        default:
-            break;
-    }
-    return SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_0;
+    return defaultValue;
 }
 
 int64_t default_composition_dataspace(Dataspace defaultValue) {
@@ -308,6 +264,22 @@ int32_t display_update_imminent_timeout_ms(int32_t defaultValue) {
     return defaultValue;
 }
 
+int32_t resync_on_tx_timeout(int64_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::resync_on_tx_timeout();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
+int32_t resync_on_choreographer_timeout(int64_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::resync_on_choreographer_timeout();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
 #define DISPLAY_PRIMARY_SIZE 3
 
 constexpr float kSrgbRedX = 0.4123f;
@@ -361,6 +333,10 @@ bool enable_frame_rate_override(bool defaultValue) {
 
 bool enable_layer_caching(bool defaultValue) {
     return SurfaceFlingerProperties::enable_layer_caching().value_or(defaultValue);
+}
+
+bool force_hole_punch(bool defaultValue) {
+    return SurfaceFlingerProperties::force_hole_punch().value_or(defaultValue);
 }
 
 bool ignore_hdr_camera_layers(bool defaultValue) {

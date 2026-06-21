@@ -137,4 +137,6 @@ pub static CLASSIFIED_DEVICES: &[(
     (0x28bd, 0x091f, KeyboardType::NonAlphabetic, true),
     // XP-Pen Deco mini7W
     (0x28bd, 0x0928, KeyboardType::NonAlphabetic, true),
+    // Redragon M720 Gaming Mouse
+    (0x04d9, 0xfc5d, KeyboardType::NonAlphabetic, true),
 ];

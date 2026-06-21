@@ -27,6 +27,9 @@ cc_test {
     defaults: [
         "android.hardware.graphics.common-ndk_shared",
         "android.hardware.graphics.composer3-ndk_shared",
+
+        // The zumapro tonemap library is missing BTI.
+        "no_bti",
     ],
     test_suites: ["device-tests"],
     srcs: [

@@ -198,9 +198,6 @@ TEST_F(CachedSetTest, addLayer) {
     EXPECT_EQ(2u, cachedSet.getLayerCount());
     EXPECT_EQ(0u, cachedSet.getAge());
     expectNoBuffer(cachedSet);
-    // TODO(b/181192080): check that getNonBufferHash returns the correct hash value
-    // EXPECT_EQ(android::hashCombine(layer1.getHash(), layer2.getHash()),
-    // cachedSet.getNonBufferHash());
 }
 
 TEST_F(CachedSetTest, decompose) {
@@ -301,9 +298,6 @@ TEST_F(CachedSetTest, append) {
     EXPECT_EQ(0u, cachedSet1.getSkipCount());
 
     expectNoBuffer(cachedSet1);
-    // TODO(b/181192080): check that getNonBufferHash returns the correct hash value
-    // EXPECT_EQ(android::hashCombine(layer1.getHash(), layer2.getHash()),
-    // cachedSet1.getNonBufferHash());
 }
 
 TEST_F(CachedSetTest, updateAge_NoUpdate) {
@@ -608,10 +602,27 @@ TEST_F(CachedSetTest, holePunch_requiresRoundedCorners) {
     auto& layerFECompositionState = mTestLayers[0]->layerFECompositionState;
     layerFECompositionState.buffer = sp<GraphicBuffer>::make();
     layerFECompositionState.blendMode = hal::BlendMode::NONE;
+    sp<mock::LayerFE> layerFE1 = mTestLayers[0]->layerFE;
 
     CachedSet cachedSet(layer1);
+    cachedSet.setHolePunchWithoutRoundedCorners(false);
+    EXPECT_CALL(*layerFE1, hasRoundedCorners()).WillRepeatedly(Return(false));
 
     EXPECT_FALSE(cachedSet.requiresHolePunch());
+}
+
+TEST_F(CachedSetTest, holePunch_withoutRoundedCorners) {
+    CachedSet::Layer& layer1 = *mTestLayers[0]->cachedSetLayer.get();
+    auto& layerFECompositionState = mTestLayers[0]->layerFECompositionState;
+    layerFECompositionState.buffer = sp<GraphicBuffer>::make();
+    layerFECompositionState.blendMode = hal::BlendMode::NONE;
+    sp<mock::LayerFE> layerFE1 = mTestLayers[0]->layerFE;
+
+    CachedSet cachedSet(layer1);
+    cachedSet.setHolePunchWithoutRoundedCorners(true);
+    EXPECT_CALL(*layerFE1, hasRoundedCorners()).WillRepeatedly(Return(false));
+
+    EXPECT_TRUE(cachedSet.requiresHolePunch());
 }
 
 TEST_F(CachedSetTest, holePunch_requiresSingleLayer) {

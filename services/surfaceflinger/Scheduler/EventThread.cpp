@@ -78,8 +78,9 @@ std::string toString(VSyncRequest request) {
 }
 
 std::string toString(const EventThreadConnection& connection) {
-    return StringPrintf("Connection{%p, %s}", &connection,
-                        toString(connection.vsyncRequest).c_str());
+    return StringPrintf("Connection{%p, %s, owned by (pid=%d, uid=%u)}", &connection,
+                        toString(connection.vsyncRequest).c_str(), connection.mOwnerPid,
+                        connection.mOwnerUid);
 }
 
 std::string toString(const DisplayEventReceiver::Event& event) {
@@ -225,8 +226,10 @@ DisplayEventReceiver::Event makeModeRejection(PhysicalDisplayId displayId, Displ
 } // namespace
 
 EventThreadConnection::EventThreadConnection(EventThread* eventThread, uid_t callingUid,
+                                             pid_t callingPid,
                                              EventRegistrationFlags eventRegistration)
       : mOwnerUid(callingUid),
+        mOwnerPid(callingPid),
         mEventRegistration(eventRegistration),
         mEventThread(eventThread),
         mChannel(gui::BitTube::DefaultSize) {}
@@ -282,18 +285,14 @@ status_t EventThreadConnection::postEvent(const DisplayEventReceiver::Event& eve
         return size < 0 ? status_t(size) : status_t(NO_ERROR);
     };
 
-    if (event.header.type == DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE ||
-        event.header.type == DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE) {
-        mPendingEvents.emplace_back(event);
-        if (event.header.type == DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE ||
-            event.header.type == DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE) {
-            return status_t(NO_ERROR);
-        }
-
-        auto size = DisplayEventReceiver::sendEvents(&mChannel, mPendingEvents.data(),
-                                                     mPendingEvents.size());
-        mPendingEvents.clear();
-        return toStatus(size);
+    switch (event.header.type) {
+        case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
+            [[fallthrough]];
+        case DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE:
+            mPendingEvents.emplace_back(event);
+            return NO_ERROR;
+        default:
+            break;
     }
 
     mPendingEvents.emplace_back(event);
@@ -365,9 +364,10 @@ void EventThread::setDuration(std::chrono::nanoseconds workDuration,
 
 sp<EventThreadConnection> EventThread::createEventConnection(
         EventRegistrationFlags eventRegistration) const {
-    auto connection = sp<EventThreadConnection>::make(const_cast<EventThread*>(this),
-                                                      IPCThreadState::self()->getCallingUid(),
-                                                      eventRegistration);
+    const auto& ipc = IPCThreadState::self();
+    auto connection =
+            sp<EventThreadConnection>::make(const_cast<EventThread*>(this), ipc->getCallingUid(),
+                                            ipc->getCallingPid(), eventRegistration);
     if (!FlagManager::getInstance().disable_sched_fifo_sf_sched()) {
         const int policy = SCHED_FIFO;
         connection->setMinSchedulerPolicy(policy, sched_get_priority_min(policy));
@@ -379,8 +379,8 @@ status_t EventThread::registerDisplayEventConnection(const sp<EventThreadConnect
     std::lock_guard<std::mutex> lock(mMutex);
 
     // this should never happen
-    auto it = std::find(mDisplayEventConnections.cbegin(),
-            mDisplayEventConnections.cend(), connection);
+    auto it = std::find(mDisplayEventConnections.cbegin(), mDisplayEventConnections.cend(),
+                        connection);
     if (it != mDisplayEventConnections.cend()) {
         ALOGW("DisplayEventConnection %p already exists", connection.get());
         mCondition.notify_all();
@@ -393,8 +393,8 @@ status_t EventThread::registerDisplayEventConnection(const sp<EventThreadConnect
 }
 
 void EventThread::removeDisplayEventConnectionLocked(const wp<EventThreadConnection>& connection) {
-    auto it = std::find(mDisplayEventConnections.cbegin(),
-            mDisplayEventConnections.cend(), connection);
+    auto it = std::find(mDisplayEventConnections.cbegin(), mDisplayEventConnections.cend(),
+                        connection);
     if (it != mDisplayEventConnections.cend()) {
         mDisplayEventConnections.erase(it);
     }
@@ -504,10 +504,8 @@ void EventThread::onModeAndFrameRateOverridesChanged(PhysicalDisplayId displayId
     for (auto frameRateOverride : overrides) {
         mPendingEvents.push_back(makeFrameRateOverrideEvent(displayId, frameRateOverride));
     }
-    if (FlagManager::getInstance().supported_refresh_rate_update()) {
-        for (float refreshRate : supportedRefreshRates) {
-            mPendingEvents.push_back(makeSupportedRefreshRateEvent(displayId, refreshRate));
-        }
+    for (float refreshRate : supportedRefreshRates) {
+        mPendingEvents.push_back(makeSupportedRefreshRateEvent(displayId, refreshRate));
     }
     mPendingEvents.push_back(makeModeChanged(mode, config));
 
@@ -887,7 +885,7 @@ scheduler::VSyncCallbackRegistration EventThread::onNewVsyncScheduleInternal(
     // their transactions. The only way to revive the 'mVSyncState' right now is a new Hotplug
     // connect event. We should also revive 'mVSyncState' here so that when a new pacesetter is
     // selected, it can have a new vsync state.
-    if (FlagManager::getInstance().pacesetter_selection() && !mVSyncState) {
+    if (!mVSyncState) {
         SFTRACE_FORMAT_INSTANT("OnNewVsyncScheduleInternalNewState");
         mVSyncState.emplace();
     }

@@ -33,6 +33,8 @@ std::vector<std::pair<String16, int>> LayerStatePermissions::mPermissionMap = {
          layer_state_t::Permission::ROTATE_SURFACE_FLINGER},
         {String16("android.permission.INTERNAL_SYSTEM_WINDOW"),
          layer_state_t::Permission::INTERNAL_SYSTEM_WINDOW},
+        {String16("android.permission.READ_FRAME_BUFFER"),
+         layer_state_t::Permission::READ_FRAME_BUFFER},
 };
 
 static bool callingThreadHasPermission(const String16& permission __attribute__((unused)),

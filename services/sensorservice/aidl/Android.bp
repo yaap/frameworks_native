@@ -23,6 +23,7 @@ cc_library {
     header_libs: ["jni_headers"],
     shared_libs: [
         "libbase",
+        "liblog",
         "libutils",
         "libcutils",
         "libbinder_ndk",

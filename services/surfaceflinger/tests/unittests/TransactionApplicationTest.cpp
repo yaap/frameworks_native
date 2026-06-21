@@ -383,7 +383,8 @@ public:
         return fence;
     }
 
-    ComposerState createComposerState(int layerId, sp<Fence> fence, uint64_t what) {
+    ComposerState createComposerState(int layerId, sp<Fence> fence,
+                                      layer_state_t::LayerChangedSet what) {
         ComposerState state;
         state.state.bufferData =
                 std::make_shared<fake::BufferData>(/* bufferId */ 123L, /* width */ 1,

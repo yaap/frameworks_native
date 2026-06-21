@@ -27,6 +27,8 @@
 #include <binder/Parcel.h>
 #include <binder/IInterface.h>
 
+#include <android/native_window.h>
+#include <gui/BufferQueueCore.h>
 #include <gui/BufferQueueDefs.h>
 
 #include <gui/IGraphicBufferProducer.h>
@@ -82,6 +84,10 @@ enum {
     SET_FRAME_RATE,
     SET_ADDITIONAL_OPTIONS,
     SET_MAX_BUFER_COUNT_EXTENDED,
+    SET_PRODUCER_THROTTLING_ENABLED,
+    GET_PRODUCER_THROTTLING_ENABLED,
+    SET_PRESENT_MODE,
+    GET_CONFIG_FOR_SURFACE,
 };
 
 class BpGraphicBufferProducer : public BpInterface<IGraphicBufferProducer>
@@ -93,6 +99,21 @@ public:
     }
 
     ~BpGraphicBufferProducer() override;
+
+    virtual status_t getConfigForSurface(SurfaceConfig* outConfig) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        status_t result = remote()->transact(GET_CONFIG_FOR_SURFACE, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+
+        result = reply.readInt32();
+        if (result != NO_ERROR) {
+            return result;
+        }
+        return reply.readParcelable(outConfig);
+    }
 
     virtual status_t requestBuffer(int bufferIdx, sp<GraphicBuffer>* buf) {
         Parcel data, reply;
@@ -150,7 +171,6 @@ public:
         return result;
     }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     status_t extendSlotCount(int size) override {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
@@ -162,7 +182,6 @@ public:
         result = reply.readInt32();
         return result;
     }
-#endif
 
     virtual status_t setAsyncMode(bool async) {
         Parcel data, reply;
@@ -455,8 +474,7 @@ public:
         return result;
     }
 
-    virtual status_t query(const std::vector<int32_t> inputs,
-                           std::vector<QueryOutput>* outputs) {
+    virtual status_t query(const std::vector<int32_t>& inputs, std::vector<QueryOutput>* outputs) {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
         data.writeInt32Vector(inputs);
@@ -794,6 +812,27 @@ public:
         return result;
     }
 
+    virtual status_t setProducerThrottlingEnabled(bool enabled) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        data.writeBool(enabled);
+        status_t result = remote()->transact(SET_PRODUCER_THROTTLING_ENABLED, data, &reply);
+        if (result == NO_ERROR) {
+            result = reply.readInt32();
+        }
+        return result;
+    }
+
+    virtual status_t isProducerThrottlingEnabled(bool* outEnabled) const override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        status_t result = remote()->transact(GET_PRODUCER_THROTTLING_ENABLED, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        return reply.readBool(outEnabled);
+    }
+
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     virtual status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) {
         Parcel data, reply;
@@ -813,6 +852,18 @@ public:
         return result;
     }
 #endif
+
+    virtual status_t setPresentMode(int32_t mode) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        data.writeInt32(static_cast<int32_t>(mode));
+        status_t result = remote()->transact(SET_PRESENT_MODE, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readInt32();
+        return result;
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -825,6 +876,10 @@ class HpGraphicBufferProducer : public HpInterface<
         H2BGraphicBufferProducerV2_0> {
 public:
     explicit HpGraphicBufferProducer(const sp<IBinder>& base) : PBase(base) {}
+
+    status_t getConfigForSurface(SurfaceConfig* outConfig) override {
+        return mBase->getConfigForSurface(outConfig);
+    }
 
     status_t requestBuffer(int slot, sp<GraphicBuffer>* buf) override {
         return mBase->requestBuffer(slot, buf);
@@ -907,8 +962,7 @@ public:
         return mBase->query(what, value);
     }
 
-    status_t query(const std::vector<int32_t> inputs,
-                   std::vector<QueryOutput>* outputs) override {
+    status_t query(const std::vector<int32_t>& inputs, std::vector<QueryOutput>* outputs) override {
         return mBase->query(inputs, outputs);
     }
 
@@ -991,6 +1045,14 @@ public:
     status_t setAutoPrerotation(bool autoPrerotation) override {
         return mBase->setAutoPrerotation(autoPrerotation);
     }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+    status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) override {
+        return mBase->setAdditionalOptions(options);
+    }
+#endif
+
+    status_t setPresentMode(int32_t mode) override { return mBase->setPresentMode(mode); }
 };
 
 IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer,
@@ -998,13 +1060,17 @@ IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer,
 
 // ----------------------------------------------------------------------
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+status_t IGraphicBufferProducer::getConfigForSurface(SurfaceConfig* outConfig) {
+    // No-op for IGBP other than BufferQueue.
+    (void)outConfig;
+    return INVALID_OPERATION;
+}
+
 status_t IGraphicBufferProducer::extendSlotCount(int size) {
     // No-op for IGBP other than BufferQueue.
     (void)size;
     return INVALID_OPERATION;
 }
-#endif
 
 status_t IGraphicBufferProducer::setLegacyBufferDrop(bool drop) {
     // No-op for IGBP other than BufferQueue.
@@ -1024,12 +1090,27 @@ status_t IGraphicBufferProducer::setFrameRate(float /*frameRate*/, int8_t /*comp
     return INVALID_OPERATION;
 }
 
+status_t IGraphicBufferProducer::setProducerThrottlingEnabled(bool /*enabled*/) {
+    // No-op for IGBP other than BufferQueue.
+    return INVALID_OPERATION;
+}
+
+status_t IGraphicBufferProducer::isProducerThrottlingEnabled(bool* /*outEnabled*/) const {
+    // No-op for IGBP other than BufferQueue.
+    return INVALID_OPERATION;
+}
+
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
 status_t IGraphicBufferProducer::setAdditionalOptions(const std::vector<gui::AdditionalOptions>&) {
     // No-op for IGBP other than BufferQueue.
     return INVALID_OPERATION;
 }
 #endif
+
+status_t IGraphicBufferProducer::setPresentMode(int32_t /*mode*/) {
+    // No-op for IGBP other than BufferQueue.
+    return INVALID_OPERATION;
+}
 
 status_t IGraphicBufferProducer::exportToParcel(Parcel* parcel) {
     status_t res = OK;
@@ -1581,6 +1662,22 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
+        case SET_PRODUCER_THROTTLING_ENABLED: {
+            CHECK_INTERFACE(IGraphicBuffer, data, reply);
+            bool enabled = data.readBool();
+            status_t result = setProducerThrottlingEnabled(enabled);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        }
+        case GET_PRODUCER_THROTTLING_ENABLED: {
+            CHECK_INTERFACE(IGraphicBuffer, data, reply);
+            bool outEnabled = false;
+            status_t result = isProducerThrottlingEnabled(&outEnabled);
+            if (result != NO_ERROR) {
+                return result;
+            }
+            return reply->writeBool(outEnabled);
+        }
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
         case SET_ADDITIONAL_OPTIONS: {
             CHECK_INTERFACE(IGraphicBuffer, data, reply);
@@ -1603,7 +1700,6 @@ status_t BnGraphicBufferProducer::onTransact(
             return NO_ERROR;
         }
 #endif
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         case SET_MAX_BUFER_COUNT_EXTENDED: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             int size = data.readInt32();
@@ -1611,9 +1707,39 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
-#endif
+        case SET_PRESENT_MODE: {
+            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+            int32_t mode = data.readInt32();
+            status_t result = setPresentMode(mode);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        }
+        case GET_CONFIG_FOR_SURFACE: {
+            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+            SurfaceConfig config;
+            status_t result = getConfigForSurface(&config);
+            reply->writeInt32(result);
+            if (result == NO_ERROR) {
+                reply->writeParcelable(config);
+            }
+            return NO_ERROR;
+        }
     }
     return BBinder::onTransact(code, data, reply, flags);
+}
+
+status_t IGraphicBufferProducer::SurfaceConfig::writeToParcel(android::Parcel* parcel) const {
+    parcel->writeString8(consumerName);
+    parcel->writeUint32(slotCount);
+    parcel->writeBool(isSlotExpansionAllowed);
+    return NO_ERROR;
+}
+
+status_t IGraphicBufferProducer::SurfaceConfig::readFromParcel(const android::Parcel* parcel) {
+    consumerName = parcel->readString8();
+    slotCount = parcel->readUint32();
+    isSlotExpansionAllowed = parcel->readBool();
+    return NO_ERROR;
 }
 
 }; // namespace android

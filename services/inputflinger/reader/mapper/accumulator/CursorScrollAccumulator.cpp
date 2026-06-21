@@ -16,13 +16,10 @@
 
 #include "CursorScrollAccumulator.h"
 
-#include <android_companion_virtualdevice_flags.h>
-#include "EventHub.h"
 #include "InputDevice.h"
+#include "RawEvent.h"
 
 namespace android {
-
-namespace vd_flags = android::companion::virtualdevice::flags;
 
 CursorScrollAccumulator::CursorScrollAccumulator()
       : mHaveRelWheel(false),
@@ -35,10 +32,8 @@ CursorScrollAccumulator::CursorScrollAccumulator()
 void CursorScrollAccumulator::configure(InputDeviceContext& deviceContext) {
     mHaveRelWheel = deviceContext.hasRelativeAxis(REL_WHEEL);
     mHaveRelHWheel = deviceContext.hasRelativeAxis(REL_HWHEEL);
-    if (vd_flags::high_resolution_scroll()) {
-        mHaveRelWheelHighRes = deviceContext.hasRelativeAxis(REL_WHEEL_HI_RES);
-        mHaveRelHWheelHighRes = deviceContext.hasRelativeAxis(REL_HWHEEL_HI_RES);
-    }
+    mHaveRelWheelHighRes = deviceContext.hasRelativeAxis(REL_WHEEL_HI_RES);
+    mHaveRelHWheelHighRes = deviceContext.hasRelativeAxis(REL_HWHEEL_HI_RES);
 }
 
 void CursorScrollAccumulator::reset(InputDeviceContext& deviceContext) {

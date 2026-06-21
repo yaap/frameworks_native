@@ -53,7 +53,6 @@
 #include "DisplayHardware/HWComposer.h"
 #include "FrameTracker.h"
 #include "LayerFE.h"
-#include "LayerVector.h"
 #include "Scheduler/FrameTimeline.h"
 #include "Scheduler/LayerInfo.h"
 #include "SurfaceFlinger.h"
@@ -119,9 +118,9 @@ public:
         sp<NativeHandle> sidebandStream;
         mat4 colorTransform;
 
-        // The deque of callback handles for this frame. The back of the deque contains the most
-        // recent callback handle.
-        std::deque<sp<CallbackHandle>> callbackHandles;
+        // The callback handles for this frame. The back of the vector contains the most recent
+        // callback handle.
+        std::vector<CallbackHandle> callbackHandles;
         nsecs_t desiredPresentTime = 0;
         bool isAutoTimestamp = true;
 
@@ -153,9 +152,13 @@ public:
         bool autoRefresh = false;
         float currentHdrSdrRatio = 1.f;
         float desiredHdrSdrRatio = -1.f;
+        float maxDesiredHdrSdrRatio = 0.f;
         int64_t latchedVsyncId = 0;
         bool useVsyncIdForRefreshRateSelection = false;
         bool useLuts = false;
+        bool hasRenderCommandBufferFrameId = false;
+        uint64_t renderCommandBufferFrameId = 0;
+        nsecs_t renderCommandBufferFrameIdQueueTime = 0;
     };
 
     explicit Layer(const surfaceflinger::LayerCreationArgs& args);
@@ -178,16 +181,22 @@ public:
     bool setBuffer(std::shared_ptr<renderengine::ExternalTexture>& /* buffer */,
                    const BufferData& /* bufferData */, nsecs_t /* postTime */,
                    nsecs_t /*desiredPresentTime*/, bool /*isAutoTimestamp*/,
-                   const FrameTimelineInfo& /*info*/, gui::GameMode gameMode);
+                   const FrameTimelineInfo& /*info*/, gui::GameMode gameMode,
+                   int32_t systemContentPriority);
+    bool setRenderCommandBufferFrameId(uint64_t frameId, nsecs_t renderCommandBufferFrameIdQueueTime,
+                                       nsecs_t postTime, nsecs_t desiredPresentTime,
+                                       bool isAutoTimestamp, const FrameTimelineInfo& info,
+                                       gui::GameMode gameMode, int32_t systemContentPriority);
     void setDesiredPresentTime(nsecs_t /*desiredPresentTime*/, bool /*isAutoTimestamp*/);
     bool setDataspace(ui::Dataspace /*dataspace*/);
     bool setExtendedRangeBrightness(float currentBufferRatio, float desiredRatio);
     bool setDesiredHdrHeadroom(float desiredRatio);
+    bool setDesiredMaxHdrHeadroom(float maxDesiredHdrSdrRatio);
     void setUseLuts(bool useLuts) { mDrawingState.useLuts = useLuts; }
     bool setSidebandStream(const sp<NativeHandle>& /*sidebandStream*/,
                            const FrameTimelineInfo& /* info*/, nsecs_t /* postTime */,
-                           gui::GameMode gameMode);
-    bool setTransactionCompletedListeners(const std::vector<sp<CallbackHandle>>& /*handles*/,
+                           gui::GameMode gameMode, int32_t systemContentPriority);
+    bool setTransactionCompletedListeners(std::vector<CallbackHandle> /*handles*/,
                                           bool willPresent);
 
     sp<LayerFE> getCompositionEngineLayerFE(const frontend::LayerHierarchy::TraversalPath&);
@@ -261,9 +270,6 @@ public:
     bool fenceHasSignaled() const;
     void onPreComposition(nsecs_t refreshStartTime);
 
-    // Tracks mLastClientCompositionFence and gets the callback handle for this layer.
-    sp<CallbackHandle> findCallbackHandle();
-
     // Adds the future release fence to a list of fences that are used to release the
     // last presented buffer. Also keeps track of the layerstack in a list of previous
     // layerstacks that have been presented.
@@ -301,7 +307,7 @@ public:
     // creates its tracks by buffer id and has no way of associating a buffer back to the process
     // that created it, the current implementation is only sufficient for cases where a buffer is
     // only used within a single layer.
-    uint64_t getCurrentBufferId() const { return getBuffer() ? getBuffer()->getId() : 0; }
+    uint64_t getLatchedBufferId() const { return getBuffer() ? getBuffer()->getId() : 0; }
 
     void writeCompositionStateToProto(perfetto::protos::LayerProto* layerProto,
                                       ui::LayerStack layerStack);
@@ -327,9 +333,11 @@ public:
     Rect getCroppedBufferSize(const Layer::State& s) const;
 
     void setFrameTimelineVsyncForBufferTransaction(const FrameTimelineInfo& info, nsecs_t postTime,
-                                                   gui::GameMode gameMode);
+                                                   gui::GameMode gameMode,
+                                                   int32_t systemContentPriority);
     void setFrameTimelineVsyncForBufferlessTransaction(const FrameTimelineInfo& info,
-                                                       nsecs_t postTime, gui::GameMode gameMode);
+                                                       nsecs_t postTime, gui::GameMode gameMode,
+                                                       int32_t systemContentPriority);
 
     void addSurfaceFrameDroppedForBuffer(std::shared_ptr<scheduler::SurfaceFrame>& surfaceFrame,
                                          nsecs_t dropTime);
@@ -338,12 +346,14 @@ public:
                                            nsecs_t expectedPresentTime);
 
     std::shared_ptr<scheduler::SurfaceFrame> createSurfaceFrameForTransaction(
-            const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode);
+            const FrameTimelineInfo& info, nsecs_t postTime, gui::GameMode gameMode,
+            int32_t systemContentPriority);
     std::shared_ptr<scheduler::SurfaceFrame> createSurfaceFrameForBuffer(
             const FrameTimelineInfo& info, nsecs_t queueTime, std::string debugName,
-            gui::GameMode gameMode);
+            gui::GameMode gameMode, int32_t systemContentPriority);
     void setFrameTimelineVsyncForSkippedFrames(const FrameTimelineInfo& info, nsecs_t postTime,
-                                               std::string debugName, gui::GameMode gameMode);
+                                               std::string debugName, gui::GameMode gameMode,
+                                               int32_t systemContentPriority);
 
     bool setTrustedPresentationInfo(TrustedPresentationThresholds const& thresholds,
                                     TrustedPresentationListener const& listener);
@@ -441,9 +451,7 @@ protected:
     // Leverages FrameTimeline to generate FrameStats. Since FrameTimeline already has the data,
     // statistical history needs to only be tracked by count of frames.
     // TODO: Deprecate the '--latency-clear' and get rid of this.
-    std::atomic<uint16_t> mFrameStatsHistorySize;
-    // Timestamp history for UIAutomation. Thread safe.
-    FrameTracker mDeprecatedFrameTracker;
+    std::atomic<uint32_t> mFrameStatsHistorySize;
 
     // main thread
     sp<NativeHandle> mSidebandStream;
@@ -499,7 +507,8 @@ private:
     // Latch sideband stream and returns true if the dirty region should be updated.
     bool latchSidebandStream(bool& recomputeVisibleRegions);
 
-    void updateTexImage(nsecs_t latchTime, nsecs_t expectedPresentTime, bool bgColorOnly = false);
+    void latchBufferStatsAndHandles(
+            nsecs_t latchTime, nsecs_t expectedPresentTime, bool bgColorOnly = false);
 
     // Crop that applies to the buffer
     Rect computeBufferCrop(const State& s);
@@ -534,6 +543,9 @@ private:
     std::optional<ui::Transform::RotationFlags> mTransformHint = std::nullopt;
     std::optional<gui::CornerRadii> mCornerRadii = std::nullopt;
 
+    // Tracks mLastClientCompositionFence and gets the callback handle for this layer.
+    CallbackHandle* findCallbackHandle();
+
     ReleaseCallbackId mPreviousReleaseCallbackId = ReleaseCallbackId::INVALID_ID;
     sp<IBinder> mPreviousReleaseBufferEndpoint;
 
@@ -564,6 +576,10 @@ private:
     std::optional<std::reference_wrapper<scheduler::FrameTimeline>> getTimeline() const {
         return *mFlinger->mFrameTimeline;
     }
+
+    uint64_t getPendingBufferId();
+    nsecs_t getAcquireSignalTime();
+    void gatherBufferInfoRenderCommandBuffer();
 };
 
 std::ostream& operator<<(std::ostream& stream, const Layer::FrameRate& rate);

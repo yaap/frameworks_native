@@ -16,15 +16,18 @@
 
 #pragma once
 
+#include <SkRuntimeEffect.h>
 #include <android/gui/BorderSettings.h>
 #include <android/gui/BoxShadowSettings.h>
 #include <com_android_graphics_surfaceflinger_flags.h>
+#include <ftl/enum.h>
 #include <gui/CornerRadii.h>
 #include <gui/DisplayLuts.h>
+#include <gui/RenderCommandBufferConsumer.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <renderengine/ExternalTexture.h>
-#include <renderengine/PrintMatrix.h>
+#include <renderengine/PrintUtils.h>
 #include <ui/BlurRegion.h>
 #include <ui/DebugUtils.h>
 #include <ui/Fence.h>
@@ -38,9 +41,22 @@
 #include <ui/Transform.h>
 #include "ui/EdgeExtensionEffect.h"
 
+#include <cstdint>
 #include <iosfwd>
+#include <memory>
+#include <optional>
+#include <vector>
+
+/**
+ * WARNING: do NOT change default values of existing types, as existing tests and benchmarks rely
+ * on default behavior.
+ */
 
 namespace android {
+
+struct IPCServerResourceCache;
+class RenderCommandBuffer;
+
 namespace renderengine {
 
 // Metadata describing the input buffer to render from.
@@ -166,6 +182,20 @@ struct LayerSettings {
     float whitePointNits = -1.f;
 
     std::shared_ptr<gui::DisplayLuts> luts;
+
+    std::shared_ptr<IPCServerResourceCache> renderResourceCache;
+    std::shared_ptr<RenderCommandBuffer> renderCommandBuffer;
+
+    // A raw runtime effect and its uniforms.
+    sk_sp<SkRuntimeEffect> postProcessEffect;
+    std::shared_ptr<std::vector<uint8_t>> postProcessUniforms;
+
+    enum class SampleTarget : uint32_t {
+        Self,
+        Behind,
+        ftl_last = Behind,
+    };
+    SampleTarget postProcessTarget;
 };
 
 // Keep in sync with custom comparison function in
@@ -212,129 +242,187 @@ static inline bool operator==(const LayerSettings& lhs, const LayerSettings& rhs
             lhs.whitePointNits == rhs.whitePointNits && lhs.luts == rhs.luts;
 }
 
-static inline void PrintTo(const Buffer& settings, ::std::ostream* os) {
+static inline void PrintTo(const Buffer& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "Buffer {";
-    *os << "\n    .buffer = " << settings.buffer.get() << " "
-        << (settings.buffer.get() ? decodePixelFormat(settings.buffer->getPixelFormat()).c_str()
-                                  : "");
-    *os << "\n    .fence = " << settings.fence.get();
-    *os << "\n    .useTextureFiltering = " << settings.useTextureFiltering;
-    *os << "\n    .textureTransform = ";
+    *os << newline << ".buffer = " << *settings.buffer.get();
+    *os << newline << ".fence = " << settings.fence.get();
+    *os << newline << ".useTextureFiltering = " << settings.useTextureFiltering;
+    *os << newline << ".textureTransform = ";
     PrintMatrix(settings.textureTransform, os);
-    *os << "\n    .usePremultipliedAlpha = " << settings.usePremultipliedAlpha;
-    *os << "\n    .isOpaque = " << settings.isOpaque;
-    *os << "\n    .maxLuminanceNits = " << settings.maxLuminanceNits;
-    *os << "\n}";
+    *os << newline << ".usePremultipliedAlpha = " << settings.usePremultipliedAlpha;
+    *os << newline << ".isOpaque = " << settings.isOpaque;
+    *os << newline << ".maxLuminanceNits = " << settings.maxLuminanceNits;
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
-static inline void PrintTo(const Geometry& settings, ::std::ostream* os) {
+static inline void PrintTo(const Geometry& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "Geometry {";
-    *os << "\n    .boundaries = ";
+    *os << newline << ".boundaries = ";
     PrintTo(settings.boundaries, os);
-    *os << "\n    .originalBounds = ";
+    *os << newline << ".originalBounds = ";
     PrintTo(settings.originalBounds, os);
-    *os << "\n    .positionTransform = ";
+    *os << newline << ".positionTransform = ";
     PrintMatrix(settings.positionTransform, os);
-    *os << "\n    .roundedCornersRadii = " << settings.roundedCornersRadii;
-    *os << "\n    .roundedCornersCrop = ";
+    *os << newline << ".roundedCornersRadii = " << settings.roundedCornersRadii;
+    *os << newline << ".roundedCornersCrop = ";
     PrintTo(settings.roundedCornersCrop, os);
-    *os << "\n    .otherRoundedCornersRadii = " << settings.otherRoundedCornersRadii;
-    *os << "\n    .otherCrop = ";
+    *os << newline << ".otherRoundedCornersRadii = " << settings.otherRoundedCornersRadii;
+    *os << newline << ".otherCrop = ";
     PrintTo(settings.otherCrop, os);
 
-    *os << "\n}";
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
-static inline void PrintTo(const PixelSource& settings, ::std::ostream* os) {
+static inline void PrintTo(const PixelSource& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "PixelSource {";
     if (settings.buffer.buffer) {
-        *os << "\n    .buffer = ";
-        PrintTo(settings.buffer, os);
-        *os << "\n}";
+        *os << newline << ".buffer = ";
+        PrintTo(settings.buffer, os, currentIndent + 1);
+        *os << IndentedNewline(currentIndent) << "}";
     } else {
-        *os << "\n    .solidColor = " << settings.solidColor;
-        *os << "\n}";
+        *os << newline << ".solidColor = " << settings.solidColor;
+        *os << IndentedNewline(currentIndent) << "}";
     }
 }
 
-static inline void PrintTo(const ShadowSettings& settings, ::std::ostream* os) {
+static inline void PrintTo(const ShadowSettings& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "ShadowSettings {";
-    *os << "\n    .boundaries = ";
+    *os << newline << ".boundaries = ";
     PrintTo(settings.boundaries, os);
-    *os << "\n    .ambientColor = " << settings.ambientColor;
-    *os << "\n    .spotColor = " << settings.spotColor;
-    *os << "\n    .lightPos = " << settings.lightPos;
-    *os << "\n    .lightRadius = " << settings.lightRadius;
-    *os << "\n    .length = " << settings.length;
-    *os << "\n    .casterIsTranslucent = " << settings.casterIsTranslucent;
-    *os << "\n}";
+    *os << newline << ".ambientColor = " << settings.ambientColor;
+    *os << newline << ".spotColor = " << settings.spotColor;
+    *os << newline << ".lightPos = " << settings.lightPos;
+    *os << newline << ".lightRadius = " << settings.lightRadius;
+    *os << newline << ".length = " << settings.length;
+    *os << newline << ".casterIsTranslucent = " << settings.casterIsTranslucent;
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
-static inline void PrintTo(const StretchEffect& effect, ::std::ostream* os) {
+static inline void PrintTo(const StretchEffect& effect, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "StretchEffect {";
-    *os << "\n     .width = " << effect.width;
-    *os << "\n     .height = " << effect.height;
-    *os << "\n     .vectorX = " << effect.vectorX;
-    *os << "\n     .vectorY = " << effect.vectorY;
-    *os << "\n     .maxAmountX = " << effect.maxAmountX;
-    *os << "\n     .maxAmountY = " << effect.maxAmountY;
-    *os << "\n     .mappedLeft = " << effect.mappedChildBounds.left;
-    *os << "\n     .mappedTop = " << effect.mappedChildBounds.top;
-    *os << "\n     .mappedRight = " << effect.mappedChildBounds.right;
-    *os << "\n     .mappedBottom = " << effect.mappedChildBounds.bottom;
-    *os << "\n}";
+    *os << newline << ".width = " << effect.width;
+    *os << newline << ".height = " << effect.height;
+    *os << newline << ".vectorX = " << effect.vectorX;
+    *os << newline << ".vectorY = " << effect.vectorY;
+    *os << newline << ".maxAmountX = " << effect.maxAmountX;
+    *os << newline << ".maxAmountY = " << effect.maxAmountY;
+    *os << newline << ".mappedLeft = " << effect.mappedChildBounds.left;
+    *os << newline << ".mappedTop = " << effect.mappedChildBounds.top;
+    *os << newline << ".mappedRight = " << effect.mappedChildBounds.right;
+    *os << newline << ".mappedBottom = " << effect.mappedChildBounds.bottom;
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
 static inline void PrintTo(const EdgeExtensionEffect& effect, ::std::ostream* os) {
     *os << effect;
 }
 
-static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os) {
-    *os << "LayerSettings for '" << settings.name.c_str() << "' {";
-    *os << "\n    .geometry = ";
-    PrintTo(settings.geometry, os);
-    *os << "\n    .source = ";
-    PrintTo(settings.source, os);
-    *os << "\n    .alpha = " << settings.alpha;
-    *os << "\n    .sourceDataspace = ";
-    PrintTo(settings.sourceDataspace, os);
-    *os << "\n    .colorTransform = ";
-    PrintMatrix(settings.colorTransform, os);
-    *os << "\n    .disableBlending = " << settings.disableBlending;
-    *os << "\n    .skipContentDraw = " << settings.skipContentDraw;
-    if (settings.shadow != ShadowSettings()) {
-        *os << "\n    .shadow = ";
-        PrintTo(settings.shadow, os);
-    }
-    *os << "\n    .backgroundBlurRadius = " << settings.backgroundBlurRadius;
-    *os << "\n    .backgroundBlurScale = " << settings.backgroundBlurScale;
-    if (settings.blurRegions.size()) {
-        *os << "\n    .blurRegions =";
-        for (auto blurRegion : settings.blurRegions) {
-            *os << "\n";
-            PrintTo(blurRegion, os);
+// TODO: print the effect's name after it's exposed in Skia.
+static inline void PrintTo(const sk_sp<SkRuntimeEffect> effect, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
+    const std::string innerNewline = IndentedNewline(currentIndent + 2);
+    *os << "SkRuntimeEffect {";
+    if (!effect->children().empty()) {
+        *os << newline << ".children = [";
+        for (const auto& child : effect->children()) {
+            *os << innerNewline << child.name << " (type = " << static_cast<int>(child.type) << ")";
         }
+        *os << newline << "]";
     }
-    *os << "\n    .blurRegionTransform = ";
+    std::stringstream source(effect->source());
+    std::string lineSrc;
+    int lineNumber = 1;
+    *os << newline << ".source = (";
+    while (std::getline(source, lineSrc)) {
+        // Printing line numbers gives an indication if some log lines are missing.
+        *os << innerNewline << std::setw(4) << lineNumber++ << ": " << lineSrc;
+    }
+    *os << newline << ")";
+    *os << IndentedNewline(currentIndent) << "}";
+}
+
+static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
+    *os << "LayerSettings for '" << settings.name.c_str() << "' {";
+    *os << newline << ".geometry = ";
+    PrintTo(settings.geometry, os, currentIndent + 1);
+    *os << newline << ".source = ";
+    PrintTo(settings.source, os, currentIndent + 1);
+    *os << newline << ".alpha = " << settings.alpha;
+    *os << newline << ".sourceDataspace = ";
+    PrintTo(settings.sourceDataspace, os);
+    *os << " (" << ::dataspaceDetails(static_cast<android_dataspace>(settings.sourceDataspace))
+        << ")";
+    *os << newline << ".colorTransform = ";
+    PrintMatrix(settings.colorTransform, os);
+    *os << newline << ".disableBlending = " << settings.disableBlending;
+    *os << newline << ".skipContentDraw = " << settings.skipContentDraw;
+    if (settings.shadow != ShadowSettings()) {
+        *os << newline << ".shadow = ";
+        PrintTo(settings.shadow, os, currentIndent + 1);
+    }
+    if (settings.borderSettings != gui::BorderSettings()) {
+        *os << newline << ".borderSettings = " << settings.borderSettings.toString();
+    }
+    if (settings.boxShadowSettings != gui::BoxShadowSettings()) {
+        *os << newline << ".boxShadowSettings = " << settings.boxShadowSettings.toString();
+    }
+    *os << newline << ".backgroundBlurRadius = " << settings.backgroundBlurRadius;
+    *os << newline << ".backgroundBlurScale = " << settings.backgroundBlurScale;
+    if (settings.blurRegions.size()) {
+        *os << newline << ".blurRegions = [";
+        const std::string blurRegionNewline = IndentedNewline(currentIndent + 2);
+        for (auto blurRegion : settings.blurRegions) {
+            *os << blurRegionNewline;
+            PrintTo(blurRegion, os, currentIndent + 2);
+        }
+        *os << newline << "]";
+    }
+    *os << newline << ".blurRegionTransform = ";
     PrintMatrix(settings.blurRegionTransform, os);
     if (settings.stretchEffect != StretchEffect()) {
-        *os << "\n    .stretchEffect = ";
-        PrintTo(settings.stretchEffect, os);
+        *os << newline << ".stretchEffect = ";
+        PrintTo(settings.stretchEffect, os, currentIndent + 1);
     }
-
     if (settings.edgeExtensionEffect.hasEffect()) {
-        *os << "\n    .edgeExtensionEffect = " << settings.edgeExtensionEffect;
+        *os << newline << ".edgeExtensionEffect = " << settings.edgeExtensionEffect;
     }
-    *os << "\n    .whitePointNits = " << settings.whitePointNits;
+    *os << newline << ".whitePointNits = " << settings.whitePointNits;
     if (settings.luts) {
-        *os << "\n    .luts = ";
-        PrintTo(settings.luts, os);
+        *os << newline << ".luts = ";
+        PrintTo(settings.luts, os, currentIndent + 1);
+    }
+    if (settings.renderCommandBuffer) {
+        *os << newline << ".renderCommandBuffer = " << settings.renderCommandBuffer.get();
+    }
+    if (settings.postProcessEffect) {
+        *os << newline << ".postProcessEffect = ";
+        PrintTo(settings.postProcessEffect, os, currentIndent + 1);
+    }
+    if (settings.postProcessUniforms) {
+        *os << newline << ".postProcessUniforms = " << "[ ";
+        for (const uint8_t uniform : *settings.postProcessUniforms) {
+            *os << uniform << " ";
+        }
+        *os << "]";
+    }
+    if (settings.postProcessEffect) {
+        *os << newline << ".postProcessTarget = " << ftl::enum_string(settings.postProcessTarget);
     }
 
-    *os << "\n    .borderSettings = " << settings.borderSettings.toString();
-    *os << "\n    .boxShadowSettings = " << settings.boxShadowSettings.toString();
-
-    *os << "\n}";
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
 } // namespace renderengine

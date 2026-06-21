@@ -22,6 +22,8 @@
 
 #include <grallocusage/GrallocUsageConversion.h>
 
+#include <com_android_graphics_libui_flags.h>
+
 // We would eliminate the non-conforming zero-length array, but we can't since
 // this is effectively included from the Linux kernel
 #pragma clang diagnostic push
@@ -42,6 +44,7 @@
 #include <system/graphics.h>
 
 using unique_fd = ::android::base::unique_fd;
+using namespace com::android::graphics::libui;
 
 namespace android {
 // ---------------------------------------------------------------------------
@@ -50,9 +53,15 @@ using LockResult = GraphicBufferMapper::LockResult;
 
 ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferMapper )
 
+static bool requireMapper4() {
+    return android_get_device_api_level() >= 36 && flags::require_gralloc4_or_newer();
+}
+
 void GraphicBufferMapper::preloadHal() {
-    Gralloc2Mapper::preload();
-    Gralloc3Mapper::preload();
+    if (!requireMapper4()) {
+        Gralloc2Mapper::preload();
+        Gralloc3Mapper::preload();
+    }
     Gralloc4Mapper::preload();
     Gralloc5Mapper::preload();
 }
@@ -68,15 +77,17 @@ GraphicBufferMapper::GraphicBufferMapper() {
         mMapperVersion = Version::GRALLOC_4;
         return;
     }
-    mMapper = std::make_unique<const Gralloc3Mapper>();
-    if (mMapper->isLoaded()) {
-        mMapperVersion = Version::GRALLOC_3;
-        return;
-    }
-    mMapper = std::make_unique<const Gralloc2Mapper>();
-    if (mMapper->isLoaded()) {
-        mMapperVersion = Version::GRALLOC_2;
-        return;
+    if (!requireMapper4()) {
+        mMapper = std::make_unique<const Gralloc3Mapper>();
+        if (mMapper->isLoaded()) {
+            mMapperVersion = Version::GRALLOC_3;
+            return;
+        }
+        mMapper = std::make_unique<const Gralloc2Mapper>();
+        if (mMapper->isLoaded()) {
+            mMapperVersion = Version::GRALLOC_2;
+            return;
+        }
     }
 
     LOG_ALWAYS_FATAL("gralloc-mapper is missing");
@@ -379,6 +390,20 @@ status_t GraphicBufferMapper::getSmpte2094_10(
 status_t GraphicBufferMapper::setSmpte2094_10(buffer_handle_t bufferHandle,
                                               std::optional<std::vector<uint8_t>> smpte2094_10) {
     return mMapper->setSmpte2094_10(bufferHandle, smpte2094_10);
+}
+
+status_t GraphicBufferMapper::getStride(buffer_handle_t bufferHandle, uint32_t* outStride) {
+    return mMapper->getStride(bufferHandle, outStride);
+}
+
+status_t GraphicBufferMapper::getSmpte2094_50(
+        buffer_handle_t bufferHandle, std::optional<std::vector<uint8_t>>* outSmpte2094_50) {
+    return mMapper->getSmpte2094_50(bufferHandle, outSmpte2094_50);
+}
+
+status_t GraphicBufferMapper::setSmpte2094_50(buffer_handle_t bufferHandle,
+                                              std::optional<std::vector<uint8_t>> smpte2094_50) {
+    return mMapper->setSmpte2094_50(bufferHandle, smpte2094_50);
 }
 
 // ---------------------------------------------------------------------------

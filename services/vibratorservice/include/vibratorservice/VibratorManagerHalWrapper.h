@@ -78,6 +78,9 @@ public:
      */
     virtual void tryReconnect() = 0;
 
+    // returns the wrapped HAL service instance.
+    virtual std::shared_ptr<aidl::android::hardware::vibrator::IVibratorManager> getHal() = 0;
+
     virtual HalResult<ManagerCapabilities> getCapabilities() = 0;
     virtual HalResult<std::vector<int32_t>> getVibratorIds() = 0;
     virtual HalResult<std::shared_ptr<HalController>> getVibrator(int32_t id) = 0;
@@ -101,6 +104,7 @@ public:
 
     HalResult<void> ping() override final;
     void tryReconnect() override final;
+    std::shared_ptr<aidl::android::hardware::vibrator::IVibratorManager> getHal() override final;
 
     HalResult<ManagerCapabilities> getCapabilities() override final;
     HalResult<std::vector<int32_t>> getVibratorIds() override final;
@@ -122,6 +126,7 @@ public:
 
     HalResult<void> ping() override final;
     void tryReconnect() override final;
+    std::shared_ptr<aidl::android::hardware::vibrator::IVibratorManager> getHal() override final;
 
     HalResult<ManagerCapabilities> getCapabilities() override final;
     HalResult<std::vector<int32_t>> getVibratorIds() override final;
@@ -146,7 +151,6 @@ private:
             GUARDED_BY(mVibratorsMutex);
     std::shared_ptr<CallbackScheduler> mCallbackScheduler;
 
-    std::shared_ptr<VibratorManager> getHal();
     std::shared_ptr<HalWrapper> connectToVibrator(int32_t vibratorId,
                                                   std::shared_ptr<CallbackScheduler> scheduler);
 };

@@ -24,17 +24,20 @@ package {
 cc_library_static {
     name: "liblshal",
     shared_libs: [
+        "apex_aidl_interface-cpp",
         "libbase",
+        "libbinder",
         "libbinderdebug",
         "libcutils",
         "libutils",
         "libhidlbase",
-        "libhidl-gen-hash",
-        "libhidl-gen-utils",
         "libvintf",
+        "packagemanager_aidl-cpp",
     ],
     static_libs: [
         "libprocpartition",
+        "libhidl-gen-hash",
+        "libhidl-gen-utils",
     ],
     srcs: [
         "DebugCommand.cpp",
@@ -56,7 +59,9 @@ cc_library_static {
 cc_defaults {
     name: "lshal_defaults",
     shared_libs: [
+        "apex_aidl_interface-cpp",
         "libbase",
+        "libbinder",
         "libbinderdebug",
         "libcutils",
         "libutils",
@@ -64,20 +69,25 @@ cc_defaults {
         "libhidl-gen-hash",
         "libhidl-gen-utils",
         "libvintf",
+        "packagemanager_aidl-cpp",
     ],
     static_libs: [
         "liblshal",
         "libprocpartition",
     ],
-    cflags: ["-Wall", "-Werror"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
 }
 
+// delete me and/or convert to AIDL
 cc_binary {
     name: "lshal",
     defaults: ["lshal_defaults"],
     srcs: [
-        "main.cpp"
-    ]
+        "main.cpp",
+    ],
 }
 
 cc_test {
@@ -85,7 +95,7 @@ cc_test {
     test_suites: ["device-tests"],
     defaults: [
         "libvintf_static_user_defaults",
-        "lshal_defaults"
+        "lshal_defaults",
     ],
     gtest: true,
     static_libs: [
@@ -97,6 +107,6 @@ cc_test {
         "libhidlbase",
     ],
     srcs: [
-        "test.cpp"
-    ]
+        "test.cpp",
+    ],
 }

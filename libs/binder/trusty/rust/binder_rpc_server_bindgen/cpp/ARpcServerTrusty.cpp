@@ -35,10 +35,10 @@ struct ARpcServerTrusty {
     ARpcServerTrusty(sp<RpcServer> rpcServer) : mRpcServer(std::move(rpcServer)) {}
 };
 
-ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const trusty_peer_id*, size_t,
-                                                                 void*),
-                                                 void* cbArg, void (*cbArgDeleter)(void*)) {
-    std::shared_ptr<void> cbArgSp(cbArg, cbArgDeleter);
+ARpcServerTrusty* ARpcServerTrusty_newPerSession(ARpcServerTrusty_CreateRootCb create_root,
+                                                 void* create_root_arg,
+                                                 void (*delete_create_root_arg)(void*)) {
+    std::shared_ptr<void> arg_sp(create_root_arg, delete_create_root_arg);
 
     auto rpcTransportCtxFactory = RpcTransportCtxFactoryTipcTrusty::make();
     if (rpcTransportCtxFactory == nullptr) {
@@ -55,9 +55,10 @@ ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const trusty_pe
         return nullptr;
     }
 
-    auto create_session = [cb, cbArgSp](wp<RpcSession> /*session*/, const trusty_peer_id& peer,
-                                        size_t peer_len) -> sp<IBinder> {
-        auto* aib = (*cb)(&peer, peer_len, cbArgSp.get());
+    auto wrap_create_root = [create_root, arg_sp](wp<RpcSession> /*session*/,
+                                                  const trusty_peer_id& peer,
+                                                  size_t peer_len) -> sp<IBinder> {
+        auto* aib = (*create_root)(&peer, peer_len, arg_sp.get());
         auto b = AIBinder_toPlatformBinder(aib);
 
         // We have a new sp<IBinder> backed by the same
@@ -68,7 +69,7 @@ ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const trusty_pe
         return b;
     };
 
-    RpcServerTrusty::setPerSessionRootObjectInternal(rpcServer.get(), std::move(create_session));
+    RpcServerTrusty::setPerSessionRootObjectInternal(rpcServer.get(), std::move(wrap_create_root));
     return new (std::nothrow) ARpcServerTrusty(std::move(rpcServer));
 }
 

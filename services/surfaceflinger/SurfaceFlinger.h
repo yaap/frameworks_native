@@ -21,6 +21,7 @@
  * NOTE: Make sure this file doesn't include  anything from <gl/ > or <gl2/ >
  */
 
+#include <android-base/expected.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/thread_annotations.h>
@@ -37,8 +38,10 @@
 #include <cutils/atomic.h>
 #include <cutils/compiler.h>
 #include <ftl/algorithm.h>
+#include <ftl/finalizer.h>
 #include <ftl/future.h>
 #include <ftl/non_null.h>
+#include <ftl/small_map.h>
 #include <gui/BufferQueue.h>
 #include <gui/CompositorTiming.h>
 #include <gui/FrameTimestamps.h>
@@ -69,6 +72,7 @@
 #include <scheduler/TransactionSchedule.h>
 #include <scheduler/interface/CompositionCoverage.h>
 #include <scheduler/interface/ICompositor.h>
+#include <ui/DisplayId.h>
 #include <ui/FenceResult.h>
 
 #include "ActivePictureTracker.h"
@@ -87,13 +91,14 @@
 #include "FrontEnd/LayerSnapshot.h"
 #include "FrontEnd/LayerSnapshotBuilder.h"
 #include "FrontEnd/TransactionHandler.h"
-#include "LayerVector.h"
 #include "MutexUtils.h"
 #include "PowerAdvisor/PowerAdvisor.h"
 #include "QueuedTransactionState.h"
+#include "RenderResourceCache.h"
 #include "Scheduler/ISchedulerCallback.h"
 #include "Scheduler/RefreshRateSelector.h"
 #include "Scheduler/Scheduler.h"
+#include "ShaderRegistry.h"
 #include "SurfaceFlingerFactory.h"
 #include "ThreadContext.h"
 #include "Tracing/LayerTracing.h"
@@ -387,10 +392,9 @@ private:
 
     class State {
     public:
-        explicit State(LayerVector::StateSet set) : stateSet(set) {}
+        State() = default;
+
         State& operator=(const State& other) {
-            // We explicitly don't copy stateSet so that, e.g., mDrawingState
-            // always uses the Drawing StateSet.
             displays = other.displays;
             colorMatrixChanged = other.colorMatrixChanged;
             if (colorMatrixChanged) {
@@ -401,21 +405,7 @@ private:
             return *this;
         }
 
-        const LayerVector::StateSet stateSet = LayerVector::StateSet::Invalid;
-
-        // TODO(b/241285876): Replace deprecated DefaultKeyedVector with ftl::SmallMap.
-        DefaultKeyedVector<wp<IBinder>, DisplayDeviceState> displays;
-
-        std::optional<size_t> getDisplayIndex(PhysicalDisplayId displayId) const {
-            for (size_t i = 0; i < displays.size(); i++) {
-                const auto& state = displays.valueAt(i);
-                if (state.physical && state.physical->id == displayId) {
-                    return i;
-                }
-            }
-
-            return {};
-        }
+        ui::DisplayMap<wp<IBinder>, DisplayDeviceState> displays;
 
         bool colorMatrixChanged = true;
         mat4 colorMatrix;
@@ -538,7 +528,7 @@ private:
     // ISurfaceComposer implementation:
     sp<IBinder> createVirtualDisplay(const std::string& displayName, bool isSecure,
                                      gui::ISurfaceComposer::OptimizationPolicy optimizationPolicy,
-                                     const std::string& uniqueId,
+                                     const std::string& uniqueId, uid_t ownerUid,
                                      float requestedRefreshRate = 0.0f);
     status_t destroyVirtualDisplay(const sp<IBinder>& displayToken);
     std::vector<PhysicalDisplayId> getPhysicalDisplayIds() const EXCLUDES(mStateLock) {
@@ -548,11 +538,11 @@ private:
 
     sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId) const;
     status_t setTransactionState(TransactionState&& state, const sp<IBinder>& applyToken) override;
+    status_t registerGraphicBuffers(const gui::GraphicBuffersRegisterInfo& info) override;
+    status_t unregisterGraphicBuffers(const gui::GraphicBuffersUnregisterInfo& info) override;
     void bootFinished();
     status_t getSupportedFrameTimestamps(std::vector<FrameEvent>* outSupported) const;
     sp<IDisplayEventConnection> createDisplayEventConnection(
-            gui::ISurfaceComposer::VsyncSource vsyncSource =
-                    gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
             EventRegistrationFlags eventRegistration = {},
             const sp<IBinder>& layerHandle = nullptr);
 
@@ -614,8 +604,8 @@ private:
     status_t removeFpsListener(const sp<gui::IFpsListener>& listener);
     status_t addTunnelModeEnabledListener(const sp<gui::ITunnelModeEnabledListener>& listener);
     status_t removeTunnelModeEnabledListener(const sp<gui::ITunnelModeEnabledListener>& listener);
-    status_t setDesiredDisplayModeSpecs(const sp<IBinder>& displayToken,
-                                        const gui::DisplayModeSpecs&);
+    status_t setDesiredDisplayModeSpecs(const sp<IBinder>& applyToken,
+                                        const std::vector<gui::DisplayModeSpecs>&);
     status_t getDesiredDisplayModeSpecs(const sp<IBinder>& displayToken, gui::DisplayModeSpecs*);
     status_t getDisplayBrightnessSupport(const sp<IBinder>& displayToken, bool* outSupport) const;
     status_t setDisplayBrightness(const sp<IBinder>& displayToken,
@@ -657,16 +647,24 @@ private:
     status_t getStalledTransactionInfo(
             int pid, std::optional<TransactionHandler::StalledTransactionInfo>& result);
 
-    void updateHdcpLevels(hal::HWDisplayId hwcDisplayId, int32_t connectedLevel, int32_t maxLevel);
-
     void addActivePictureListener(const sp<gui::IActivePictureListener>& listener);
 
     void removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
+
+    bool registerShader(const sp<IBinder>& shaderToken, const std::string& uniqueShaderName,
+                        const std::string& shaderString);
+    void unregisterShader(const sp<IBinder>& shaderToken);
 
     // IBinder::DeathRecipient overrides:
     void binderDied(const wp<IBinder>& who) override;
 
     // HWC2::ComposerCallback overrides:
+    //
+    // Callbacks that access mScheduler must check for nullptr under mSchedulerLock, because they
+    // could be invoked before initScheduler.
+    //
+    // TODO: b/241285191 - Reorder Scheduler initialization before HWComposer::setCallback.
+    //
     void onComposerHalVsync(hal::HWDisplayId, nsecs_t timestamp,
                             std::optional<hal::VsyncPeriodNanos>) override;
     void onComposerHalHotplugEvent(hal::HWDisplayId, DisplayHotplugEvent) override;
@@ -686,6 +684,8 @@ private:
                                          const scheduler::FrameTargeters&) override
             REQUIRES(kMainThreadContext);
 
+    void traceCompositionSummary(const std::vector<std::pair<Layer*, LayerFE*>>& layers);
+
     void sample() override;
 
     // ISchedulerCallback overrides:
@@ -702,6 +702,9 @@ private:
             REQUIRES(kMainThreadContext);
 
     // ICEPowerCallback overrides:
+    // If the performance hint session is enabled, and SurfaceFlinger is in performance policy
+    // mode, this will provide a performance hint that SurfaceFlinger's CPU workload is
+    // increasing.
     void notifyCpuLoadUp() override;
 
     using KernelIdleTimerController = scheduler::RefreshRateSelector::KernelIdleTimerController;
@@ -725,13 +728,14 @@ private:
     status_t setActiveModeFromBackdoor(const sp<display::DisplayToken>&, DisplayModeId, Fps minFps,
                                        Fps maxFps);
 
-    void initiateDisplayModeChanges() REQUIRES(kMainThreadContext) REQUIRES(mStateLock);
+    void initiateDisplayModeChanges() REQUIRES(kMainThreadContext)
+            REQUIRES(mStateLock, mModeTransitionMutex);
 
     // Returns whether the commit stage should proceed. The return value is ignored when finalizing
     // immediate mode changes, which happen toward the end of the commit stage.
     // TODO: b/355427258 - Remove the return value once the `synced_resolution_switch` flag is live.
     bool finalizeDisplayModeChange(PhysicalDisplayId) REQUIRES(kMainThreadContext)
-            REQUIRES(mStateLock);
+            REQUIRES(mStateLock, mModeTransitionMutex);
 
     // TODO: Remove once `modeset_state_machine` flag is cleaned up.
     void dropModeRequest(PhysicalDisplayId) REQUIRES(kMainThreadContext);
@@ -742,9 +746,18 @@ private:
 
     // Called on the main thread in response to setPowerMode()
     void setPhysicalDisplayPowerMode(const sp<DisplayDevice>& display, hal::PowerMode mode)
-            REQUIRES(mStateLock, kMainThreadContext);
+            EXCLUDES(mStateLock, mModeTransitionMutex) REQUIRES(kMainThreadContext);
+
+    // Returns a future for the slow hardware operation which can run on any
+    // thread and a finalizer whose function must be scheduled on the main
+    // thread.
+    [[nodiscard]] std::pair<ftl::Future<status_t>, ftl::FinalizerStd>
+    setPhysicalDisplayPowerModeAsync(const sp<DisplayDevice>& display, hal::PowerMode mode)
+            EXCLUDES(mStateLock, mModeTransitionMutex) REQUIRES(kMainThreadContext);
+    [[nodiscard]] ftl::FinalizerStd makePowerModeAsyncFinalizer(PhysicalDisplayId displayId,
+                                                                hal::PowerMode mode);
     void setVirtualDisplayPowerMode(const sp<DisplayDevice>& display, hal::PowerMode mode)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(kMainThreadContext);
 
     // Adjusts thread scheduling according to the optimization policy
     static void optimizeThreadScheduling(
@@ -752,8 +765,7 @@ private:
 
     // Enables or disables power optimizations depending on whether there are displays that should
     // be optimized for performance.
-    void applyOptimizationPolicy(const char* whence) REQUIRES(kMainThreadContext)
-            REQUIRES(mStateLock);
+    void applyOptimizationPolicy(const char* whence) REQUIRES(kMainThreadContext);
 
     // Returns the preferred mode for PhysicalDisplayId if the Scheduler has selected one for that
     // display. Falls back to the display's defaultModeId otherwise.
@@ -761,13 +773,17 @@ private:
             PhysicalDisplayId, DisplayModeId defaultModeId) const REQUIRES(mStateLock);
 
     status_t setDesiredDisplayModeSpecsInternal(
-            const sp<DisplayDevice>&, const scheduler::RefreshRateSelector::PolicyVariant&)
-            EXCLUDES(mStateLock) REQUIRES(kMainThreadContext);
+            const sp<DisplayDevice>&, const scheduler::RefreshRateSelector::PolicyVariant&,
+            sp<IBinder> displaySyncToken = nullptr) EXCLUDES(mStateLock, mModeTransitionMutex)
+            REQUIRES(kMainThreadContext);
 
     // TODO(b/241285191): Look up RefreshRateSelector on Scheduler to remove redundant parameter.
     status_t applyRefreshRateSelectorPolicy(PhysicalDisplayId,
-                                            const scheduler::RefreshRateSelector&)
-            REQUIRES(mStateLock, kMainThreadContext);
+                                            const scheduler::RefreshRateSelector&,
+                                            sp<IBinder> displaySyncToken = nullptr)
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
+
+    void updateWorkDuration(const sp<DisplayDevice>&, const gui::DisplayModeSpecs&);
 
     void commitTransactions() REQUIRES(kMainThreadContext, mStateLock);
     void commitTransactionsLocked(uint32_t transactionFlags)
@@ -778,9 +794,11 @@ private:
             compositionengine::CompositionRefreshArgs& refreshArgs, bool cursorOnly)
             REQUIRES(kMainThreadContext);
 
-    void moveSnapshotsFromCompositionArgs(compositionengine::CompositionRefreshArgs& refreshArgs,
-                                          const std::vector<std::pair<Layer*, LayerFE*>>& layers)
+    void moveSnapshotsFromCompositionArgs(const std::vector<std::pair<Layer*, LayerFE*>>& layers)
             REQUIRES(kMainThreadContext);
+    std::vector<std::pair<Layer*, LayerFE*>> copyMergedSnapshots(
+            compositionengine::CompositionRefreshArgs& refreshArgs) REQUIRES(kMainThreadContext);
+
     // Return true if we must composite this frame
     bool updateLayerSnapshots(VsyncId vsyncId, nsecs_t frameTimeNs, nsecs_t expecedPresentTimeNs,
                               bool transactionsFlushed, bool& out) REQUIRES(kMainThreadContext);
@@ -789,12 +807,13 @@ private:
     void updateInputFlinger(VsyncId vsyncId, TimePoint frameTime) REQUIRES(kMainThreadContext);
     void persistDisplayBrightness(bool needsComposite) REQUIRES(kMainThreadContext);
     void buildWindowInfos(std::vector<gui::WindowInfo>& outWindowInfos,
-                          std::vector<gui::DisplayInfo>& outDisplayInfos)
-            REQUIRES(kMainThreadContext);
+                          std::vector<gui::DisplayInfo>& outDisplayInfos,
+                          std::vector<int32_t>& outVisibleWindowIds) REQUIRES(kMainThreadContext);
     void commitInputWindowCommands() REQUIRES(mStateLock);
     void updateCursorAsync() REQUIRES(kMainThreadContext);
 
-    void initScheduler(const sp<const DisplayDevice>&) REQUIRES(kMainThreadContext, mStateLock);
+    void initScheduler(const sp<const DisplayDevice>&)
+            REQUIRES(kMainThreadContext, mStateLock, mModeTransitionMutex);
 
     /*
      * Transactions
@@ -863,15 +882,25 @@ private:
     status_t checkLayerLeaks();
 
     status_t mirrorLayer(const LayerCreationArgs& args, const sp<IBinder>& mirrorFromHandle,
-                         const sp<IBinder>& stopAtHandle, gui::CreateSurfaceResult& outResult);
+                         const sp<IBinder>& stopAtHandle, const sp<IBinder>& cropByHandle,
+                         gui::CreateSurfaceResult& outResult);
 
-    status_t mirrorDisplay(DisplayId displayId, const LayerCreationArgs& args,
-                           gui::CreateSurfaceResult& outResult);
+    // Finds the layer stack associated with the provided `displayId`, and returns the surface
+    // control via `gui::CreateSurfaceResult`. Otherwise, PERMISSION_DENIED if the client lacks the
+    // necessary permissions, or NAME_NOT_FOUND if the `displayId` does not exist, or NO_MEMORY if
+    // the layer cannot be created due to a leak. Note: The mirrored layer stack does not change,
+    // even if the display's layer does.
+    base::expected<gui::CreateSurfaceResult, status_t> mirrorLayerStack(
+            DisplayId displayId, const LayerCreationArgs& args);
 
-    // add a layer to SurfaceFlinger
-    status_t addClientLayer(LayerCreationArgs& args, const sp<IBinder>& handle,
-                            const sp<Layer>& layer, const wp<Layer>& parentLayer,
-                            uint32_t* outTransformHint);
+    // Returns a surface control via `gui::CreateSurfaceResult` that mirrors the provided
+    // `displayIdToMirror` inside `args`. Otherwise, PERMISSION_DENIED if the client lacks necessary
+    // permissions, or NO_MEMORY if the layer cannot be created due to a leak. The
+    // `displayIdToMirror` must exist.
+    base::expected<gui::CreateSurfaceResult, status_t> mirrorDisplay(const LayerCreationArgs& args);
+
+    // Adds a layer to SurfaceFlinger
+    void addClientLayer(LayerCreationArgs& args, const sp<Layer>& layer);
 
     // Creates a promise for a future release fence for a layer. This allows for
     // the layer to keep track of when its buffer can be released.
@@ -906,6 +935,9 @@ private:
 
         std::function<bool(const frontend::LayerSnapshot&, bool& outStopTraversal)>
                 snapshotFilterFn{nullptr};
+
+        // A bitmask for filtering layers that have specific screen capture flags.
+        uint32_t exclusionMask;
     };
 
     /*
@@ -996,6 +1028,10 @@ private:
     base::expected<ScreenshotStrategy, status_t> setScreenshotSnapshotsAndDisplayState(
             ScreenshotArgs& args, ui::PixelFormat requestedPixelFormat);
 
+    bool loadReadbackAttributesAndCheckPixelFormat(
+            PhysicalDisplayId displayId, ui::PixelFormat reqPixelFormat,
+            aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes& outAttributes);
+
     void captureScreenCommon(ScreenshotArgs& args, ui::PixelFormat,
                              const sp<IScreenCaptureListener>&);
 
@@ -1066,9 +1102,6 @@ private:
     }
 
     sp<DisplayDevice> getPacesetterDisplayLocked() REQUIRES(mStateLock) {
-        if (!FlagManager::getInstance().pacesetter_selection()) {
-            return getFrontInternalDisplayLocked();
-        }
         return getDisplayDeviceLocked(mScheduler->getPacesetterDisplayId());
     }
 
@@ -1088,13 +1121,6 @@ private:
     sp<const DisplayDevice> getFrontInternalDisplay() const EXCLUDES(mStateLock) {
         Mutex::Autolock lock(mStateLock);
         return getFrontInternalDisplayLocked();
-    }
-
-    std::optional<PhysicalDisplayId> getDefaultPacesetterDisplay() const {
-        if (FlagManager::getInstance().pacesetter_selection()) {
-            return std::nullopt;
-        }
-        return mFrontInternalDisplayId;
     }
 
     using DisplayDeviceAndSnapshot = std::pair<sp<DisplayDevice>, display::DisplaySnapshotRef>;
@@ -1190,7 +1216,8 @@ private:
             const DisplayDeviceState& state,
             const sp<compositionengine::DisplaySurface>& displaySurface,
             const sp<Surface>& compositionSurface) REQUIRES(mStateLock);
-    void processDisplayChangesLocked() REQUIRES(mStateLock, kMainThreadContext);
+    void processDisplayChangesLocked()
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
     void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState&)
             REQUIRES(mStateLock, kMainThreadContext);
     void processDisplayRemoved(const wp<IBinder>& displayToken)
@@ -1198,7 +1225,7 @@ private:
     void processDisplayChanged(const wp<IBinder>& displayToken,
                                const DisplayDeviceState& currentState,
                                const DisplayDeviceState& drawingState)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
 
     /*
      * Display identification
@@ -1276,13 +1303,13 @@ private:
     void releaseVirtualDisplay(VirtualDisplayIdVariant displayId);
     void releaseVirtualDisplaySnapshot(VirtualDisplayId displayId);
 
-    sp<DisplayDevice> findFrontInternalDisplay() const REQUIRES(mStateLock, kMainThreadContext);
+    sp<DisplayDevice> findFrontInternalDisplay() const REQUIRES(kMainThreadContext);
 
     void onNewFrontInternalDisplay(const DisplayDevice* oldFrontInternalDisplayPtr,
                                    const DisplayDevice& newFrontInternalDisplay)
-            REQUIRES(mStateLock, kMainThreadContext);
+            REQUIRES(kMainThreadContext);
 
-    void onNewPacesetterDisplay() REQUIRES(mStateLock, kMainThreadContext);
+    void onNewPacesetterDisplay() REQUIRES(mStateLock, mModeTransitionMutex, kMainThreadContext);
 
     /*
      * Debugging & dumpsys
@@ -1313,6 +1340,7 @@ private:
     void dumpHdrInfo(std::string& result) const REQUIRES(mStateLock);
     void dumpFrontEnd(std::string& result) REQUIRES(kMainThreadContext);
     void dumpVisibleFrontEnd(std::string& result) REQUIRES(mStateLock, kMainThreadContext);
+    void dumpRenderCommandBuffers(std::string& result) REQUIRES(kMainThreadContext);
 
     perfetto::protos::LayersProto dumpDrawingStateProto(uint32_t traceFlags) const
             REQUIRES(kMainThreadContext);
@@ -1360,8 +1388,13 @@ private:
 
     ui::Rotation getPhysicalDisplayOrientation(PhysicalDisplayId, bool isPrimary) const
             REQUIRES(mStateLock);
-    void traverseLegacyLayers(const LayerVector::Visitor& visitor) const
-            REQUIRES(kMainThreadContext);
+
+    template <typename F>
+    void traverseLegacyLayers(F visitor) const REQUIRES(kMainThreadContext) {
+        for (auto& layer : mLegacyLayers) {
+            visitor(layer.second.get());
+        }
+    }
 
     void initBootProperties();
     void initTransactionTraceWriter();
@@ -1384,7 +1417,7 @@ private:
     // - write access from the main thread must lock mStateLock, since another
     // thread may be reading these variables.
     mutable Mutex mStateLock;
-    State mCurrentState{LayerVector::StateSet::Current};
+    State mCurrentState;
     std::atomic<int32_t> mTransactionFlags = 0;
     std::atomic<uint32_t> mUniqueTransactionId = 1;
 
@@ -1411,7 +1444,7 @@ private:
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
-    State mDrawingState{LayerVector::StateSet::Drawing};
+    State mDrawingState;
     bool mVisibleRegionsDirty = false;
 
     bool mHdrLayerInfoChanged = false;
@@ -1496,6 +1529,12 @@ private:
     std::atomic<PhysicalDisplayId> mFrontInternalDisplayId;
 
     display::DisplayModeController mDisplayModeController;
+    std::mutex mModeTransitionMutex;
+
+    bool shouldSyncResolutionSwitch() const {
+        return FlagManager::getInstance().synced_resolution_switch() &&
+                mBootStage == BootStage::FINISHED;
+    }
 
     struct {
         std::unique_ptr<DisplayIdGenerator<GpuVirtualDisplayId>> gpu =
@@ -1574,6 +1613,9 @@ private:
 
     std::unique_ptr<scheduler::Scheduler> mScheduler;
 
+    // Used during boot. See HWC2::ComposerCallback overrides.
+    std::mutex mSchedulerLock;
+
     scheduler::PresentLatencyTracker mPresentLatencyTracker GUARDED_BY(kMainThreadContext);
 
     bool mLumaSampling = true;
@@ -1636,14 +1678,16 @@ private:
         return mScheduler->getLayerFramerate(now, id);
     }
 
-    bool mPowerHintSessionEnabled;
+    std::atomic_bool mPowerHintSessionEnabled;
+    std::atomic_int mPowerModeInProgressCount{0};
+    std::atomic_bool mPowerModeChangeInProgress{false};
     // Whether a display should be turned on when initialized
     bool mSkipPowerOnForQuiescent;
 
     // used for omitting vsync callbacks to apps when the display is not updatable
-    int mRefreshableDisplays GUARDED_BY(mStateLock) = 0;
-    void incRefreshableDisplays() REQUIRES(mStateLock);
-    void decRefreshableDisplays() REQUIRES(mStateLock);
+    int mRefreshableDisplays GUARDED_BY(kMainThreadContext) = 0;
+    void incRefreshableDisplays() REQUIRES(kMainThreadContext);
+    void decRefreshableDisplays() REQUIRES(kMainThreadContext);
 
     frontend::LayerLifecycleManager mLayerLifecycleManager GUARDED_BY(kMainThreadContext);
     frontend::LayerHierarchyBuilder mLayerHierarchyBuilder GUARDED_BY(kMainThreadContext);
@@ -1667,11 +1711,20 @@ private:
     bool mFrontEndDisplayInfosChanged GUARDED_BY(kMainThreadContext) = false;
 
     // WindowInfo ids visible during the last commit.
-    std::unordered_set<int32_t> mVisibleWindowIds GUARDED_BY(kMainThreadContext);
+    std::vector<int32_t> mVisibleWindowIds GUARDED_BY(kMainThreadContext);
+    std::vector<int32_t> mLastVisibleWindowIds GUARDED_BY(kMainThreadContext);
 
     // Mirroring
     // Map of displayid to mirrorRoot
     ftl::SmallMap<int64_t, sp<SurfaceControl>, 3> mMirrorMapForDebug;
+
+    // The IPC cache is used to manage render resources that are transferred from
+    // client processes to SurfaceFlinger. It is populated via the
+    // registerGraphicBuffers and unregisterGraphicBuffers AIDL calls, and is
+    // used to resolve resources during layer snapshotting.
+    sp<RenderResourceCache> mIpcCache = sp<RenderResourceCache>::make();
+
+    sp<ShaderRegistry> mShaderRegistry = sp<ShaderRegistry>::make();
 
     // NotifyExpectedPresentHint
     enum class NotifyExpectedPresentHintStatus {
@@ -1715,17 +1768,11 @@ private:
     void sfdo_resetForcedPacesetter();
 
     // Partition displays: physical for main thread, virtual for offloaded.
-    struct RefreshArgsPartition {
-        compositionengine::CompositionRefreshArgs mainThreadRefreshArgs;
-        std::optional<compositionengine::CompositionRefreshArgs> offloadedRefreshArgs;
-    };
-    RefreshArgsPartition addOutputsToRefreshArgs(
-            PhysicalDisplayId pacesetterId,
-            const compositionengine::CompositionRefreshArgs& refreshArgs,
+    std::optional<compositionengine::CompositionRefreshArgs> addOutputsToRefreshArgs(
+            PhysicalDisplayId pacesetterId, compositionengine::CompositionRefreshArgs& refreshArgs,
             const scheduler::FrameTargeters& frameTargeters);
     std::future<void> offloadGpuCompositedDisplays(
-            compositionengine::CompositionRefreshArgs offloadedRefreshArgs,
-            std::vector<std::pair<Layer*, LayerFE*>> offloadedLayers);
+            compositionengine::CompositionRefreshArgs offloadedRefreshArgs);
     void prepareLayersForComposition(compositionengine::CompositionRefreshArgs& refreshArgs,
                                      bool kCursorOnly,
                                      const std::vector<std::pair<Layer*, LayerFE*>>& layers);
@@ -1733,8 +1780,7 @@ private:
     //  to rebuild layer stack instead of crashing.
     void setVisibleRegionDirtyIfNeeded(compositionengine::CompositionRefreshArgs& refreshArgs);
 
-    void setForcedClientCompositionLayerStacks(
-            compositionengine::CompositionRefreshArgs& refreshArgs) EXCLUDES(mStateLock);
+    void setForcedClientCompositionLayerStacks(compositionengine::CompositionRefreshArgs&);
 };
 
 class SurfaceComposerAIDL : public gui::BnSurfaceComposer {
@@ -1743,14 +1789,13 @@ public:
 
     binder::Status bootFinished() override;
     binder::Status createDisplayEventConnection(
-            VsyncSource vsyncSource, EventRegistration eventRegistration,
-            const sp<IBinder>& layerHandle,
+            EventRegistration eventRegistration, const sp<IBinder>& layerHandle,
             sp<gui::IDisplayEventConnection>* outConnection) override;
     binder::Status createConnection(sp<gui::ISurfaceComposerClient>* outClient) override;
     binder::Status createVirtualDisplay(
             const std::string& displayName, bool isSecure,
             gui::ISurfaceComposer::OptimizationPolicy optimizationPolicy,
-            const std::string& uniqueId, float requestedRefreshRate,
+            const std::string& uniqueId, int32_t ownerUid, float requestedRefreshRate,
             sp<IBinder>* outDisplay) override;
     binder::Status destroyVirtualDisplay(const sp<IBinder>& displayToken) override;
     binder::Status getPhysicalDisplayIds(std::vector<int64_t>* outDisplayIds) override;
@@ -1829,8 +1874,9 @@ public:
             const sp<gui::ITunnelModeEnabledListener>& listener) override;
     binder::Status removeTunnelModeEnabledListener(
             const sp<gui::ITunnelModeEnabledListener>& listener) override;
-    binder::Status setDesiredDisplayModeSpecs(const sp<IBinder>& displayToken,
-                                              const gui::DisplayModeSpecs&) override;
+    binder::Status setDesiredDisplayModeSpecs(
+            const sp<IBinder>& applyToken,
+            const std::vector<gui::DisplayModeSpecs>&) override;
     binder::Status getDesiredDisplayModeSpecs(const sp<IBinder>& displayToken,
                                               gui::DisplayModeSpecs* outSpecs) override;
     binder::Status getDisplayBrightnessSupport(const sp<IBinder>& displayToken,
@@ -1879,6 +1925,10 @@ public:
     binder::Status removeActivePictureListener(const sp<gui::IActivePictureListener>& listener);
     binder::Status forcePacesetter(int64_t displayId) override;
     binder::Status resetForcedPacesetter() override;
+    binder::Status registerShader(const sp<IBinder>& shaderToken,
+                                  const std::string& uniqueShaderName,
+                                  const std::string& shaderString) override;
+    binder::Status unregisterShader(const sp<IBinder>& shader) override;
 
 private:
     static const constexpr bool kUsePermissionCache = true;

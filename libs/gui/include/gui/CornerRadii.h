@@ -69,7 +69,7 @@ public:
     }
 
     /* Scales the X and Y of each corner radius as per ui::Transform */
-    void transform(ui::Transform t) {
+    void transform(const ui::Transform& t) {
         this->topLeft.x *= t.getScaleX();
         this->topLeft.y *= t.getScaleY();
         this->topRight.x *= t.getScaleX();
@@ -92,6 +92,11 @@ public:
 
 inline bool operator==(const CornerRadii& lhs, const CornerRadii& rhs) {
     return static_cast<const ::android::gui::CornerRadiiData&>(lhs) ==
+            static_cast<const ::android::gui::CornerRadiiData&>(rhs);
+}
+
+inline bool operator!=(const CornerRadii& lhs, const CornerRadii& rhs) {
+    return static_cast<const ::android::gui::CornerRadiiData&>(lhs) !=
             static_cast<const ::android::gui::CornerRadiiData&>(rhs);
 }
 

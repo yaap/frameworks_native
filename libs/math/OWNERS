@@ -1,3 +1,7 @@
+# Bug component: 1075130
+include platform/frameworks/base:/graphics/java/android/graphics/CORE_GRAPHICS_OWNERS
+
+# Historical owners
 mathias@google.com
 sumir@google.com
 jreck@google.com

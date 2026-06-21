@@ -18,6 +18,7 @@
 #define LOG_TAG "CpuConsumer"
 //#define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <aidl/android/hardware/graphics/common/PixelFormat.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueue.h>
@@ -33,6 +34,7 @@
 #define CC_LOGW(x, ...) ALOGW("[%s] " x, mName.c_str(), ##__VA_ARGS__)
 #define CC_LOGE(x, ...) ALOGE("[%s] " x, mName.c_str(), ##__VA_ARGS__)
 
+using AidlPixelFormat = aidl::android::hardware::graphics::common::PixelFormat;
 namespace android {
 
 std::tuple<sp<CpuConsumer>, sp<Surface>> CpuConsumer::create(size_t maxLockedBuffers,
@@ -103,6 +105,7 @@ static bool isPossiblyYUV(PixelFormat format) {
         case HAL_PIXEL_FORMAT_Y8:
         case HAL_PIXEL_FORMAT_Y16:
         case HAL_PIXEL_FORMAT_RAW16:
+        case static_cast<int>(AidlPixelFormat::RAW14):
         case HAL_PIXEL_FORMAT_RAW12:
         case HAL_PIXEL_FORMAT_RAW10:
         case HAL_PIXEL_FORMAT_RAW_OPAQUE:

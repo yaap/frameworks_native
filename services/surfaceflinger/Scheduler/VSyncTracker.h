@@ -39,20 +39,60 @@ public:
     virtual ~VSyncTracker();
 
     /*
+     * Enum to specify the origin of the VSYNC timestamp being reported.
+     */
+    enum class VsyncTimeSource {
+        /* Default VsyncTimeSource. */
+        Unknown,
+        /* Timestamp from a direct hardware VSYNC callback. */
+        HwVsyncCallback,
+        /* Timestamp from querying the last known hardware VSYNC time. */
+        HwVsyncQuery,
+        /* Timestamp derived from a present fence, indicating when a frame was actually presented.
+         */
+        PresentFence,
+        ftl_last = PresentFence,
+    };
+
+    /*
      * The threshold for a vsync timestamp to be too old to be used for prediction of
      * nextAnticipatedVSyncTimeFrom.
      */
     static constexpr Duration kPredictorThreshold = std::chrono::milliseconds(200);
 
     /*
-     * Adds a known timestamp from a vsync timing source (HWVsync signal, present fence)
-     * to the model.
+     * Adds a known timestamp from a vsync timing source to the model. This timestamp
+     * is used to correct the model's internal phase and period.
      *
-     * \param [in] timestamp    The timestamp when the vsync signal was.
+     * \param [in] timestamp    The timestamp (in nanoseconds) when the vsync signal occurred.
      * \return                  True if the timestamp was consistent with the internal model,
-     *                          False otherwise
+     *                          False otherwise.
      */
     virtual bool addVsyncTimestamp(nsecs_t timestamp) = 0;
+
+    struct HwVsyncStability {
+        std::optional<nsecs_t> error;
+        std::optional<nsecs_t> stddev;
+    };
+
+    struct ModelAccuracy {
+        nsecs_t modelErrorNs;
+        nsecs_t actualVsync;
+        nsecs_t predictedVsync;
+        nsecs_t idealPeriod;
+        double vsyncPeriodsElapsed;
+        HwVsyncStability hwVsyncStability;
+    };
+
+    /*
+     * Evaluates the model's accuracy by comparing a known VSync timestamp against the prediction
+     * the model would have made for that event. This is a query-only function and does not
+     * affect the internal state of the tracker.
+     *
+     * \param [in] timestamp    A known VSync timestamp to compare against the model.
+     * \return                  A struct containing error metrics and timing context.
+     */
+    virtual ModelAccuracy getModelAccuracy(nsecs_t timestamp) const = 0;
 
     /*
      * Access the next anticipated vsync time such that the anticipated time >= timePoint.

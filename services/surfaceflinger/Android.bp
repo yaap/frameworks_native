@@ -21,15 +21,81 @@ aconfig_declarations {
 
 cc_aconfig_library {
     name: "libsurfaceflingerflags",
+    host_supported: true,
     aconfig_declarations: "surfaceflinger_flags",
     vendor_available: true,
+    target: {
+        windows: {
+            enabled: true,
+        },
+    },
 }
 
 cc_defaults {
     name: "surfaceflinger_defaults",
+    defaults: [
+        "no_bti",
+    ],
+    tidy: true,
+    tidy_flags: [
+        // Only check our headers
+        "-header-filter=^.*frameworks/native/services/surfaceflinger/.*.h$",
+    ],
+    tidy_checks: [
+        "-android-cloexec-dup",
+        "-android-cloexec-pipe",
+        "-bugprone-argument-comment",
+        "-bugprone-branch-clone",
+        "-bugprone-forward-declaration-namespace",
+        "-bugprone-incorrect-roundings",
+        "-bugprone-integer-division",
+        "-bugprone-lambda-function-name",
+        "-bugprone-misplaced-widening-cast",
+        "-bugprone-move-forwarding-reference",
+        "-bugprone-nondeterministic-pointer-iteration-order",
+        "-bugprone-switch-missing-default-case",
+        "-cert-dcl59-cpp",
+        "-cert-err34-c",
+        "-cert-int09-c",
+        "-cert-msc30-c",
+        "-cert-msc50-cpp",
+        "-cert-oop54-cpp",
+        "-clang-analyzer-core.CallAndMessage",
+        "-clang-analyzer-core.DivideZero",
+        "-clang-analyzer-deadcode.DeadStores",
+        "-clang-analyzer-optin.core.EnumCastOutOfRange",
+        "-clang-analyzer-optin.cplusplus.UninitializedObject",
+        "-clang-analyzer-optin.cplusplus.VirtualCall",
+        "-clang-analyzer-optin.performance.Padding",
+        "-clang-analyzer-security.ArrayBound",
+        "-clang-diagnostic-deprecated-declarations",
+        "-google-build-namespaces",
+        "-misc-include-cleaner",
+        "-misc-unused-using-decls",
+        "-misc-use-internal-linkage",
+        "-performance-enum-size",
+        "-performance-for-range-copy",
+        "-performance-inefficient-vector-operation",
+        "-performance-move-const-arg",
+        "-performance-unnecessary-copy-initialization",
+        "-performance-unnecessary-value-param",
+        "-portability-template-virtual-member-function",
+    ],
+    tidy_checks_as_errors: [
+        "abseil-*",
+        "android-*",
+        "bugprone-*",
+        "cert-*",
+        "clang-analyzer-*",
+        "google-*",
+        "misc-*",
+        "performance*",
+        "portability*",
+    ],
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-DLOG_TAG=\"SurfaceFlinger\"",
+        "-DFMT_CPP_LIB_FILESYSTEM=0", // b/455625875
         "-Wall",
         "-Wconversion",
         "-Werror",
@@ -80,9 +146,6 @@ cc_defaults {
     shared_libs: [
         "android.hardware.common-V2-ndk",
         "android.hardware.common.fmq-V1-ndk",
-        "android.hardware.configstore-utils",
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore@1.1",
         "android.hardware.graphics.allocator@2.0",
         "android.hardware.graphics.allocator@3.0",
         "android.hardware.graphics.common@1.2",
@@ -90,7 +153,6 @@ cc_defaults {
         "android.hardware.graphics.composer@2.2",
         "android.hardware.graphics.composer@2.3",
         "android.hardware.graphics.composer@2.4",
-        "android.os.flags-aconfig-cc-host",
         "libEGL",
         "libGLESv1_CM",
         "libGLESv2",
@@ -127,7 +189,8 @@ cc_defaults {
         "libtonemap",
     ],
     header_libs: [
-        "android.hardware.graphics.composer3-command-buffer",
+        // TODO(b/445511672): clean up command-buffer versioning.
+        "android.hardware.graphics.composer3-command-buffer-V5",
         "android.hardware.graphics.composer@2.1-command-buffer",
         "android.hardware.graphics.composer@2.2-command-buffer",
         "android.hardware.graphics.composer@2.3-command-buffer",
@@ -183,15 +246,9 @@ cc_library_headers {
     export_static_lib_headers: ["libserviceutils"],
 
     shared_libs: [
-        "android.hardware.configstore-utils",
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore@1.1",
         "libbinder_ndk",
     ],
     export_shared_lib_headers: [
-        "android.hardware.configstore-utils",
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore@1.1",
         "libbinder_ndk",
     ],
 }
@@ -202,12 +259,13 @@ filegroup {
         "DisplayHardware/AidlComposerHal.cpp",
         "DisplayHardware/ComposerHal.cpp",
         "DisplayHardware/FramebufferSurface.cpp",
+        "DisplayHardware/HwcSlotTracker.cpp",
         "DisplayHardware/HWC2.cpp",
         "DisplayHardware/HWComposer.cpp",
         "DisplayHardware/HidlComposerHal.cpp",
+        "DisplayHardware/LegacyFramebufferSurface.cpp",
         "DisplayHardware/VirtualDisplay/LegacyVirtualDisplaySurface.cpp",
         "DisplayHardware/VirtualDisplay/SinkSurfaceHelper.cpp",
-        "DisplayHardware/VirtualDisplay/VirtualDisplayBufferSlotTracker.cpp",
         "DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp",
         "DisplayHardware/VirtualDisplay/VirtualDisplayThread.cpp",
         "DisplayHardware/VirtualDisplay/VirtualDisplayThreadManager.cpp",
@@ -220,12 +278,6 @@ cc_library_headers {
     export_include_dirs: ["."],
     static_libs: ["libserviceutils"],
     export_static_lib_headers: ["libserviceutils"],
-}
-
-cc_library_headers {
-    name: "liblocklessqueue_headers",
-    host_supported: true,
-    export_include_dirs: ["."],
 }
 
 filegroup {
@@ -253,13 +305,15 @@ filegroup {
         "FrontEnd/RequestedLayerState.cpp",
         "FrontEnd/TransactionHandler.cpp",
         "FrontEnd/Caching/MergeableHierarchy.cpp",
+        "FrontEnd/Caching/MergeableHierarchyManager.cpp",
+        "FrontEnd/Caching/TexturePool.cpp",
         "HdrLayerInfoReporter.cpp",
         "HdrSdrRatioOverlay.cpp",
+        "RenderResourceCache.cpp",
         "Jank/JankTracker.cpp",
         "Layer.cpp",
         "LayerFE.cpp",
         "LayerProtoHelper.cpp",
-        "LayerVector.cpp",
         "RefreshRateOverlay.cpp",
         "RegionSamplingThread.cpp",
         "Scheduler/EventThread.cpp",
@@ -279,6 +333,7 @@ filegroup {
         "Scheduler/VsyncModulator.cpp",
         "Scheduler/VsyncSchedule.cpp",
         "ScreenCaptureOutput.cpp",
+        "ShaderRegistry.cpp",
         "SurfaceFlinger.cpp",
         "SurfaceFlingerDefaultFactory.cpp",
         "Tracing/LayerDataSource.cpp",
@@ -289,6 +344,7 @@ filegroup {
         "Tracing/tools/LayerTraceGenerator.cpp",
         "TransactionCallbackInvoker.cpp",
         "TunnelModeEnabledReporter.cpp",
+        "Utils/FenceUtils.cpp",
         "WindowInfosListenerInvoker.cpp",
     ],
 }
@@ -303,8 +359,6 @@ cc_defaults {
         "-DLOG_TAG=\"SurfaceFlinger\"",
     ],
     shared_libs: [
-        "android.hardware.configstore-utils",
-        "android.hardware.configstore@1.0",
         "android.hardware.graphics.allocator@2.0",
         "android.hardware.graphics.allocator@3.0",
         "libbinder",
@@ -316,8 +370,6 @@ cc_defaults {
         "libutils",
     ],
     static_libs: [
-        "android.frameworks.displayservice@1.0",
-        "libdisplayservicehidl",
         "libserviceutils",
     ],
 }
@@ -332,7 +384,9 @@ filegroup {
 
 cc_binary {
     name: "surfaceflinger",
-    defaults: ["libsurfaceflinger_binary"],
+    defaults: [
+        "libsurfaceflinger_binary",
+    ],
     init_rc: ["surfaceflinger.rc"],
     srcs: [
         ":surfaceflinger_binary_sources",
@@ -358,9 +412,6 @@ cc_library_shared {
         "SurfaceFlingerProperties.cpp",
     ],
     shared_libs: [
-        "android.hardware.configstore-utils",
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore@1.1",
         "android.hardware.graphics.common@1.2",
         "libhidlbase",
         "liblog",
@@ -386,6 +437,7 @@ cc_library {
     generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
     export_generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
     shared_libs: [
+        "android.os.statsbootstrap_aidl-cpp",
         "libbinder",
         "libstatsbootstrap",
         "libutils",
@@ -396,7 +448,7 @@ genrule {
     name: "statslog_surfaceflinger_bootstrap.h",
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger_bootstrap.h" +
-        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+        " --module surfaceflinger --namespace android,surfaceflinger,stats --interface bootstrap",
     out: [
         "statslog_surfaceflinger_bootstrap.h",
     ],
@@ -407,7 +459,7 @@ genrule {
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger_bootstrap.cpp" +
         " --module surfaceflinger --namespace android,surfaceflinger,stats" +
-        " --importHeader statslog_surfaceflinger_bootstrap.h --bootstrap",
+        " --importHeader statslog_surfaceflinger_bootstrap.h --interface bootstrap",
     out: [
         "statslog_surfaceflinger_bootstrap.cpp",
     ],

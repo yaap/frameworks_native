@@ -27,6 +27,7 @@
 #include <android-base/expected.h>
 #include <binder/IBinder.h>
 #include <ftl/finalizer.h>
+#include <ftl/non_null.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/SurfaceControl.h>
 #include <ui/GraphicBuffer.h>
@@ -39,8 +40,15 @@
 #include "test_framework/surfaceflinger/events/TransactionCompleted.h"
 #include "test_framework/surfaceflinger/events/TransactionInitiated.h"
 
+namespace android::surfaceflinger::tests::end2end::test_framework::core {
+
+class TestService;
+
+}  // namespace android::surfaceflinger::tests::end2end::test_framework::core
+
 namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger {
 
+class SFController;
 class SimpleBufferPool;
 
 // Wrapper around a gui::SurfaceControl
@@ -75,11 +83,11 @@ class Surface final : public std::enable_shared_from_this<Surface> {
         events::TransactionCompleted::AsyncConnector onTransactionCompleted;
     };
 
-    [[nodiscard]] static auto make(const sp<SurfaceComposerClient>& flinger,
+    [[nodiscard]] static auto make(const ftl::NonNull<std::shared_ptr<SFController>>& controller,
                                    const Surface::CreationArgs& args)
             -> base::expected<std::shared_ptr<Surface>, std::string>;
 
-    explicit Surface(Passkey passkey);
+    explicit Surface(ftl::NonNull<std::weak_ptr<SFController>> controller, Passkey passkey);
 
     [[nodiscard]] auto id() const -> uintptr_t { return std::bit_cast<uintptr_t>(this); }
 
@@ -91,8 +99,11 @@ class Surface final : public std::enable_shared_from_this<Surface> {
     [[nodiscard]] auto commitNextBuffer() -> uint64_t;
 
   private:
-    [[nodiscard]] auto init(const sp<SurfaceComposerClient>& flinger,
+    [[nodiscard]] auto init(const ftl::NonNull<std::shared_ptr<SFController>>& controller,
                             const Surface::CreationArgs& args) -> base::expected<void, std::string>;
+
+    [[nodiscard]] auto testService() const -> std::shared_ptr<core::TestService>;
+
     void commitBufferInternal(
             uint64_t frameNumber, const sp<GraphicBuffer>& buffer,
             ReleaseBufferCallback releaseCallback,
@@ -104,6 +115,8 @@ class Surface final : public std::enable_shared_from_this<Surface> {
     void onTransactionCommitted(const events::TransactionCommitted& event) const;
     void onTransactionCompleted(const events::TransactionCompleted& event) const;
     void ensureCallbacksCompletedBeforeShutdown();
+
+    const ftl::NonNull<std::weak_ptr<SFController>> mController;
 
     Callbacks mCallbacks;
 

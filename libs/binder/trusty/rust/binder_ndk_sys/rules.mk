@@ -44,4 +44,8 @@ MODULE_BINDGEN_SRC_HEADER := $(LIBBINDER_DIR)/rust/sys/BinderBindings.hpp
 MODULE_BINDGEN_FLAGS += $(shell cat $(LIBBINDER_NDK_BINDGEN_FLAG_FILE))
 MODULE_SRCDEPS += $(LIBBINDER_NDK_BINDGEN_FLAG_FILE)
 
+# Fix "this URL is not a hyperlink" errors caused by bindgen
+# copying URLs in C++ comments verbatim to Rust
+MODULE_RUSTFLAGS += --allow rustdoc::bare_urls
+
 include make/library.mk

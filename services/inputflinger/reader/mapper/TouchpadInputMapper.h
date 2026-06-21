@@ -25,8 +25,7 @@
 #include <android/os/PointerCaptureMode.h>
 #include <utils/Timers.h>
 
-#include "CapturedTouchpadEventConverter.h"
-#include "EventHub.h"
+#include "AbsoluteTouchpadEventConverter.h"
 #include "InputDevice.h"
 #include "InputMapper.h"
 #include "InputReaderBase.h"
@@ -78,6 +77,7 @@ private:
     void resetGestureInterpreter(nsecs_t when);
     explicit TouchpadInputMapper(InputDeviceContext& deviceContext,
                                  const InputReaderConfiguration& readerConfig);
+    void configureAccelerationCurves();
     void updatePalmDetectionMetrics();
     [[nodiscard]] std::list<NotifyArgs> sendHardwareState(nsecs_t when, nsecs_t readTime,
                                                           SelfContainedHardwareState schs);
@@ -97,11 +97,13 @@ private:
 
     HardwareStateConverter mStateConverter;
     UncapturedGestureConverter mGestureConverter;
-    CapturedTouchpadEventConverter mCapturedEventConverter;
+    AbsoluteTouchpadEventConverter mAbsoluteModeEventConverter;
     RelativeModeGestureConverter mRelativeModeGestureConverter;
     HardwareProperties mHardwareProperties;
 
     PointerCaptureMode mCaptureMode = PointerCaptureMode::UNCAPTURED;
+    int32_t mPointerSpeed = 0;
+    bool mAccelerationEnabled = true;
     bool mResettingInterpreter = false;
     std::vector<Gesture> mGesturesToProcess;
 

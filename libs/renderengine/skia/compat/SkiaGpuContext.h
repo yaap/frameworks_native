@@ -17,19 +17,25 @@
 #pragma once
 
 #include <include/core/SkSurface.h>
-#include <include/gpu/ganesh/GrDirectContext.h>
+#include <include/effects/SkRuntimeEffect.h>
 #include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
 #include <include/gpu/ganesh/gl/GrGLInterface.h>
 #include <include/gpu/graphite/Context.h>
+#include <include/gpu/graphite/PersistentPipelineStorage.h>
 #include <include/gpu/vk/VulkanBackendContext.h>
 
+#include "../debug/SkiaMemoryReporter.h"
 #include "SkiaBackendTexture.h"
+#include "renderengine/RenderEngine.h"
 
 #include <log/log.h>
 
 #include <memory>
 
 namespace android::renderengine::skia {
+
+class PipelineCallbackHandler;
 
 /**
  * Abstraction over Ganesh and Graphite's underlying context-like objects.
@@ -60,7 +66,10 @@ public:
      * vulkanBackendContext must remain valid until after SkiaGpuContext is destroyed.
      */
     static std::unique_ptr<SkiaGpuContext> MakeVulkan_Graphite(
-            const skgpu::VulkanBackendContext& vulkanBackendContext);
+            const skgpu::VulkanBackendContext& vulkanBackendContext,
+            skgpu::graphite::PersistentPipelineStorage* persistentPipelineStorage,
+            SkSpan<sk_sp<SkRuntimeEffect>> userDefinedKnownRuntimeEffects,
+            PipelineCallbackHandler* callbackHandler);
 
     virtual ~SkiaGpuContext() = default;
 
@@ -97,15 +106,24 @@ public:
      */
     virtual sk_sp<SkSurface> createRenderTarget(SkImageInfo imageInfo) = 0;
 
-    virtual bool isAbandonedOrDeviceLost() = 0;
+    virtual void purgeResourcesNotUsedIn(std::chrono::milliseconds) = 0;
+
+    virtual constexpr RenderEngine::SkiaBackend getBackend_onlyUseForCriticalWorkarounds()
+            const = 0;
     virtual size_t getMaxRenderTargetSize() const = 0;
     virtual size_t getMaxTextureSize() const = 0;
-    virtual void setResourceCacheLimit(size_t maxResourceBytes) = 0;
+    virtual bool isAbandonedOrDeviceLost() = 0;
+    virtual bool supportsProtectedContent() const = 0;
 
+    virtual void setResourceCacheLimit(size_t maxResourceBytes) = 0;
     virtual void purgeUnlockedScratchResources() = 0;
     virtual void resetContextIfApplicable() = 0; // No-op outside of GL (&& Ganesh at this point.)
 
-    virtual void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const = 0;
+    virtual void reportStatsForEachCache(
+            const std::vector<ResourcePair>& resourceMap,
+            std::function<void(SkiaMemoryReporter& reporter, const char* label,
+                               const size_t cacheLimit)>
+                    reportStats) const = 0;
 };
 
 } // namespace android::renderengine::skia

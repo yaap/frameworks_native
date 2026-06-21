@@ -14,26 +14,37 @@
  * limitations under the License.
  */
 
-#include <android/surface_texture.h>
-#include <android/surface_texture_jni.h>
-
 #define LOG_TAG "ASurfaceTexture"
 
-#include <utils/Log.h>
-
+#include <android/surface_texture.h>
+#include <android/surface_texture_jni.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/Surface.h>
-
-#include <surfacetexture/surface_texture_platform.h>
+#include <nativehelper/scoped_local_ref.h>
+#include <surfacetexture/LegacySurfaceTexture.h>
 #include <surfacetexture/SurfaceTexture.h>
+#include <surfacetexture/surface_texture_platform.h>
+#include <utils/Log.h>
 
 #include <mutex>
 
 #include <jni.h>
-#include <nativehelper/scoped_local_ref.h>
+
+namespace android {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_SURFACETEXTURE)
+typedef SurfaceTexture SurfaceTextureType;
+#else
+typedef LegacySurfaceTexture SurfaceTextureType;
+#endif
+} // namespace android
 
 struct ASurfaceTexture {
-    android::sp<android::SurfaceTexture> consumer;
+    android::sp<android::SurfaceTextureType> consumer;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_SURFACETEXTURE)
+    android::sp<android::Surface> surface;
+#else
     android::sp<android::IGraphicBufferProducer> producer;
+#endif
 };
 
 using namespace android;
@@ -88,14 +99,21 @@ static bool android_SurfaceTexture_isInstanceOf(JNIEnv* env, jobject thiz) {
     return env->IsInstanceOf(thiz, surfaceTextureClass);
 }
 
-static sp<SurfaceTexture> SurfaceTexture_getSurfaceTexture(JNIEnv* env, jobject thiz) {
+static sp<SurfaceTextureType> SurfaceTexture_getSurfaceTexture(JNIEnv* env, jobject thiz) {
     std::call_once(sInitFieldsOnce, [=]() {
         register_android_graphics_SurfaceTexture(env);
     });
 
-    return (SurfaceTexture*)env->GetLongField(thiz, fields.surfaceTexture);
+    return (SurfaceTextureType*)env->GetLongField(thiz, fields.surfaceTexture);
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_SURFACETEXTURE)
+static sp<Surface> SurfaceTexture_getSurface(JNIEnv* env, jobject thiz) {
+    std::call_once(sInitFieldsOnce, [=]() { register_android_graphics_SurfaceTexture(env); });
+
+    return (Surface*)env->GetLongField(thiz, fields.producer);
+}
+#else
 static sp<IGraphicBufferProducer> SurfaceTexture_getProducer(JNIEnv* env, jobject thiz) {
     std::call_once(sInitFieldsOnce, [=]() {
         register_android_graphics_SurfaceTexture(env);
@@ -103,6 +121,7 @@ static sp<IGraphicBufferProducer> SurfaceTexture_getProducer(JNIEnv* env, jobjec
 
     return (IGraphicBufferProducer*)env->GetLongField(thiz, fields.producer);
 }
+#endif
 
 // The following functions implement NDK API.
 ASurfaceTexture* ASurfaceTexture_fromSurfaceTexture(JNIEnv* env, jobject surfacetexture) {
@@ -111,15 +130,26 @@ ASurfaceTexture* ASurfaceTexture_fromSurfaceTexture(JNIEnv* env, jobject surface
     }
     ASurfaceTexture* ast = new ASurfaceTexture;
     ast->consumer = SurfaceTexture_getSurfaceTexture(env, surfacetexture);
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_SURFACETEXTURE)
+    ast->surface = SurfaceTexture_getSurface(env, surfacetexture);
+#else
     ast->producer = SurfaceTexture_getProducer(env, surfacetexture);
+#endif
     return ast;
 }
 
 ANativeWindow* ASurfaceTexture_acquireANativeWindow(ASurfaceTexture* st) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_SURFACETEXTURE)
+    sp<Surface> surface = st->surface;
+    ANativeWindow* win(surface.get());
+    ANativeWindow_acquire(win);
+    return win;
+#else
     sp<Surface> surface = new Surface(st->producer);
     ANativeWindow* win(surface.get());
     ANativeWindow_acquire(win);
     return win;
+#endif
 }
 
 void ASurfaceTexture_release(ASurfaceTexture* st) {

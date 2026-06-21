@@ -183,6 +183,11 @@ std::unique_ptr<ContextRunner> CreateContextRunner(const AdbdAuthCallbacks& cb) 
                                               server_socket.value());
       break;
     }
+    case 3: {
+        context = std::make_unique<AdbdAuthContextV3>(&reinterpret_cast<const AdbdAuthCallbacksV3&>(cb),
+                                                      server_socket.value());
+        break;
+    }
     default: {
       fail("Unable to create AuthContext for version="s + std::to_string(cb.version));
     }
@@ -273,4 +278,135 @@ TEST(AdbAuthTest, UnhandledPacket) {
     ASSERT_EQ(msg[1], 'P');
     ASSERT_EQ(msg[2], port);
     ASSERT_EQ(msg[3], 0);
+}
+
+TEST(AdbAuthTest, RegisterService) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    std::string instance_name = "in";
+    std::string service_type= "t_p";
+    uint16_t port = 65019;
+    auto result = adbd_auth_register_service(runner->Context(),
+                                             instance_name.c_str(), service_type.c_str(), port);
+    ASSERT_EQ(ADBD_AUTH_REGISTER_OK, result);
+
+
+    auto msg = framework.Recv();
+    ASSERT_EQ(2 + 1 + instance_name.size() + 1 + service_type.size() + sizeof(port), msg.size());
+    ASSERT_EQ(msg[0], 'R');
+    ASSERT_EQ(msg[1], 'S');
+
+    ASSERT_EQ(msg[2], instance_name.size());
+    ASSERT_EQ(msg.substr(3, 2), instance_name);
+
+    ASSERT_EQ(msg[5], service_type.size());
+    ASSERT_EQ(msg.substr(6,3), service_type);
+
+    uint8_t lsb = port & 0xFF;
+    uint8_t msb = (port >> 8) & 0xFF;
+    ASSERT_EQ((uint8_t)msg[9], lsb);
+    ASSERT_EQ((uint8_t)msg[10], msb);
+}
+
+TEST(AdbAuthTest, RegisterServiceBadInstance) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    std::string instance_name(256, 'I');
+    std::string service_type= "t_p";
+    uint16_t port = 65019;
+    auto result = adbd_auth_register_service(runner->Context(),
+                                             instance_name.c_str(), service_type.c_str(), port);
+    ASSERT_EQ(ADBD_AUTH_REGISTER_BAD_NAME, result);
+}
+
+TEST(AdbAuthTest, RegisterServiceBadService) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    std::string instance_name = "in";
+    std::string service_type(256, 'S');
+    uint16_t port = 65019;
+    auto result = adbd_auth_register_service(runner->Context(),
+                                             instance_name.c_str(), service_type.c_str(), port);
+    ASSERT_EQ(ADBD_AUTH_REGISTER_BAD_NAME, result);
+}
+
+TEST(AdbAuthTest, UnregisterService) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    const std::string instance_name = "in";
+    const std::string service_type= "t_p";
+    auto result = adbd_auth_unregister_service(runner->Context(),
+                                               instance_name.c_str(), service_type.c_str());
+    ASSERT_EQ(ADBD_AUTH_UNREGISTER_OK, result);
+
+
+    auto msg = framework.Recv();
+    ASSERT_EQ(2 + 1 + instance_name.size() + 1 + service_type.size(), msg.size());
+    ASSERT_EQ(msg[0], 'U');
+    ASSERT_EQ(msg[1], 'S');
+
+    ASSERT_EQ(msg[2], instance_name.size());
+    ASSERT_EQ(msg.substr(3, 2), instance_name);
+
+    ASSERT_EQ(msg[5], service_type.size());
+    ASSERT_EQ(msg.substr(6,3), service_type);
+}
+
+TEST(AdbAuthTest, UnregisterServiceBadInstance) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    std::string instance_name(256, 'I');
+    std::string service_type= "t_p";
+    auto result = adbd_auth_unregister_service(runner->Context(),
+                                               instance_name.c_str(), service_type.c_str());
+    ASSERT_EQ(ADBD_AUTH_UNREGISTER_BAD_NAME, result);
+}
+
+TEST(AdbAuthTest, UnregisterServiceBadService) {
+    AdbdAuthCallbacksV2 callbacks{};
+    callbacks.version = 2;
+    auto runner= CreateContextRunner(callbacks);
+    Framework framework{};
+
+    std::string instance_name = "in";
+    std::string service_type(256, 'S');
+    auto result = adbd_auth_unregister_service(runner->Context(),
+                                               instance_name.c_str(), service_type.c_str());
+    ASSERT_EQ(ADBD_AUTH_UNREGISTER_BAD_NAME, result);
+}
+
+TEST(AdbAuthTest, FrameworkConnectedCallback) {
+    AdbdAuthCallbacksV3 callbacks{};
+
+    static bool framework_detected = false;
+    callbacks.on_framework_connected = [] {
+        framework_detected = true;
+    };
+    callbacks.version = 3;
+    auto runner= CreateContextRunner(callbacks);
+
+    // Check that the framework connection has not been detected.
+    ASSERT_FALSE(framework_detected);
+
+    // Connect the framework
+    Framework framework{};
+    framework.SendAndWaitContext("XX", runner.get());
+
+    // Check that the framework connection has been detected.
+    ASSERT_TRUE(framework_detected);
 }

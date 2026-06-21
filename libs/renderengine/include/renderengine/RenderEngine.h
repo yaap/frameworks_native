@@ -39,12 +39,20 @@
 #define PROPERTY_DEBUG_RENDERENGINE_BACKEND "debug.renderengine.backend"
 
 /**
- * Allows opting particular devices into an initial preview rollout of RenderEngine on Graphite.
+ * Allows opting particular devices into an INITIAL preview rollout of RenderEngine on Graphite.
  *
  * Only applicable within SurfaceFlinger, and if relevant aconfig flags are enabled.
  */
 #define PROPERTY_DEBUG_RENDERENGINE_GRAPHITE_PREVIEW_OPTIN \
     "debug.renderengine.graphite_preview_optin"
+
+/**
+ * Allows opting particular devices into a SECOND WAVE preview rollout of RenderEngine on Graphite.
+ *
+ * Only applicable within SurfaceFlinger, and if relevant aconfig flags are enabled.
+ */
+#define PROPERTY_DEBUG_RENDERENGINE_GRAPHITE_PREVIEW2_OPTIN \
+    "debug.renderengine.graphite_preview2_optin"
 
 /**
  * Allows opting desktop devices into a rollout of RenderEngine on Graphite.
@@ -159,7 +167,6 @@ public:
         None,
         Gaussian,
         Kawase,
-        KawaseDualFilter,
         KawaseDualFilterV2,
 
         ftl_last = KawaseDualFilterV2
@@ -344,6 +351,10 @@ protected:
             const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
             float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
             const std::shared_ptr<ExternalTexture>& gainmap) = 0;
+
+    // Logs high-level state that may assist debugging intentional crashes. Should be kept
+    // somewhat succinct to avoid overloading logcat.
+    virtual void logStateForCrash() {}
 };
 
 struct RenderEngineCreationArgs {

@@ -28,6 +28,13 @@
 
 #include "util.h"
 
+NdkParcelAdapter::~NdkParcelAdapter() {
+    for (const auto& [binder, callback] : mFrozenChangeCallbacks) {
+        AIBinder_removeFrozenStateChangeCallback(binder.get(), callback, nullptr);
+        AIBinder_FrozenStateChangeCallback_delete(callback);
+    }
+}
+
 // TODO(b/142061461): parent class
 class SomeParcelable {
 public:
@@ -51,6 +58,9 @@ public:
 static binder_status_t onTransact(AIBinder*, transaction_code_t, const AParcel*, AParcel*) {
     return STATUS_UNKNOWN_TRANSACTION;
 }
+
+static void onFrozenStateChanged(void*, bool) {}
+static void onBinderUnlinked(void*) {}
 
 static AIBinder_Class* g_class =
         ::ndk::ICInterface::defineClass("ISomeInterface", onTransact, nullptr, 0);
@@ -185,6 +195,46 @@ std::vector<ParcelRead<NdkParcelAdapter>> BINDER_NDK_PARCEL_READ_FUNCTIONS{
         PARCEL_READ(std::array<std::shared_ptr<ISomeInterface> COMMA 3>, ndk::AParcel_readData),
 #undef COMMA
 
+        [](const NdkParcelAdapter& p, FuzzedDataProvider& provider) {
+            FUZZ_LOG() << "about to read parcel using readStrongBinder for FrozenStateChangeCallback";
+            ndk::SpAIBinder binder;
+            if (AParcel_readStrongBinder(p.aParcel(), binder.getR()) == STATUS_OK &&
+                binder.get() != nullptr) {
+                if (provider.ConsumeBool()) {
+                    AIBinder_FrozenStateChangeCallback* callback =
+                            AIBinder_FrozenStateChangeCallback_new(onFrozenStateChanged,
+                                                                   onBinderUnlinked);
+                    binder_status_t status =
+                            AIBinder_addFrozenStateChangeCallback(binder.get(), callback, nullptr);
+                    FUZZ_LOG() << "AIBinder_addFrozenStateChangeCallback status: " << status;
+                    if (status == STATUS_OK) {
+                        p.mFrozenChangeCallbacks.push_back(std::make_pair(binder, callback));
+                    } else {
+                        AIBinder_FrozenStateChangeCallback_delete(callback);
+                    }
+                } else {
+                    if (!p.mFrozenChangeCallbacks.empty()) {
+                        size_t idx = provider.ConsumeIntegralInRange<size_t>(
+                                0, p.mFrozenChangeCallbacks.size() - 1);
+                        auto& [storedBinder, storedCallback] = p.mFrozenChangeCallbacks[idx];
+                        binder_status_t status = AIBinder_removeFrozenStateChangeCallback(
+                                storedBinder.get(), storedCallback, nullptr);
+                        FUZZ_LOG() << "AIBinder_removeFrozenStateChangeCallback status: " << status;
+                        AIBinder_FrozenStateChangeCallback_delete(storedCallback);
+                        p.mFrozenChangeCallbacks.erase(p.mFrozenChangeCallbacks.begin() + idx);
+                    } else {
+                        AIBinder_FrozenStateChangeCallback* callback =
+                                AIBinder_FrozenStateChangeCallback_new(onFrozenStateChanged,
+                                                                       onBinderUnlinked);
+                        binder_status_t status = AIBinder_removeFrozenStateChangeCallback(
+                                binder.get(), callback, nullptr);
+                        FUZZ_LOG() << "AIBinder_removeFrozenStateChangeCallback (orphan) status: "
+                                   << status;
+                        AIBinder_FrozenStateChangeCallback_delete(callback);
+                    }
+                }
+            }
+        },
         [](const NdkParcelAdapter& p, FuzzedDataProvider& /*provider*/) {
             FUZZ_LOG() << "about to read parcel using readFromParcel for EmptyParcelable";
             aidl::parcelables::EmptyParcelable emptyParcelable;

@@ -15,16 +15,24 @@
  */
 
 use crate::binder::{AsNative, FromIBinder, Strong};
+use crate::binder_impl::panic_if_poisoned;
+use crate::binder_impl::Mutex;
 use crate::error::{status_result, Result, StatusCode};
 use crate::proxy::SpIBinder;
 use crate::sys;
 // TODO(b/402766978) Add this back into vendor variants when the LLNDK symbols are supported
 // with something like __builtin_available
+use alloc::borrow::ToOwned;
+use alloc::ffi::CString;
+use alloc::string::String;
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::ffi::c_char;
+use core::ffi::{c_void, CStr};
 #[cfg(not(any(trusty, android_ndk, android_vendor, android_vndk)))]
 use libc::{pid_t, uid_t};
-use std::ffi::{c_void, CStr, CString};
+#[cfg(feature = "std")]
 use std::os::raw::c_char;
-use std::sync::Mutex;
 
 /// Value to use with check_service_access for permission to "find" a service
 #[cfg(not(any(trusty, android_ndk, android_vendor, android_vndk)))]
@@ -111,7 +119,7 @@ impl LazyServiceGuard {
     /// Create a new LazyServiceGuard to prevent the service manager prematurely killing this
     /// process.
     pub fn new() -> Self {
-        let mut count = GUARD_COUNT.lock().unwrap();
+        let mut count = panic_if_poisoned!(GUARD_COUNT.lock());
         *count += 1;
         if *count == 1 {
             // It's important that we make this call with the mutex held, to make sure
@@ -125,7 +133,7 @@ impl LazyServiceGuard {
 
 impl Drop for LazyServiceGuard {
     fn drop(&mut self) {
-        let mut count = GUARD_COUNT.lock().unwrap();
+        let mut count = panic_if_poisoned!(GUARD_COUNT.lock());
         *count -= 1;
         if *count == 0 {
             force_lazy_services_persist(false);
@@ -238,7 +246,7 @@ pub fn get_declared_instances(interface: &str) -> Result<Vec<String>> {
                 instances.push(CStr::from_ptr(instance).to_owned());
             }
         } else {
-            eprintln!("Opaque pointer was null in get_declared_instances callback!");
+            log::error!("Opaque pointer was null in get_declared_instances callback!");
         }
     }
 
@@ -255,12 +263,14 @@ pub fn get_declared_instances(interface: &str) -> Result<Vec<String>> {
         );
     }
 
+    // The variable `e` is not used when "std" is disabled.
+    #[allow(unused_variables)]
     instances
         .into_iter()
         .map(CString::into_string)
-        .collect::<std::result::Result<Vec<String>, _>>()
+        .collect::<core::result::Result<Vec<String>, _>>()
         .map_err(|e| {
-            eprintln!("An interface instance name was not a valid UTF-8 string: {}", e);
+            log::error!("An interface instance name was not a valid UTF-8 string: {}", e);
             StatusCode::BAD_VALUE
         })
 }

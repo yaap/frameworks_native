@@ -18,6 +18,8 @@
 
 #include <android-base/logging.h>
 #include <android/input.h>
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include <utils/Errors.h>
 
 #include "RawEvent.h"
@@ -75,6 +77,12 @@ void VerifyingTrace::expectMotionDispatchTraced(const MotionEvent& event, int32_
     mExpectedEvents.emplace_back(event, windowId);
 }
 
+void VerifyingTrace::expectAllRawEventsAtTimestampToMatchMetadata(
+        nsecs_t when, ::testing::Matcher<TracedEventMetadata> metadataMatcher) {
+    std::scoped_lock lock(mLock);
+    mExpectedRawEvents.emplace_back(when, metadataMatcher);
+}
+
 void VerifyingTrace::verifyExpectedEventsTraced() {
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
@@ -90,6 +98,13 @@ void VerifyingTrace::verifyExpectedEventsTraced() {
                 return false;
             }
         }
+
+        for (const auto& [when, metadataMatcher] : mExpectedRawEvents) {
+            result = verifyRawEventTraced(when, metadataMatcher);
+            if (!result.ok()) {
+                return false;
+            }
+        }
         return true;
     });
 
@@ -101,6 +116,7 @@ void VerifyingTrace::verifyExpectedEventsTraced() {
 void VerifyingTrace::reset() {
     std::scoped_lock lock(mLock);
     mTracedEvents.clear();
+    mTracedRawEvents.clear();
     mTracedWindowDispatches.clear();
     mExpectedEvents.clear();
 }
@@ -161,6 +177,30 @@ base::Result<void> VerifyingTrace::verifyEventTraced(const Event& expectedEvent,
             tracedEventsIt->second);
 }
 
+base::Result<void> VerifyingTrace::verifyRawEventTraced(
+        nsecs_t when, ::testing::Matcher<TracedEventMetadata> metadataMatcher) const {
+    std::ostringstream msg;
+
+    auto [startOfRange, endOfRange] = mTracedRawEvents.equal_range(when);
+    if (startOfRange == mTracedRawEvents.end()) {
+        msg << "Expected one or more raw events with timestamp " << when
+            << " to be traced, but none were.";
+        return error(msg);
+    }
+
+    ::testing::StringMatchResultListener resultListener;
+    for (auto i = startOfRange; i != endOfRange; i++) {
+        auto [rawEvent, metadata] = i->second;
+        if (!::testing::ExplainMatchResult(metadataMatcher, metadata, &resultListener)) {
+            msg << "Raw event with timestamp " << when
+                << " didn't match metadata: " << resultListener.str();
+            return error(msg);
+        }
+    }
+
+    return {};
+}
+
 // --- FakeInputTracingBackend ---
 
 void FakeInputTracingBackend::traceKeyEvent(const TracedKeyEvent& event,
@@ -190,10 +230,13 @@ void FakeInputTracingBackend::traceWindowDispatch(const WindowDispatchArgs& args
     mTrace->mEventTracedCondition.notify_all();
 }
 
-void FakeInputTracingBackend::traceRawEvent(const RawEvent& entry) {
-    // TODO(b/394861376): log the traced raw event in the VerifyingTrace, like we do with the other
-    // types of traced event, and write some tests for raw tracing in InputTracingTest.cpp.
-    // (InputReaderIntegrationTest should provide good inspiration.)
+void FakeInputTracingBackend::traceRawEvent(const RawEvent& entry,
+                                            const TracedEventMetadata& metadata) {
+    {
+        std::scoped_lock lock(mTrace->mLock);
+        mTrace->mTracedRawEvents.insert({entry.when, {entry, metadata}});
+    }
+    mTrace->mEventTracedCondition.notify_all();
 }
 
 } // namespace android::input_trace

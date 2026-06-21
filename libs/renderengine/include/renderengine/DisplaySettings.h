@@ -18,10 +18,12 @@
 
 #include <aidl/android/hardware/graphics/composer3/DimmingStage.h>
 #include <aidl/android/hardware/graphics/composer3/RenderIntent.h>
+#include <cstdint>
 #include <iosfwd>
 
 #include <math/mat4.h>
-#include <renderengine/PrintMatrix.h>
+#include <renderengine/PrintUtils.h>
+#include <ui/DebugUtils.h>
 #include <ui/DisplayId.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Rect.h>
@@ -141,27 +143,31 @@ static const char* orientation_to_string(uint32_t orientation) {
     }
 }
 
-static inline void PrintTo(const DisplaySettings& settings, ::std::ostream* os) {
+static inline void PrintTo(const DisplaySettings& settings, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "DisplaySettings {";
-    *os << "\n    .display = " << settings.namePlusId;
-    *os << "\n    .physicalDisplay = ";
+    *os << newline << ".display = " << settings.namePlusId;
+    *os << newline << ".physicalDisplay = ";
     PrintTo(settings.physicalDisplay, os);
-    *os << "\n    .clip = ";
+    *os << newline << ".clip = ";
     PrintTo(settings.clip, os);
-    *os << "\n    .maxLuminance = " << settings.maxLuminance;
-    *os << "\n    .currentLuminanceNits = " << settings.currentLuminanceNits;
-    *os << "\n    .outputDataspace = ";
+    *os << newline << ".maxLuminance = " << settings.maxLuminance;
+    *os << newline << ".currentLuminanceNits = " << settings.currentLuminanceNits;
+    *os << newline << ".outputDataspace = ";
     PrintTo(settings.outputDataspace, os);
-    *os << "\n    .colorTransform = ";
+    *os << " (" << ::dataspaceDetails(static_cast<android_dataspace>(settings.outputDataspace))
+        << ")";
+    *os << newline << ".colorTransform = ";
     PrintMatrix(settings.colorTransform, os);
-    *os << "\n    .deviceHandlesColorTransform = " << settings.deviceHandlesColorTransform;
-    *os << "\n    .orientation = " << orientation_to_string(settings.orientation);
-    *os << "\n    .targetLuminanceNits = " << settings.targetLuminanceNits;
-    *os << "\n    .dimmingStage = "
+    *os << newline << ".deviceHandlesColorTransform = " << settings.deviceHandlesColorTransform;
+    *os << newline << ".orientation = " << orientation_to_string(settings.orientation);
+    *os << newline << ".targetLuminanceNits = " << settings.targetLuminanceNits;
+    *os << newline << ".dimmingStage = "
         << aidl::android::hardware::graphics::composer3::toString(settings.dimmingStage).c_str();
-    *os << "\n    .renderIntent = "
+    *os << newline << ".renderIntent = "
         << aidl::android::hardware::graphics::composer3::toString(settings.renderIntent).c_str();
-    *os << "\n}";
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
 } // namespace renderengine

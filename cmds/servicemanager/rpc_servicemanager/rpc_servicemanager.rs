@@ -22,7 +22,7 @@ use rpc_servicemanager_aidl::aidl::android::os::IRpcProvider::{
     IRpcProvider, ServiceConnectionInfo::ServiceConnectionInfo,
 };
 use rpcbinder::{FileDescriptorTransportMode, RpcServer};
-use rustutils::sockets::android_get_control_socket;
+use rustutils::android::sockets::android_get_control_socket;
 use servicemanager_aidl::aidl::android::os::IServiceManager::{
     BnServiceManager, CallerContext::CallerContext, IServiceManager,
 };
@@ -169,7 +169,7 @@ pub fn register_rpc_servicemanager(provider_service: Strong<dyn IRpcProvider>) -
     server.set_supported_file_descriptor_transport_modes(&[FileDescriptorTransportMode::Unix]);
 
     info!("The RPC server '{}' is running.", RPC_SERVICEMANAGER_UDS_NAME);
-    if let Err(e) = rustutils::system_properties::write("servicemanager.ready", "true") {
+    if let Err(e) = rustutils::android::system_properties::write("servicemanager.ready", "true") {
         error!("failed to set ro.servicemanager.ready {:?}", e);
     }
 

@@ -14,8 +14,12 @@
  * limitations under the License.
  */
 
+#include <android-base/stringprintf.h>
 #include <compositionengine/impl/DumpHelpers.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
+#include <include/core/SkData.h>
+#include <include/core/SkString.h>
+#include <include/private/SkHdrMetadata.h>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
@@ -88,6 +92,30 @@ void OutputLayerCompositionState::dump(std::string& out) const {
     dumpVal(out, "override visible region", visibleRegionString);
     dumpVal(out, "override peekThroughLayer", overrideInfo.peekThroughLayer);
     dumpVal(out, "override disableBackgroundBlur", overrideInfo.disableBackgroundBlur);
+
+    if (appLuts) {
+        out.append("\n      appLuts: ");
+        appLuts->dump(out);
+    }
+
+    if (generatedLuts) {
+        out.append("\n      generatedLuts: ");
+        generatedLuts->dump(out);
+    }
+
+    if (smpte2094_50) {
+        out.append("\n      smpte2094_50: ");
+        auto smpte2094_50Data = SkData::MakeWithoutCopy(smpte2094_50->data(), smpte2094_50->size());
+        skhdr::AdaptiveGlobalToneMap agtm;
+        if (agtm.parse(smpte2094_50Data.get())) {
+            out.append(agtm.toString().c_str());
+        } else {
+            for (size_t i = 0; i < smpte2094_50->size(); ++i) {
+                android::base::StringAppendF(&out, "%02x%s", (*smpte2094_50)[i],
+                                             (i == smpte2094_50->size() - 1 ? "" : " "));
+            }
+        }
+    }
 
     if (hwc) {
         dumpHwc(*hwc, out);

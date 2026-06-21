@@ -29,8 +29,20 @@ prebuilt_etc {
 }
 
 prebuilt_etc {
+    name: "android.hardware.audio.output.prebuilt.xml",
+    src: "android.hardware.audio.output.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
     name: "android.hardware.biometrics.face.prebuilt.xml",
     src: "android.hardware.biometrics.face.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.hardware.bluetooth_le.channel_sounding.prebuilt.xml",
+    src: "android.hardware.bluetooth_le.channel_sounding.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
@@ -113,6 +125,12 @@ prebuilt_etc {
 }
 
 prebuilt_etc {
+    name: "android.hardware.location.prebuilt.xml",
+    src: "android.hardware.location.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
     name: "android.hardware.nfc.prebuilt.xml",
     src: "android.hardware.nfc.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
@@ -139,6 +157,12 @@ prebuilt_etc {
 prebuilt_etc {
     name: "android.hardware.reboot_escrow.prebuilt.xml",
     src: "android.hardware.reboot_escrow.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.hardware.screen.portrait.prebuilt.xml",
+    src: "android.hardware.screen.portrait.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
@@ -353,6 +377,12 @@ prebuilt_etc {
 }
 
 prebuilt_etc {
+    name: "android.hardware.touchscreen.multitouch.distinct.prebuilt.xml",
+    src: "android.hardware.touchscreen.multitouch.distinct.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
     name: "android.hardware.usb.accessory.prebuilt.xml",
     src: "android.hardware.usb.accessory.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
@@ -361,6 +391,12 @@ prebuilt_etc {
 prebuilt_etc {
     name: "android.hardware.usb.host.prebuilt.xml",
     src: "android.hardware.usb.host.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.hardware.uwb.prebuilt.xml",
+    src: "android.hardware.uwb.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
@@ -412,12 +448,30 @@ prebuilt_etc {
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
+prebuilt_etc {
+    name: "android.software.backup.prebuilt.xml",
+    src: "android.software.backup.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.software.connectionservice.prebuilt.xml",
+    src: "android.software.connectionservice.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
 // installed in system for GSI
 prebuilt_etc {
     name: "android.software.credentials.prebuilt.xml",
     relative_install_path: "permissions",
     src: "android.software.credentials.xml",
     filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "android.software.device_admin.prebuilt.xml",
+    src: "android.software.device_admin.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
 }
 
 prebuilt_etc {
@@ -429,6 +483,12 @@ prebuilt_etc {
 prebuilt_etc {
     name: "android.software.ipsec_tunnels.prebuilt.xml",
     src: "android.software.ipsec_tunnels.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.software.managed_users.prebuilt.xml",
+    src: "android.software.managed_users.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
@@ -549,5 +609,17 @@ prebuilt_etc {
 prebuilt_etc {
     name: "handheld_core_hardware.prebuilt.xml",
     src: "handheld_core_hardware.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "android.software.aiseal.prebuilt.xml",
+    src: "android.software.aiseal.xml",
+    defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+prebuilt_etc {
+    name: "wearable_core_hardware.prebuilt.xml",
+    src: "wearable_core_hardware.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
 }

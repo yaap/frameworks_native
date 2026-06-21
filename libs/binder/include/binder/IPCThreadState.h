@@ -22,6 +22,8 @@
 #include <utils/Errors.h>
 #include <utils/Vector.h>
 
+#include <optional>
+
 #if defined(_WIN32)
 typedef  int  uid_t;
 #endif
@@ -211,6 +213,11 @@ public:
     // side.
     LIBBINDER_EXPORTED static const int32_t kUnsetWorkSource = -1;
 
+    // Logs a PCC transaction to the audit log. Returns true if the transaction was logged
+    // successfully, false otherwise.
+    LIBBINDER_EXPORTED static bool logPccTransaction(BBinder* binder, uint32_t code,
+                                                     uid_t callingUid);
+
 private:
     IPCThreadState();
     ~IPCThreadState();
@@ -249,7 +256,7 @@ private:
             const SpGuard* mServingStackPointerGuard;
             pid_t               mCallingPid;
             const char*         mCallingSid;
-            uid_t               mCallingUid;
+            std::optional<uid_t> mCallingUid;
             // The UID of the process who is responsible for this transaction.
             // This is used for resource attribution.
             int32_t             mWorkSource;

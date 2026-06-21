@@ -57,20 +57,23 @@ mod ffi {
         /// ```
         type InputVerifier;
         #[cxx_name = create]
-        fn create_input_verifier(name: String, verify_buttons: bool) -> Box<InputVerifier>;
+        fn create_input_verifier(name: String) -> Box<InputVerifier>;
         #[allow(clippy::too_many_arguments)]
         fn process_movement(
             verifier: &mut InputVerifier,
             device_id: i32,
+            event_time_nanos: i64,
             source: u32,
             action: u32,
             action_button: u32,
             pointer_properties: &[RustPointerProperties],
             flags: u32,
             button_state: u32,
-        ) -> String;
+            down_time_nanos: i64,
+        ) -> ProcessMovementResult;
         fn dump(verifier: &InputVerifier) -> String;
         fn reset_device(verifier: &mut InputVerifier, device_id: i32);
+        fn is_empty(verifier: &InputVerifier) -> bool;
     }
 
     #[namespace = "android::input::keyboardClassifier"]
@@ -115,25 +118,38 @@ mod ffi {
         pub version: u16,
         pub descriptor: String,
     }
+
+    #[derive(Debug)]
+    pub struct ProcessMovementResult {
+        pub error: String,
+        pub is_empty: bool,
+    }
 }
 
-use crate::ffi::{RustInputDeviceIdentifier, RustPointerProperties};
+use crate::ffi::{ProcessMovementResult, RustInputDeviceIdentifier, RustPointerProperties};
 
-fn create_input_verifier(name: String, verify_buttons: bool) -> Box<InputVerifier> {
-    Box::new(InputVerifier::new(&name, ffi::shouldLog("InputVerifierLogEvents"), verify_buttons))
+fn create_input_verifier(name: String) -> Box<InputVerifier> {
+    Box::new(InputVerifier::new(
+        &name,
+        ffi::shouldLog("InputVerifierLogEvents"),
+        input_flags::enable_button_state_verification(),
+        input_flags::enable_captured_verification(),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn process_movement(
     verifier: &mut InputVerifier,
     device_id: i32,
+    event_time_nanos: i64,
     source: u32,
     action: u32,
     action_button: u32,
     pointer_properties: &[RustPointerProperties],
     flags: u32,
     button_state: u32,
-) -> String {
+    down_time_nanos: i64,
+) -> ProcessMovementResult {
     let Some(converted_source) = Source::from_bits(source) else {
         panic!(
             "The conversion of source 0x{source:08x} failed, please check if some sources have not \
@@ -165,24 +181,29 @@ fn process_movement(
             MotionAction::ButtonPress { action_button: _ }
             | MotionAction::ButtonRelease { action_button: _ } => {}
             _ => {
-                return format!(
-                    "Invalid {motion_action} event: has action button {motion_action_button:?} but \
-                     is not a button action"
-                );
+                return ProcessMovementResult {
+                    error: format!(
+                        "Invalid {motion_action} event: has action button {motion_action_button:?} \
+                         but is not a button action"
+                    ),
+                    is_empty: false,
+                };
             }
         }
     }
     let result = verifier.process_movement(NotifyMotionArgs {
+        event_time_nanos,
         device_id: DeviceId(device_id),
         source: converted_source,
         action: motion_action,
         pointer_properties,
         flags: motion_flags,
         button_state: motion_button_state,
+        down_time_nanos,
     });
     match result {
-        Ok(()) => "".to_string(),
-        Err(e) => e,
+        Ok(is_empty) => ProcessMovementResult { error: "".to_string(), is_empty },
+        Err(e) => ProcessMovementResult { error: e, is_empty: false },
     }
 }
 
@@ -192,6 +213,10 @@ fn dump(verifier: &InputVerifier) -> String {
 
 fn reset_device(verifier: &mut InputVerifier, device_id: i32) {
     verifier.reset_device(DeviceId(device_id));
+}
+
+fn is_empty(verifier: &InputVerifier) -> bool {
+    verifier.is_empty()
 }
 
 fn create_keyboard_classifier() -> Box<KeyboardClassifier> {
@@ -253,41 +278,53 @@ fn process_key(
 
 #[cfg(test)]
 mod tests {
-    use crate::create_input_verifier;
     use crate::process_movement;
+    use crate::InputVerifier;
     use crate::RustPointerProperties;
 
     const BASE_POINTER_PROPERTIES: [RustPointerProperties; 1] = [RustPointerProperties { id: 0 }];
 
     #[test]
     fn verify_nonbutton_action_with_action_button() {
-        let mut verifier = create_input_verifier("Test".to_string(), /*verify_buttons*/ true);
+        let mut verifier = Box::new(InputVerifier::new(
+            "Test", /*should_log=*/ false, /*verify_buttons=*/ true,
+            /*verify_captured_events=*/ true,
+        ));
         assert!(process_movement(
             &mut verifier,
             1,
+            0,
             input_bindgen::AINPUT_SOURCE_MOUSE,
             input_bindgen::AMOTION_EVENT_ACTION_HOVER_ENTER,
             input_bindgen::AMOTION_EVENT_BUTTON_PRIMARY,
             &BASE_POINTER_PROPERTIES,
             0,
             0,
+            0,
         )
+        .error
         .contains("button action"));
     }
 
     #[test]
     fn verify_nonbutton_action_with_action_button_and_button_state() {
-        let mut verifier = create_input_verifier("Test".to_string(), /*verify_buttons*/ true);
+        let mut verifier = Box::new(InputVerifier::new(
+            "Test", /*should_log=*/ false, /*verify_buttons=*/ true,
+            /*verify_captured_events=*/ true,
+        ));
         assert!(process_movement(
             &mut verifier,
             1,
+            0,
             input_bindgen::AINPUT_SOURCE_MOUSE,
             input_bindgen::AMOTION_EVENT_ACTION_HOVER_ENTER,
             input_bindgen::AMOTION_EVENT_BUTTON_PRIMARY,
             &BASE_POINTER_PROPERTIES,
             0,
             input_bindgen::AMOTION_EVENT_BUTTON_PRIMARY,
+            0,
         )
+        .error
         .contains("button action"));
     }
 }

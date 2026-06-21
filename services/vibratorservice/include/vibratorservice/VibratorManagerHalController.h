@@ -55,6 +55,8 @@ public:
 
     HalResult<void> ping() override final;
 
+    std::shared_ptr<aidl::android::hardware::vibrator::IVibratorManager> getHal() override final;
+
     HalResult<ManagerCapabilities> getCapabilities() override final;
     HalResult<std::vector<int32_t>> getVibratorIds() override final;
     HalResult<std::shared_ptr<HalController>> getVibrator(int32_t id) override final;

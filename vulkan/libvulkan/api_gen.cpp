@@ -181,7 +181,7 @@ bool InitDispatchTable(
     INIT_PROC(false, instance, GetPhysicalDeviceExternalSemaphoreProperties);
     INIT_PROC(false, instance, GetPhysicalDeviceExternalFenceProperties);
     INIT_PROC(false, instance, EnumeratePhysicalDeviceGroups);
-    INIT_PROC_EXT(KHR_swapchain, true, instance, GetPhysicalDevicePresentRectanglesKHR);
+    INIT_PROC_EXT(KHR_swapchain, false, instance, GetPhysicalDevicePresentRectanglesKHR);
     INIT_PROC(false, instance, GetPhysicalDeviceToolProperties);
     // clang-format on
 
@@ -330,9 +330,9 @@ bool InitDispatchTable(
     INIT_PROC(false, dev, BindBufferMemory2);
     INIT_PROC(false, dev, BindImageMemory2);
     INIT_PROC(false, dev, CmdSetDeviceMask);
-    INIT_PROC_EXT(KHR_swapchain, true, dev, GetDeviceGroupPresentCapabilitiesKHR);
-    INIT_PROC_EXT(KHR_swapchain, true, dev, GetDeviceGroupSurfacePresentModesKHR);
-    INIT_PROC_EXT(KHR_swapchain, true, dev, AcquireNextImage2KHR);
+    INIT_PROC_EXT(KHR_swapchain, false, dev, GetDeviceGroupPresentCapabilitiesKHR);
+    INIT_PROC_EXT(KHR_swapchain, false, dev, GetDeviceGroupSurfacePresentModesKHR);
+    INIT_PROC_EXT(KHR_swapchain, false, dev, AcquireNextImage2KHR);
     INIT_PROC(false, dev, CmdDispatchBase);
     INIT_PROC(false, dev, CreateDescriptorUpdateTemplate);
     INIT_PROC(false, dev, DestroyDescriptorUpdateTemplate);
@@ -693,6 +693,7 @@ VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice device, const char* pNa
         "vkEnumerateInstanceVersion",
         "vkEnumeratePhysicalDeviceGroups",
         "vkEnumeratePhysicalDeviceGroupsKHR",
+        "vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM",
         "vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR",
         "vkEnumeratePhysicalDevices",
         "vkGetDisplayModeProperties2KHR",
@@ -733,6 +734,8 @@ VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice device, const char* pNa
         "vkGetPhysicalDeviceProperties",
         "vkGetPhysicalDeviceProperties2",
         "vkGetPhysicalDeviceProperties2KHR",
+        "vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM",
+        "vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM",
         "vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR",
         "vkGetPhysicalDeviceQueueFamilyProperties",
         "vkGetPhysicalDeviceQueueFamilyProperties2",

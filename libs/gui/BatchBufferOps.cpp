@@ -108,7 +108,7 @@ status_t IGraphicBufferProducer::cancelBuffers(
     return NO_ERROR;
 }
 
-status_t IGraphicBufferProducer::query(const std::vector<int32_t> inputs,
+status_t IGraphicBufferProducer::query(const std::vector<int32_t>& inputs,
                                        std::vector<QueryOutput>* outputs) {
     outputs->clear();
     outputs->reserve(inputs.size());

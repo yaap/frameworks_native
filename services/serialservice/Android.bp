@@ -24,6 +24,7 @@ rust_defaults {
     rustlibs: [
         "android.hardware.serialservice-rust",
         "libanyhow",
+        "libatrace_rust",
         "libbinder_rs",
         "libbinder_tokio_rs",
         "libfutures",
@@ -34,6 +35,7 @@ rust_defaults {
         "librustutils",
         "libtokio",
         "libtokio_stream",
+        "libtracing",
         "libueventd",
     ],
 }
@@ -46,9 +48,12 @@ rust_binary {
     init_rc: ["serialservice.rc"],
     rustlibs: [
         "libandroid_hardware_serial_flags_rust",
+        "libatrace_tracing_subscriber",
         "libserialservice",
+        "libtracing_subscriber",
     ],
     prefer_rlib: true,
+    required: ["serialservice_overlay"],
 }
 
 rust_library {

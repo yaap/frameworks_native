@@ -139,7 +139,6 @@ static const android::hardware::graphics::mapper::V4_0::IMapper::MetadataType
                                      static_cast<int64_t>(
                                              aidl::android::hardware::graphics::common::
                                                      StandardMetadataType::SMPTE2094_10)};
-
 /*---------------------------------------------------------------------------------------------*/
 
 /**

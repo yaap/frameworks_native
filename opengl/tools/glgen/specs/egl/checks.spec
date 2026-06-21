@@ -1,4 +1,4 @@
-eglInitialize nullAllowed major nullAllowed minor check major 1 check minor 1
+//STUB function: //eglInitialize nullAllowed major nullAllowed minor check major 1 check minor 1
 eglGetConfigs nullAllowed configs check configs config_size
 eglChooseConfig nullAllowed configs check configs config_size check num_config 1 sentinel attrib_list EGL_NONE
 eglGetConfigAttrib check value 1

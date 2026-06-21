@@ -58,6 +58,18 @@ The legacy behaviour in this situation is as follows: touches will continue to f
 
 To keep track of this timeout, when this situation is detected initially, `mInputTargetWaitTimeoutTime` and `mAwaitedFocusedApplication` are set. When the `mInputTargetWaitTimeoutTime` expires, an ANR will be raised.
 
+## Pre-ANR notifications ##
+
+Before raising a full ANR, InputDispatcher will emit a **pre-ANR notification** to policy as an early warning signal.
+This is intended to surface impending ANRs earlier (for diagnostics, tracing, app warning, etc) seconds before raising an ANR.
+
+### Behavior ###
+
+* Pre-ANR does **not** change dispatch behavior on its own.
+* No dialogs are shown and the app is not considered unresponsive.
+
+InputDispatcher notifies policy with contextual information (application, reason, elapsed time, and
+expected full timeout).
 
 ### How to test ###
 

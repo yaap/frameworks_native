@@ -16,12 +16,16 @@
 
 #pragma once
 
+#include <utils/Timers.h>
 #include <memory>
 #include <vector>
+#include "FrontEnd/LayerSnapshotBuilder.h"
+#include "compositionengine/CompositionEngine.h"
 
 namespace android::surfaceflinger::frontend {
 
 class LayerHierarchy;
+struct LayerSnapshot;
 
 namespace caching {
 
@@ -39,36 +43,34 @@ public:
     struct HierarchyState {
         uint32_t layerId;
         const LayerHierarchy* hierarchy;
+        nsecs_t lastUpdateTime;
+
+        bool operator==(const HierarchyState&) const = default;
     };
 
-    // Accumulates LayerHierarchies to construct an MergeableHierarchy.
-    class Accumulator {
-    public:
-        // Add a new LayerHierarchy to the equivalency. True if adding it was successful
-        bool add(const LayerHierarchy* hierarchy);
+    MergeableHierarchy(HierarchyState state) : mRoot(state) {}
 
-        // True if building an MergeableHierarchy is possible
-        bool canBuild() { return !mHierarchies.empty(); }
+    uint32_t getId() const { return mRoot.layerId; }
 
-        // Builds an MergeableHierarchy, and ascribes an owner for it.
-        std::unique_ptr<MergeableHierarchy> build(uint32_t owner) {
-            return std::make_unique<MergeableHierarchy>(owner, std::move(mHierarchies));
+    void constructSnapshot(LayerSnapshotBuilder& builder, const LayerSnapshotBuilder::Args& args,
+                           compositionengine::CompositionEngine& compositionEngine,
+                           std::unordered_map<uint32_t, sp<Layer>>& legacyLayers);
+
+    std::unique_ptr<LayerSnapshot> getSnapshotCopy() const {
+        if (!mSnapshot) {
+            return nullptr;
         }
 
-    private:
-        std::vector<HierarchyState> mHierarchies;
+        return std::make_unique<LayerSnapshot>(*mSnapshot);
     };
-
-    MergeableHierarchy(uint32_t owner, std::vector<HierarchyState>&& hierarchies)
-          : mHierarchies(std::move(hierarchies)), mId(owner) {}
-
-    uint32_t getId() const { return mId; }
 
     void dump(std::ostream& out) const;
 
+    bool operator==(const MergeableHierarchy& other) const { return mRoot == other.mRoot; }
+
 private:
-    std::vector<HierarchyState> mHierarchies;
-    const uint32_t mId;
+    HierarchyState mRoot;
+    std::unique_ptr<LayerSnapshot> mSnapshot = nullptr;
 };
 
 } // namespace caching

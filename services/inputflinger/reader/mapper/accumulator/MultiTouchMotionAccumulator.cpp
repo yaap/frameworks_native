@@ -125,8 +125,10 @@ void MultiTouchMotionAccumulator::finishSync() {
 
 void MultiTouchMotionAccumulator::warnIfNotInUse(const RawEvent& event, const Slot& slot) {
     if (!slot.mInUse) {
-        ALOGW("Received unexpected event (0x%0x, 0x%0x) for slot %i with tracking id %i",
-              event.code, event.value, mCurrentSlot, slot.mAbsMtTrackingId);
+        ALOGW("Received unexpected event (%s (0x%0x), 0x%0x) for unused slot %i with tracking ID "
+              "%i",
+              InputEventLookup::getLinuxEvdevLabel(EV_ABS, event.code, 0).code.c_str(), event.code,
+              event.value, mCurrentSlot, slot.mAbsMtTrackingId);
     }
 }
 

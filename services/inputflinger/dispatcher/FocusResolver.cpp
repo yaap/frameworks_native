@@ -25,6 +25,7 @@
 #include <android-base/stringprintf.h>
 #include <binder/Binder.h>
 #include <ftl/enum.h>
+#include <ftl/expected.h>
 #include <gui/WindowInfo.h>
 #include <unordered_set>
 
@@ -36,10 +37,13 @@ using android::gui::WindowInfoHandle;
 
 namespace android::inputdispatcher {
 
+namespace {
 template <typename T>
 struct SpHash {
     size_t operator()(const sp<T>& k) const { return std::hash<T*>()(k.get()); }
 };
+
+} // namespace
 
 sp<IBinder> FocusResolver::getFocusedWindowToken(ui::LogicalDisplayId displayId) const {
     auto it = mFocusedWindowTokenByDisplay.find(displayId);
@@ -68,23 +72,25 @@ std::optional<FocusResolver::FocusChanges> FocusResolver::setInputWindows(
     // cannot be focused, focus will be removed.
     if (request) {
         sp<IBinder> requestedFocus = request->token;
-        sp<WindowInfoHandle> resolvedFocusWindow;
-        Focusability result = getResolvedFocusWindow(requestedFocus, windows, resolvedFocusWindow);
-        if (result == Focusability::OK && resolvedFocusWindow->getToken() == currentFocus) {
+        ftl::Expected<sp<WindowInfoHandle>, Focusability> result =
+                getResolvedFocusWindow(requestedFocus, windows);
+        if (result.has_value() && result.value()->getToken() == currentFocus) {
             return std::nullopt;
         }
         const Focusability previousResult = mLastFocusResultByDisplay[displayId];
-        mLastFocusResultByDisplay[displayId] = result;
-        if (result == Focusability::OK) {
-            LOG_ALWAYS_FATAL_IF(!resolvedFocusWindow,
+        mLastFocusResultByDisplay[displayId] =
+                result.has_value() ? Focusability::OK : result.error();
+        if (result.has_value()) {
+            const sp<WindowInfoHandle>& window = result.value();
+            LOG_ALWAYS_FATAL_IF(window == nullptr,
                                 "Focused window should be non-null when result is OK!");
             return updateFocusedWindow(displayId,
                                        "Window became focusable. Previous reason: " +
                                                ftl::enum_string(previousResult),
-                                       resolvedFocusWindow->getToken(),
-                                       resolvedFocusWindow->getName());
+                                       window->getToken(), window->getName());
         }
-        removeFocusReason = ftl::enum_string(result);
+        removeFocusReason =
+                ftl::enum_string(result.has_value() ? Focusability::OK : result.error());
     }
 
     // Focused window is no longer focusable and we don't have a suitable focus request to grant.
@@ -102,61 +108,68 @@ std::optional<FocusResolver::FocusChanges> FocusResolver::setFocusedWindow(
         return std::nullopt;
     }
 
-    sp<WindowInfoHandle> resolvedFocusWindow;
-    Focusability result = getResolvedFocusWindow(request.token, windows, resolvedFocusWindow);
+    ftl::Expected<sp<WindowInfoHandle>, Focusability> result =
+            getResolvedFocusWindow(request.token, windows);
     // Update focus request. The focus resolver will always try to handle this request if there is
     // no focused window on the display.
     mFocusRequestByDisplay[displayId] = request;
-    mLastFocusResultByDisplay[displayId] = result;
+    mLastFocusResultByDisplay[displayId] = result.has_value() ? Focusability::OK : result.error();
 
-    if (result == Focusability::OK) {
-        LOG_ALWAYS_FATAL_IF(!resolvedFocusWindow,
+    if (result.has_value()) {
+        const sp<WindowInfoHandle>& window = result.value();
+        LOG_ALWAYS_FATAL_IF(window == nullptr,
                             "Focused window should be non-null when result is OK!");
-        return updateFocusedWindow(displayId, "setFocusedWindow", resolvedFocusWindow->getToken(),
-                                   resolvedFocusWindow->getName());
+        return updateFocusedWindow(displayId, "setFocusedWindow", window->getToken(),
+                                   window->getName());
     }
 
     // The requested window is not currently focusable. Wait for the window to become focusable
     // but remove focus from the current window so that input events can go into a pending queue
     // and be sent to the window when it becomes focused.
-    return updateFocusedWindow(displayId, "Waiting for window because " + ftl::enum_string(result),
+    return updateFocusedWindow(displayId,
+                               "Waiting for window because " +
+                                       ftl::enum_string(result.has_value() ? Focusability::OK
+                                                                           : result.error()),
                                nullptr);
 }
 
-FocusResolver::Focusability FocusResolver::getResolvedFocusWindow(
-        const sp<IBinder>& token, const std::vector<sp<WindowInfoHandle>>& windows,
-        sp<WindowInfoHandle>& outFocusableWindow) {
-    sp<IBinder> curFocusCandidate = token;
-    bool focusedWindowFound = false;
-
+/**
+ * Each window can contain a request to transfer focus to another window.
+ * This is communicated via the `focusTransferTarget` field of 'WindowInfo'.
+ * First, we try to provide focus to the requested token. We then follow the "focusTransferTarget"
+ * requests like a linked list, ensuring that the next window is also eligible for focus.
+ * Return the last window that is eligible for focus.
+ */
+ftl::Expected<sp<android::gui::WindowInfoHandle>, FocusResolver::Focusability>
+FocusResolver::getResolvedFocusWindow(
+        const sp<IBinder>& token, const std::vector<sp<android::gui::WindowInfoHandle>>& windows) {
     // Keep track of all windows reached to prevent a cyclical transferFocus request.
     std::unordered_set<sp<IBinder>, SpHash<IBinder>> tokensReached;
+    sp<IBinder> nextToken = token;
+    sp<WindowInfoHandle> lastFocusableWindow = nullptr;
 
-    while (curFocusCandidate != nullptr && tokensReached.count(curFocusCandidate) == 0) {
-        tokensReached.emplace(curFocusCandidate);
-        Focusability result = isTokenFocusable(curFocusCandidate, windows, outFocusableWindow);
-        if (result == Focusability::OK) {
-            LOG_ALWAYS_FATAL_IF(!outFocusableWindow,
-                                "Focused window should be non-null when result is OK!");
-            focusedWindowFound = true;
-            // outFocusableWindow has been updated by isTokenFocusable to contain
-            // the window info for curFocusCandidate. See if we can grant focus
-            // to the token that it wants to transfer its focus to.
-            curFocusCandidate = outFocusableWindow->getInfo()->focusTransferTarget;
+    while (nextToken != nullptr && !tokensReached.contains(nextToken)) {
+        tokensReached.emplace(nextToken);
+        ftl::Expected<sp<WindowInfoHandle>, Focusability> result =
+                isTokenFocusable(nextToken, windows);
+        if (!result.has_value()) {
+            return lastFocusableWindow ? lastFocusableWindow : result;
         }
-
-        // If the initial token is not focusable, return early with the failed result.
-        if (!focusedWindowFound) {
-            return result;
-        }
+        lastFocusableWindow = result.value();
+        // result contains the current focus candidate. See if we can grant focus to the token that
+        // it wants to transfer its focus to.
+        nextToken = lastFocusableWindow->getInfo()->focusTransferTarget;
     }
 
-    return focusedWindowFound ? Focusability::OK : Focusability::NO_WINDOW;
+    if (lastFocusableWindow != nullptr) {
+        return lastFocusableWindow;
+    }
+    return ftl::Unexpected(Focusability::NO_WINDOW);
 }
 
-FocusResolver::Focusability FocusResolver::isTokenFocusable(
-        const sp<IBinder>& token, const std::vector<sp<WindowInfoHandle>>& windows,
-        sp<WindowInfoHandle>& outFocusableWindow) {
+ftl::Expected<android::sp<gui::WindowInfoHandle>, FocusResolver::Focusability>
+FocusResolver::isTokenFocusable(const sp<IBinder>& token,
+                                const std::vector<sp<WindowInfoHandle>>& windows) {
     bool allWindowsAreFocusable = true;
     bool windowFound = false;
     sp<WindowInfoHandle> visibleWindowHandle = nullptr;
@@ -177,18 +190,16 @@ FocusResolver::Focusability FocusResolver::isTokenFocusable(
     }
 
     if (!windowFound) {
-        return Focusability::NO_WINDOW;
+        return ftl::Unexpected(Focusability::NO_WINDOW);
     }
     if (!allWindowsAreFocusable) {
-        return Focusability::NOT_FOCUSABLE;
+        return ftl::Unexpected(Focusability::NOT_FOCUSABLE);
     }
     if (!visibleWindowHandle) {
-        return Focusability::NOT_VISIBLE;
+        return ftl::Unexpected(Focusability::NOT_VISIBLE);
     }
 
-    // Only set the outFoundWindow if the window can be focused
-    outFocusableWindow = visibleWindowHandle;
-    return Focusability::OK;
+    return visibleWindowHandle;
 }
 
 std::optional<FocusResolver::FocusChanges> FocusResolver::updateFocusedWindow(
@@ -208,6 +219,9 @@ std::optional<FocusResolver::FocusChanges> FocusResolver::updateFocusedWindow(
 }
 
 std::string FocusResolver::dumpFocusedWindows() const {
+    // When changing the format of the text output by this function, also update
+    // com.android.compatibility.common.util.WindowUtil in the CTS utils, which parses this dump to
+    // improve failure messages for waitForFocus calls.
     if (mFocusedWindowTokenByDisplay.empty()) {
         return INDENT "FocusedWindows: <none>\n";
     }

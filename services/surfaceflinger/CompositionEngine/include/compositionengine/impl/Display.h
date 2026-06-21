@@ -33,6 +33,7 @@
 namespace android::compositionengine {
 
 class CompositionEngine;
+class DisplayTestAccessor;
 
 namespace impl {
 
@@ -95,6 +96,8 @@ public:
     std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(const sp<LayerFE>&) const;
 
 private:
+    friend class ::android::compositionengine::DisplayTestAccessor;
+
     bool isPowerHintSessionEnabled() override;
     bool isPowerHintSessionGpuReportingEnabled() override;
     void setHintSessionGpuStart(TimePoint startTime) override;

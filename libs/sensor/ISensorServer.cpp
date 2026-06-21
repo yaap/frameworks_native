@@ -30,7 +30,9 @@
 #include <binder/Parcel.h>
 
 #include <sensor/Sensor.h>
-#include <sensor/ISensorEventConnection.h>
+#include <android/hardware/sensor/ISensorClientListener.h>
+
+#include <android/hardware/sensor/ISensorClientListener.h>
 
 namespace android {
 // ----------------------------------------------------------------------------
@@ -45,6 +47,7 @@ enum {
     GET_RUNTIME_SENSOR_LIST,
     ENABLE_REPLAY_DATA_INJECTION,
     ENABLE_HAL_BYPASS_REPLAY_DATA_INJECTION,
+    REGISTER_CLIENT_LISTENER,
 };
 
 class BpSensorServer : public BpInterface<ISensorServer>
@@ -215,6 +218,15 @@ public:
         remote()->transact(SET_OPERATION_PARAMETER, data, &reply);
         return reply.readInt32();
     }
+
+    status_t registerClientListener(
+            const sp<android::hardware::sensor::ISensorClientListener>& listener) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISensorServer::getInterfaceDescriptor());
+        data.writeStrongBinder(IInterface::asBinder(listener));
+        remote()->transact(REGISTER_CLIENT_LISTENER, data, &reply);
+        return reply.readExceptionCode();
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -343,6 +355,14 @@ status_t BnSensorServer::onTransact(
 
             int32_t ret = setOperationParameter(handle, type, floats, ints);
             reply->writeInt32(ret);
+            return NO_ERROR;
+        }
+        case REGISTER_CLIENT_LISTENER: {
+            CHECK_INTERFACE(ISensorServer, data, reply);
+            sp<android::hardware::sensor::ISensorClientListener> listener =
+                    interface_cast<android::hardware::sensor::ISensorClientListener>(
+                            data.readStrongBinder());
+            reply->writeInt32(registerClientListener(listener));
             return NO_ERROR;
         }
         case SHELL_COMMAND_TRANSACTION: {

@@ -15,17 +15,19 @@ cc_defaults {
         "surfaceflinger_defaults",
     ],
     shared_libs: [
+        "com.android.window.flags.window-aconfig_flags_c_lib",
         "libSurfaceFlingerProp",
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "libperfetto_c",
         "server_configurable_flags",
     ],
     static_libs: [
-        "librenderengine_includes",
         "libgui_window_info_static",
     ],
     srcs: [
         "FlagManager.cpp",
+        "Panopticon.cpp",
     ],
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
@@ -42,7 +44,6 @@ cc_library_static {
         "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
-        "com.android.input.flags-aconfig-cc",
         "libguiflags_no_apex",
         "libsurfaceflingerflags",
     ],
@@ -58,7 +59,6 @@ cc_library_static {
         "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc-test",
         "android.server.display.flags-aconfig-cc",
-        "com.android.input.flags-aconfig-cc",
         "libguiflags_no_apex",
         "libsurfaceflingerflags_test",
     ],
@@ -69,6 +69,7 @@ cc_defaults {
     shared_libs: [
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "libperfetto_c",
         "server_configurable_flags",
     ],
     static_libs: [
@@ -76,7 +77,7 @@ cc_defaults {
         "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
-        "com.android.input.flags-aconfig-cc",
+        "com.android.window.flags.window-aconfig_flags_c_lib",
         "libguiflags_no_apex",
         "libsurfaceflinger_common",
         "libsurfaceflingerflags",
@@ -88,6 +89,7 @@ cc_defaults {
     shared_libs: [
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "libperfetto_c",
         "server_configurable_flags",
     ],
     static_libs: [

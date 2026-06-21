@@ -127,7 +127,8 @@ TEST_F(TunnelModeEnabledReporterTest, callsNewListenerWithFreshInformation) {
     sp<NativeHandle> stream =
             NativeHandle::create(reinterpret_cast<native_handle_t*>(DEFAULT_SIDEBAND_STREAM),
                                  false);
-    layer->setSidebandStream(stream, FrameTimelineInfo{}, 20, gui::GameMode::Unsupported);
+    layer->setSidebandStream(stream, FrameTimelineInfo{}, 20, gui::GameMode::Unsupported,
+                             gui::ISystemContentPriorityConstants::Unset);
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
     mTunnelModeEnabledReporter->addListener(mTunnelModeEnabledListener);
     EXPECT_EQ(true, mTunnelModeEnabledListener->mTunnelModeEnabled);
@@ -150,7 +151,8 @@ TEST_F(TunnelModeEnabledReporterTest, layerWithSidebandStreamTriggersUpdate) {
             NativeHandle::create(reinterpret_cast<native_handle_t*>(DEFAULT_SIDEBAND_STREAM),
                                  false);
     layerWithSidebandStream->setSidebandStream(stream, FrameTimelineInfo{}, 20,
-                                               gui::GameMode::Unsupported);
+                                               gui::GameMode::Unsupported,
+                                               gui::ISystemContentPriorityConstants::Unset);
 
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
     EXPECT_EQ(true, mTunnelModeEnabledListener->mTunnelModeEnabled);

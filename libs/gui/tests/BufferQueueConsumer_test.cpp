@@ -21,10 +21,15 @@
 #define LOG_TAG "BufferQueueConsumer_test"
 
 #include <gui/BufferItem.h>
+#include <gui/BufferItemConsumer.h>
+#include <gui/BufferQueue.h>
 #include <gui/BufferQueueConsumer.h>
 #include <gui/BufferQueueCore.h>
 #include <gui/BufferQueueProducer.h>
 #include <gui/IConsumerListener.h>
+#include <gui/IProducerListener.h>
+#include <gui/Surface.h>
+#include <system/window.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Rect.h>
 #include <utils/Timers.h>
@@ -33,6 +38,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include "hardware/gralloc.h"
 
 namespace android {
 
@@ -158,4 +164,106 @@ TEST_F(BufferQueueConsumerVkTimingTest, FifoLatestReadyTestBasicLaterTimestamp) 
                   expectedNumberOfDroppedBuffers);
 }
 
+TEST_F(BufferQueueConsumerVkTimingTest, AcquireLatestAndFifo) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(4));
+
+    auto localCreateAndQueueBuffers = [&](int numBuffers) {
+        for (int i = 0; i < numBuffers; ++i) {
+            sp<GraphicBuffer> buffer;
+            sp<Fence> fence;
+            ASSERT_EQ(surface->dequeueBuffer(&buffer, &fence), OK);
+            surface->queueBuffer(buffer, fence);
+        }
+    };
+
+    localCreateAndQueueBuffers(3);
+
+    // Test ANATIVEWINDOW_PRESENT_DEFAULT acquiring
+    BufferItem acquiredBuffer;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, 0));
+    ASSERT_EQ(static_cast<unsigned long>(1), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, 0));
+    ASSERT_EQ(static_cast<unsigned long>(2), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, 0));
+    ASSERT_EQ(static_cast<unsigned long>(3), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+
+    // Test ANATIVEWINDOW_PRESENT_LATEST_FIFO acquiring
+    ASSERT_EQ(OK,
+              native_window_set_present_mode(surface.get(),
+                                             ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY));
+    localCreateAndQueueBuffers(3);
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, 0));
+    ASSERT_EQ(static_cast<unsigned long>(6), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+}
+
+TEST_F(BufferQueueConsumerVkTimingTest, AcquireWithMixedPresentTimes) {
+    auto [consumer, surface] = BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(4));
+
+    nsecs_t currentTime = systemTime(SYSTEM_TIME_MONOTONIC);
+    nsecs_t pastTime = currentTime - 200;
+    nsecs_t futureTime = currentTime + 200;
+    nsecs_t farFutureTime = currentTime + 400;
+
+    auto localCreateAndQueueBuffers = [&](nsecs_t timestamp) {
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        ASSERT_EQ(surface->dequeueBuffer(&buffer, &fence), OK);
+        native_window_set_buffers_timestamp(surface.get(), timestamp);
+        surface->queueBuffer(buffer, fence);
+    };
+
+    localCreateAndQueueBuffers(pastTime);
+    localCreateAndQueueBuffers(futureTime);
+    localCreateAndQueueBuffers(farFutureTime);
+
+    ASSERT_EQ(OK, native_window_set_present_mode(surface.get(), ANATIVEWINDOW_PRESENT_DEFAULT));
+
+    // In FIFO mode, we should acquire the past buffer, but not the future
+    // buffers if the expected present time is now.
+    BufferItem acquiredBuffer;
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, currentTime));
+    ASSERT_EQ(static_cast<unsigned long>(1), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(pastTime, acquiredBuffer.mTimestamp);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+
+    // The next buffer is in the future, so it should return PRESENT_LATER.
+    ASSERT_EQ(IGraphicBufferConsumer::PRESENT_LATER,
+              consumer->acquireBuffer(&acquiredBuffer, currentTime));
+
+    // If we advance the expected present time, we should get the future buffer.
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, futureTime + 1));
+    ASSERT_EQ(static_cast<unsigned long>(2), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(futureTime, acquiredBuffer.mTimestamp);
+    ASSERT_EQ(OK, consumer->releaseBuffer(acquiredBuffer));
+
+    // Now test in LATEST_FIFO mode
+    ASSERT_EQ(OK,
+              native_window_set_present_mode(surface.get(),
+                                             ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY));
+    localCreateAndQueueBuffers(pastTime);
+    localCreateAndQueueBuffers(futureTime);
+    localCreateAndQueueBuffers(farFutureTime);
+
+    // In LATEST_FIFO mode, it should drop the past and future buffers and
+    // acquire the latest one immediately, regardless of the expected present time.
+    ASSERT_EQ(IGraphicBufferConsumer::PRESENT_LATER,
+              consumer->acquireBuffer(&acquiredBuffer, currentTime));
+    ASSERT_EQ(OK, consumer->acquireBuffer(&acquiredBuffer, farFutureTime + 1));
+    ASSERT_EQ(static_cast<unsigned long>(6), acquiredBuffer.mFrameNumber);
+    ASSERT_EQ(farFutureTime, acquiredBuffer.mTimestamp);
+}
 } // namespace android

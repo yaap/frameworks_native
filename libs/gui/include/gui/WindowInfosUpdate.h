@@ -34,8 +34,8 @@ struct WindowInfosUpdate : public Parcelable {
 
     std::vector<WindowInfo> windowInfos;
     std::vector<DisplayInfo> displayInfos;
-    int64_t vsyncId;
-    int64_t timestamp;
+    int64_t vsyncId = -1;
+    int64_t timestamp = 0;
 
     status_t writeToParcel(android::Parcel*) const override;
     status_t readFromParcel(const android::Parcel*) override;

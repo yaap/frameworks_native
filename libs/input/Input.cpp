@@ -20,8 +20,9 @@
 #include <attestation/HmacKeyManager.h>
 #include <cutils/compiler.h>
 #include <inttypes.h>
-#include <string.h>
 #include <optional>
+#include <string>
+#include <string_view>
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
@@ -394,8 +395,13 @@ std::ostream& operator<<(std::ostream& out, const InputEvent& event) {
 
 // --- KeyEvent ---
 
-const char* KeyEvent::getLabel(int32_t keyCode) {
+std::optional<std::string_view> KeyEvent::getLabel(int32_t keyCode) {
     return InputEventLookup::getLabelByKeyCode(keyCode);
+}
+
+std::string KeyEvent::getLabelOrCode(int32_t keyCode) {
+    std::optional<std::string_view> label = getLabel(keyCode);
+    return label.has_value() ? std::string(label.value()) : std::to_string(keyCode);
 }
 
 std::optional<int> KeyEvent::getKeyCodeFromLabel(const char* label) {
@@ -446,8 +452,8 @@ const char* KeyEvent::actionToString(int32_t action) {
 std::ostream& operator<<(std::ostream& out, const KeyEvent& event) {
     out << "KeyEvent { action=" << KeyEvent::actionToString(event.getAction());
 
-    out << ", keycode=" << event.getKeyCode() << "(" << KeyEvent::getLabel(event.getKeyCode())
-        << ")";
+    out << ", keycode=" << event.getKeyCode() << "("
+        << KeyEvent::getLabel(event.getKeyCode()).value_or("unknown") << ")";
 
     if (event.getMetaState() != 0) {
         out << ", metaState=" << event.getMetaState();
@@ -649,10 +655,9 @@ void MotionEvent::copyFrom(const MotionEvent* other, bool keepHistory) {
         mSamplePointerCoords.clear();
         size_t pointerCount = other->getPointerCount();
         size_t historySize = other->getHistorySize();
-        mSamplePointerCoords
-                .insert(mSamplePointerCoords.end(),
-                        &other->mSamplePointerCoords[historySize * pointerCount],
-                        &other->mSamplePointerCoords[historySize * pointerCount + pointerCount]);
+        const PointerCoords* insertBegin = &other->mSamplePointerCoords[historySize * pointerCount];
+        mSamplePointerCoords.insert(mSamplePointerCoords.end(), insertBegin,
+                                    insertBegin + pointerCount);
     }
 }
 
@@ -663,7 +668,8 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
     const nsecs_t splitDownTime = other.mDownTime;
 
     auto result = split(other.getAction(), other.getFlags(), other.getHistorySize(),
-                        other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+                        other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds,
+                        [&]() { return safeDump() + ", other=" + other.safeDump(); });
     if (!result) {
         LOG(ERROR) << "Could not split " << other << " into " << splitPointerIds
                    << " with new id=" << newEventId << ": " << result.error();
@@ -1020,8 +1026,13 @@ bool MotionEvent::isTouchEvent(uint32_t source, int32_t action) {
     return false;
 }
 
-const char* MotionEvent::getLabel(int32_t axis) {
+std::optional<std::string_view> MotionEvent::getLabel(int32_t axis) {
     return InputEventLookup::getAxisLabel(axis);
+}
+
+std::string MotionEvent::getLabelOrCode(int32_t axis) {
+    std::optional<std::string_view> label = getLabel(axis);
+    return label.has_value() ? std::string(label.value()) : std::to_string(axis);
 }
 
 std::optional<int> MotionEvent::getAxisFromLabel(const char* label) {
@@ -1065,10 +1076,12 @@ base::Result<std::tuple<int32_t, std::vector<PointerProperties>, std::vector<Poi
 MotionEvent::split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
                    const std::vector<PointerProperties>& pointerProperties,
                    const std::vector<PointerCoords>& pointerCoords,
-                   std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
-    LOG_ALWAYS_FATAL_IF(!splitPointerIds.any());
+                   std::bitset<MAX_POINTER_ID + 1> splitPointerIds,
+                   std::function<std::string(void)> debugInfo) {
+    LOG_IF(FATAL, !splitPointerIds.any()) << "!splitPointerIds.any() : " << debugInfo();
     const auto pointerCount = pointerProperties.size();
-    LOG_ALWAYS_FATAL_IF(pointerCoords.size() != (pointerCount * (historySize + 1)));
+    LOG_IF(FATAL, pointerCoords.size() != (pointerCount * (historySize + 1)))
+            << "pointerCoords.size() != (pointerCount * (historySize + 1)) : " << debugInfo();
     const auto splitCount = splitPointerIds.count();
 
     std::vector<PointerProperties> splitPointerProperties;
@@ -1084,8 +1097,9 @@ MotionEvent::split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t history
             splitPointerCoords.emplace_back(pointerCoords[i]);
         }
     }
-    LOG_ALWAYS_FATAL_IF(splitPointerCoords.size() !=
-                        (splitPointerProperties.size() * (historySize + 1)));
+    LOG_IF(FATAL, splitPointerCoords.size() != (splitPointerProperties.size() * (historySize + 1)))
+            << "splitPointerCoords.size() != (splitPointerProperties.size() * (historySize + 1)) : "
+            << debugInfo();
 
     if (CC_UNLIKELY(splitPointerProperties.size() != splitCount)) {
         // TODO(b/329107108): Promote this to a fatal check once bugs in the caller are resolved.
@@ -1474,6 +1488,14 @@ void PooledInputEventFactory::recycle(InputEvent* event) {
         }
     }
     delete event;
+}
+
+// --- PointerCaptureRequest ---
+
+std::ostream& operator<<(std::ostream& out, const PointerCaptureRequest& request) {
+    out << "PointerCaptureRequest { mode=" << ftl::enum_string(request.mode)
+        << ", seq=" << request.seq << " }";
+    return out;
 }
 
 } // namespace android

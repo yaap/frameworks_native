@@ -41,19 +41,20 @@ sp<hardware::ISensorPrivacyManager> SensorPrivacyManager::getService()
 }
 
 bool SensorPrivacyManager::supportsSensorToggle(int toggleType, int sensor) {
-    if (mSupportedCache.find(sensor) == mSupportedCache.end()) {
+    ToggleCacheKey key{toggleType, sensor};
+    if (mSupportedCache.find(key) == mSupportedCache.end()) {
         sp<hardware::ISensorPrivacyManager> service = getService();
         if (service != nullptr) {
             bool result;
             service->supportsSensorToggle(toggleType, sensor, &result);
-            mSupportedCache[sensor] = result;
+            mSupportedCache[key] = result;
             return result;
         }
         // if the SensorPrivacyManager is not available then assume sensor privacy feature isn't
         // supported
         return false;
     }
-    return mSupportedCache[sensor];
+    return mSupportedCache[key];
 }
 
 void SensorPrivacyManager::addSensorPrivacyListener(

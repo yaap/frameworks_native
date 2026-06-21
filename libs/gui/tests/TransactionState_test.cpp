@@ -389,4 +389,25 @@ TEST(TransactionStateTest, clear) {
     EXPECT_EQ(state, emptyState);
 };
 
+TEST(TransactionStateTest, parcelPostProcessState) {
+    ComposerState state = createComposerStateForTest(0);
+    state.state.what |= layer_state_t::ePostProcessChanged;
+    state.state.postProcessShader = sp<BBinder>::make();
+    state.state.postProcessUniforms =
+            std::make_shared<std::vector<uint8_t>>(std::vector<uint8_t>{1, 2, 3});
+
+    Parcel p;
+    state.write(p);
+    p.setDataPosition(0);
+    ComposerState parcelledState;
+    parcelledState.read(p);
+
+    // Verify manually as operator== might not cover it yet without update
+    // EXPECT_EQ(state, parcelledState);
+    EXPECT_EQ(state.state.postProcessShader, parcelledState.state.postProcessShader);
+    ASSERT_TRUE(parcelledState.state.postProcessUniforms);
+    EXPECT_EQ(*state.state.postProcessUniforms, *parcelledState.state.postProcessUniforms);
+    EXPECT_TRUE(parcelledState.state.what & layer_state_t::ePostProcessChanged);
+}
+
 } // namespace android

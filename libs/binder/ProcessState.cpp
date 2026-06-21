@@ -28,10 +28,10 @@
 #include <utils/String8.h>
 #include <utils/Thread.h>
 
-#include "BinderObserver.h"
 #include "Static.h"
 #include "Utils.h"
 #include "binder_module.h"
+#include "observer/BinderObserver.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -522,6 +522,14 @@ bool ProcessState::isThreadPoolStarted() const {
     return mThreadPoolStarted;
 }
 
+bool ProcessState::isOutgoingTransactionsAuditable() const {
+    return mIsOutgoingTransactionsAuditable;
+}
+
+void ProcessState::setIsOutgoingTransactionsAuditable(bool enabled) {
+    mIsOutgoingTransactionsAuditable = enabled;
+}
+
 void ProcessState::checkExpectingThreadPoolStart() const {
     if (mThreadPoolStarted) return;
 
@@ -618,6 +626,7 @@ ProcessState::ProcessState(const char* driver)
         mForked(false),
         mThreadPoolStarted(false),
         mThreadPoolSeq(1),
+        mIsOutgoingTransactionsAuditable(false),
         mCallRestriction(CallRestriction::NONE) {
     String8 error;
     unique_fd opened = open_driver(driver, &error);

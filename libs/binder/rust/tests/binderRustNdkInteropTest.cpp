@@ -33,6 +33,7 @@ static const char* kRustServerName = "RustServer-BinderRustNdkInteropTest";
 extern "C" {
 int rust_call_ndk(const char* service_name);
 int rust_start_service(const char* service_name);
+int rust_test_get_function_name();
 }
 
 class NdkServer : public aidl::BnBinderRustNdkInteropTest {
@@ -60,6 +61,10 @@ TEST(RustNdkInterop, NdkCanCallRust) {
     std::string out;
     EXPECT_TRUE(interface->echo(in, &out).isOk());
     EXPECT_EQ(in, out);
+}
+
+TEST(RustNdkInterop, NdkCanGetFunctionNameFromRust) {
+    ASSERT_EQ(STATUS_OK, rust_test_get_function_name());
 }
 
 int main(int argc, char** argv) {

@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include <gui/DisplayInfo.h>
+#include <ui/DisplayId.h>
 #include <ui/DisplayMap.h>
 #include <ui/LayerStack.h>
 #include <ui/LogicalDisplayId.h>
@@ -29,6 +30,7 @@ namespace android::surfaceflinger::frontend {
 // Display information needed to populate input and calculate layer geometry.
 struct DisplayInfo {
     gui::DisplayInfo info;
+    DisplayId displayId;
     ui::Transform transform;
     bool receivesInput;
     bool isSecure;
@@ -39,7 +41,8 @@ struct DisplayInfo {
     ui::Transform::RotationFlags transformHint;
     std::string getDebugString() const {
         std::stringstream debug;
-        debug << "DisplayInfo {displayId=" << info.displayId << " lw=" << info.logicalWidth
+        debug << "DisplayInfo {logicalDisplayId=" << info.displayId
+              << " displayId=" << displayId.value << " lw=" << info.logicalWidth
               << " lh=" << info.logicalHeight << " transform={" << transform.dsdx() << " ,"
               << transform.dsdy() << " ," << transform.dtdx() << " ," << transform.dtdy()
               << "} isSecure=" << isSecure << " isPrimary=" << isPrimary

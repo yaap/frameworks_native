@@ -114,6 +114,10 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
 
     layerSettings->borderSettings = mSnapshot->borderSettings;
     layerSettings->boxShadowSettings = mSnapshot->boxShadowSettings;
+    layerSettings->postProcessEffect = mSnapshot->postProcessEffect;
+    layerSettings->postProcessUniforms = mSnapshot->postProcessUniforms;
+    layerSettings->postProcessTarget =
+            static_cast<renderengine::LayerSettings::SampleTarget>(mSnapshot->postProcessTarget);
 
     return layerSettings;
 }
@@ -125,7 +129,8 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     layerSettings.geometry.originalBounds = mSnapshot->geomLayerBounds;
 
     if (mSnapshot->parentRoundedCorner.hasRequestedRadius()) {
-        layerSettings.geometry.otherRoundedCornersRadii = mSnapshot->parentRoundedCorner.radii;
+        layerSettings.geometry.otherRoundedCornersRadii =
+                mSnapshot->parentRoundedCorner.sfDrawnRadii;
         layerSettings.geometry.otherCrop = mSnapshot->parentRoundedCorner.cropRect;
     } else {
         layerSettings.geometry.otherCrop = mSnapshot->parentGeomLayerCrop;
@@ -146,7 +151,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     }
 
     const auto& roundedCornerState = mSnapshot->roundedCorner;
-    layerSettings.geometry.roundedCornersRadii = roundedCornerState.radii;
+    layerSettings.geometry.roundedCornersRadii = roundedCornerState.sfDrawnRadii;
     layerSettings.geometry.roundedCornersCrop = roundedCornerState.cropRect;
 
     layerSettings.alpha = mSnapshot->alpha;
@@ -189,6 +194,10 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
     layerSettings.luts = mSnapshot->luts ? mSnapshot->luts : targetSettings.luts;
+
+    layerSettings.renderCommandBuffer = mSnapshot->renderCommandBuffer;
+    layerSettings.renderResourceCache = mSnapshot->renderResourceCache;
+    layerSettings.renderCommandBufferFrameId = mSnapshot->renderCommandBufferFrameId;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -388,7 +397,7 @@ int32_t LayerFE::getSequence() const {
 }
 
 bool LayerFE::hasRoundedCorners() const {
-    return mSnapshot->roundedCorner.hasRoundedCorners();
+    return mSnapshot->roundedCorner.hasSfDrawnRadius();
 }
 
 void LayerFE::setWasClientComposed(const sp<Fence>& fence) {
@@ -450,7 +459,10 @@ void LayerFE::setReleaseFence(const FenceResult& releaseFence) {
 // LayerFEs are reused and a new fence needs to be created whevever a buffer is latched.
 ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
     if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
-        LOG_ALWAYS_FATAL("Attempting to create a new promise while one is still unfulfilled.");
+        LOG_ALWAYS_FATAL_IF(!FlagManager::getInstance().frontend_caching_v0(),
+                            "Attempting to create a new promise while one is still unfulfilled.");
+        ALOGW("Creating a new promise while one is still unfulfilled. Fulfilling with NO_FENCE.");
+        mReleaseFence.set_value(Fence::NO_FENCE);
     }
     mReleaseFence = std::promise<FenceResult>();
     mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::INITIALIZED;

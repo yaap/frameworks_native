@@ -265,6 +265,23 @@ void APersistableBundle_putBooleanVector(APersistableBundle* _Nonnull pBundle,
                                          int32_t num) __INTRODUCED_IN(__ANDROID_API_V__);
 
 /**
+ * Put a byte vector associated with the provided key.
+ * New values with the same key will overwrite existing values.
+ * The values are copied.
+ *
+ * \param pBundle to operate on
+ * \param key for the mapping in UTF-8
+ * \param vec vector to put for the mapping
+ * \param num number of elements in the vector
+ *
+ * Available since API level 202604.
+ */
+void APersistableBundle_putByteVector(APersistableBundle* _Nonnull pBundle,
+                                      const char* _Nonnull key,
+                                      const uint8_t* _Nonnull vec, int32_t num)
+        __INTRODUCED_IN(37);
+
+/**
  * Put an int32_t vector associated with the provided key.
  * New values with the same key will overwrite existing values.
  * The values are copied.
@@ -451,6 +468,35 @@ int32_t APersistableBundle_getBooleanVector(const APersistableBundle* _Nonnull p
                                             const char* _Nonnull key, bool* _Nullable buffer,
                                             int32_t bufferSizeBytes)
         __INTRODUCED_IN(__ANDROID_API_V__);
+
+
+/**
+ * Get a byte vector associated with the provided key and place it in the
+ * provided pre-allocated buffer from the user.
+ *
+ * This function returns the size in bytes of stored vector.
+ * The supplied buffer will be filled in based on the smaller of the supplied
+ * bufferSizeBytes or the actual size of the stored data.
+ * If the buffer is null or if the supplied bufferSizeBytes is smaller than the
+ * actual stored data, then not all of the stored data will be returned.
+ *
+ * Users can call this function with null buffer and 0 bufferSizeBytes to get
+ * the required size of the buffer to use on a subsequent call.
+ *
+ * \param pBundle to operate on
+ * \param key for the mapping in UTF-8
+ * \param buffer pointer to a pre-allocated buffer to write the values to
+ * \param bufferSizeBytes size of the pre-allocated buffer
+ *
+ * \return size of the stored vector in bytes. This is the required size of the
+ * pre-allocated user supplied buffer if all of the stored contents are desired.
+ *         APERSISTABLEBUNDLE_KEY_NOT_FOUND if the key was not found
+ */
+ int32_t APersistableBundle_getByteVector(const APersistableBundle* _Nonnull pBundle,
+                                           const char* _Nonnull key,
+                                           uint8_t* _Nullable buffer,
+                                           int32_t bufferSizeBytes)
+        __INTRODUCED_IN(37);
 
 /**
  * Get an int32_t vector associated with the provided key and place it in the
@@ -781,6 +827,40 @@ int32_t APersistableBundle_getBooleanVectorKeys(const APersistableBundle* _Nonnu
                                                 APersistableBundle_stringAllocator stringAllocator,
                                                 void* _Nullable context)
         __INTRODUCED_IN(__ANDROID_API_V__);
+
+
+/**
+ * Get all of the keys associated with this specific type and place it in the
+ * provided pre-allocated buffer from the user. The user must provide an
+ * APersistableBundle_stringAllocator for the individual strings to be
+ * allocated.
+ * The caller is responsible for freeing the returned data.
+ *
+ * This function returns the size in bytes required to fit the fill list of keys.
+ * The supplied buffer will be filled in based on the smaller of the supplied
+ * bufferSizeBytes or the actual size of the stored data.
+ * If the buffer is null or if the supplied bufferSizeBytes is smaller than the
+ * actual stored data, then not all of the stored data will be returned.
+ *
+ * Users can call this function with null buffer and 0 bufferSizeBytes to get
+ * the required size of the buffer to use on a subsequent call.
+ *
+ * \param pBundle to operate on
+ * \param outKeys pointer to a pre-allocated buffer to write the UTF-8 keys to
+ * \param bufferSizeBytes size of the pre-allocated buffer
+ * \param stringAllocator function pointer to the string allocator
+ * \param context pointer that will be passed to the stringAllocator
+ *
+ * \return size of the buffer of keys in bytes. This is the required size of the
+ * pre-allocated user supplied buffer if all of the stored contents are desired.
+ *         APERSISTABLEBUNDLE_ALLOCATOR_FAILED if the provided allocator fails
+ */
+int32_t APersistableBundle_getByteVectorKeys(const APersistableBundle* _Nonnull pBundle,
+                                            char* _Nullable* _Nullable outKeys,
+                                            int32_t bufferSizeBytes,
+                                            APersistableBundle_stringAllocator stringAllocator,
+                                            void* _Nullable context)
+        __INTRODUCED_IN(37);
 
 /**
  * Get all of the keys associated with this specific type and place it in the

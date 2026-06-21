@@ -20,6 +20,8 @@
 
 #include <include/gpu/graphite/BackendSemaphore.h>
 
+#include "compat/PipelineCallbackHandler.h"
+
 namespace android::renderengine::skia {
 
 class GraphiteVkRenderEngine : public SkiaVkRenderEngine {
@@ -31,15 +33,40 @@ public:
 
 protected:
     std::unique_ptr<SkiaGpuContext> createContext(VulkanInterface& vulkanInterface) override;
-    void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;
+    void waitFenceImpl(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;
     base::unique_fd flushAndSubmit(SkiaGpuContext* context, sk_sp<SkSurface> dstSurface) override;
     void appendBackendSpecificInfoToDump(std::string& result) override;
 
 private:
-    GraphiteVkRenderEngine(const RenderEngineCreationArgs& args) : SkiaVkRenderEngine(args) {}
+    GraphiteVkRenderEngine(const RenderEngineCreationArgs& args) : SkiaVkRenderEngine(args) {
+        // GraphiteVk is the first RenderEngine implementation to switch from the default cache
+        // management strategy of CacheManagementPolicy::kUponContextSwitch. Eventually, it would be
+        // ideal for all RenderEngine backends to align on the CacheManagementPolicy for protected
+        // contexts (kClearStaleResourcesPostRender) and, independently, the CacheManagementPolicy
+        // for unprotected contexts.
+        mUnprotectedCachePolicy = CacheManagementPolicy::kClearStaleResourcesPostRender;
+        mProtectedCachePolicy = CacheManagementPolicy::kClearStaleResourcesPostRender;
+    }
+
+    SkiaBackend backend() const override { return SkiaBackend::Graphite; }
+
+    skgpu::graphite::PersistentPipelineStorage* graphitePersistentPipelineStorage(
+            const void* identity, ssize_t size, bool isProtected);
+    PipelineCallbackHandler* graphiteSerializedPipelineKeyCache(const void* identity, ssize_t size,
+                                                                bool isProtected);
 
     std::thread mPrecompilePipelinesTask;
     std::vector<graphite::BackendSemaphore> mStagedWaitSemaphores;
+
+    std::unique_ptr<PipelineCallbackHandler> mUnprotectedPipelineCallbackHandler;
+    std::unique_ptr<PipelineCallbackHandler> mProtectedPipelineCallbackHandler;
+
+    std::unique_ptr<skgpu::graphite::PersistentPipelineStorage>
+            mUnprotectedPersistentPipelineStorage;
+    std::unique_ptr<skgpu::graphite::PersistentPipelineStorage> mProtectedPersistentPipelineStorage;
+
+    bool mInitializedGraphiteDiskCache = false;
+    bool mInitializedGraphiteSerializedPipelineKeyCache = false;
 };
 
 } // namespace android::renderengine::skia

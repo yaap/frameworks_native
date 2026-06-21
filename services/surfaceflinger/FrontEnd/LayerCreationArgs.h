@@ -18,6 +18,7 @@
 
 #include <binder/Binder.h>
 #include <gui/LayerMetadata.h>
+#include <ui/DisplayId.h>
 #include <ui/LayerStack.h>
 #include <utils/StrongPointer.h>
 #include <cstdint>
@@ -54,15 +55,19 @@ struct LayerCreationArgs {
     gui::LayerMetadata metadata;
     pid_t ownerPid;
     uid_t ownerUid;
+    uint64_t ownerPermissions;
     uint32_t sequence;
     bool addToRoot = true;
     wp<IBinder> parentHandle = nullptr;
     wp<IBinder> mirrorLayerHandle = nullptr;
     ui::LayerStack layerStackToMirror = ui::UNASSIGNED_LAYER_STACK;
+    std::optional<DisplayId> displayIdToMirror{};
     uint32_t parentId = UNASSIGNED_LAYER_ID;
     uint32_t layerIdToMirror = UNASSIGNED_LAYER_ID;
     uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
+    uint32_t croppedByLayerId = UNASSIGNED_LAYER_ID;
     std::atomic<int32_t>* pendingBuffers = 0;
+    uintptr_t debugCookie = 0;
 };
 
 } // namespace android::surfaceflinger

@@ -54,6 +54,9 @@ struct AIBinder : public virtual ::android::RefBase {
     virtual void addDeathRecipient(const ::android::sp<AIBinder_DeathRecipient>& recipient,
                                    void* cookie) = 0;
 
+    virtual void addFrozenStateChangeCallback(
+            const ::android::sp<AIBinder_FrozenStateChangeCallback>& recipient, void* cookie) = 0;
+
    private:
     // AIBinder instance is instance of this class for a local object. In order to transact on a
     // remote object, this also must be set for simplicity (although right now, only the
@@ -82,10 +85,14 @@ struct ABBinder : public AIBinder, public ::android::BBinder {
                                    ::android::Parcel* reply, binder_flags_t flags) override;
     void addDeathRecipient(const ::android::sp<AIBinder_DeathRecipient>& /* recipient */,
                            void* /* cookie */) override;
+    void addFrozenStateChangeCallback(
+            const ::android::sp<AIBinder_FrozenStateChangeCallback>& /* recipient */,
+            void* /* cookie */) override;
 
    private:
     ABBinder(const AIBinder_Class* clazz, void* userData);
 
+    friend android::sp<ABBinder>;
     // only thing that should create an ABBinder
     friend AIBinder* AIBinder_new(const AIBinder_Class*, void*);
 
@@ -112,6 +119,9 @@ struct ABpBinder : public AIBinder {
     void setServiceFuzzing() { mServiceFuzzing = true; }
     void addDeathRecipient(const ::android::sp<AIBinder_DeathRecipient>& recipient,
                            void* cookie) override;
+    void addFrozenStateChangeCallback(
+            const ::android::sp<AIBinder_FrozenStateChangeCallback>& recipient,
+            void* cookie) override;
 
    private:
     friend android::sp<ABpBinder>;
@@ -124,6 +134,13 @@ struct ABpBinder : public AIBinder {
     };
     std::mutex mDeathRecipientsMutex;
     std::vector<DeathRecipientInfo> mDeathRecipients;
+
+    struct FrozenStateChangeCallbackInfo {
+        android::wp<AIBinder_FrozenStateChangeCallback> recipient;
+        void* cookie;
+    };
+    std::mutex mFrozenStateChangeCallbacksMutex;
+    std::vector<FrozenStateChangeCallbackInfo> mFrozenStateChangeCallbacks;
 };
 
 struct AIBinder_Class {
@@ -135,7 +152,7 @@ struct AIBinder_Class {
     bool setTransactionCodeMap(const char* const* transactionCodeMap,
                                size_t transactionCodeMapSize);
     const char* getFunctionName(transaction_code_t code) const;
-    size_t getTransactionCodeToFunctionLength() const { return mTransactionCodeToFunctionLength; }
+    size_t getTransactionCodeToFunctionLength() const { return mTransactionCodeData.count; }
 
     // whether a transaction header should be written
     bool writeHeader = true;
@@ -155,10 +172,63 @@ struct AIBinder_Class {
     // This must be a String16 since BBinder virtual getInterfaceDescriptor returns a reference to
     // one.
     const ::android::String16 mWideInterfaceDescriptor;
-    // Array which holds names of the functions
-    const char* const* mTransactionCodeToFunction = nullptr;
-    // length of mmTransactionCodeToFunctionLength array
-    size_t mTransactionCodeToFunctionLength = 0;
+
+   public:
+    // struct which holds names of the functions and count
+    alignas(16) android::TransactionCodeData mTransactionCodeData;
+};
+
+template <typename Base, typename Parent, typename Callback, typename UnlinkedCallback>
+struct TransferRecipient : Base {
+    TransferRecipient(const ::android::wp<::android::IBinder>& who, void* cookie,
+                      const ::android::wp<Parent>& parentRecipient, const Callback onCallback,
+                      const UnlinkedCallback onUnlinked)
+        : mWho(who),
+          mCookie(cookie),
+          mParentRecipient(parentRecipient),
+          mOnCallback(onCallback),
+          mOnUnlinked(onUnlinked) {}
+
+    virtual ~TransferRecipient() {
+        if (mOnUnlinked != nullptr) {
+            mOnUnlinked(mCookie);
+        }
+    }
+
+    const ::android::wp<::android::IBinder>& getWho() { return mWho; }
+    void* getCookie() { return mCookie; }
+
+   protected:
+    ::android::wp<::android::IBinder> mWho;
+    void* mCookie;
+    ::android::wp<Parent> mParentRecipient;
+    const Callback mOnCallback;
+    const UnlinkedCallback mOnUnlinked;
+};
+
+template <typename Wrapper>
+struct RecipientList {
+    std::mutex mMutex;
+    std::vector<::android::sp<Wrapper>> mList;
+
+    void pruneThisTransferEntry(const ::android::sp<::android::IBinder>& who, void* cookie) {
+        std::lock_guard<std::mutex> l(mMutex);
+        mList.erase(std::remove_if(mList.begin(), mList.end(),
+                                   [&](const ::android::sp<Wrapper>& tdr) {
+                                       auto tdrWho = tdr->getWho();
+                                       return tdrWho != nullptr && tdrWho.promote() == who &&
+                                              cookie == tdr->getCookie();
+                                   }),
+                    mList.end());
+    }
+
+    void pruneDeadTransferEntriesLocked() {
+        mList.erase(std::remove_if(mList.begin(), mList.end(),
+                                   [](const ::android::sp<Wrapper>& tdr) {
+                                       return tdr->getWho() == nullptr;
+                                   }),
+                    mList.end());
+    }
 };
 
 // Ownership is like this (when linked to death):
@@ -170,33 +240,12 @@ struct AIBinder_Class {
 struct AIBinder_DeathRecipient : ::android::RefBase {
     // One of these is created for every linkToDeath. This is to be able to recover data when a
     // binderDied receipt only gives us information about the IBinder.
-    struct TransferDeathRecipient : ::android::IBinder::DeathRecipient {
-        TransferDeathRecipient(const ::android::wp<::android::IBinder>& who, void* cookie,
-                               const ::android::wp<AIBinder_DeathRecipient>& parentRecipient,
-                               const AIBinder_DeathRecipient_onBinderDied onDied,
-                               const AIBinder_DeathRecipient_onBinderUnlinked onUnlinked)
-            : mWho(who),
-              mCookie(cookie),
-              mParentRecipient(parentRecipient),
-              mOnDied(onDied),
-              mOnUnlinked(onUnlinked) {}
-        ~TransferDeathRecipient();
-
+    struct TransferDeathRecipient
+        : TransferRecipient<::android::IBinder::DeathRecipient, AIBinder_DeathRecipient,
+                            AIBinder_DeathRecipient_onBinderDied,
+                            AIBinder_DeathRecipient_onBinderUnlinked> {
+        using TransferRecipient::TransferRecipient;
         void binderDied(const ::android::wp<::android::IBinder>& who) override;
-
-        const ::android::wp<::android::IBinder>& getWho() { return mWho; }
-        void* getCookie() { return mCookie; }
-
-       private:
-        ::android::wp<::android::IBinder> mWho;
-        void* mCookie;
-
-        ::android::wp<AIBinder_DeathRecipient> mParentRecipient;
-
-        // This is kept separately from AIBinder_DeathRecipient in case the death recipient is
-        // deleted while the death notification is fired
-        const AIBinder_DeathRecipient_onBinderDied mOnDied;
-        const AIBinder_DeathRecipient_onBinderUnlinked mOnUnlinked;
     };
 
     explicit AIBinder_DeathRecipient(AIBinder_DeathRecipient_onBinderDied onDied);
@@ -206,13 +255,42 @@ struct AIBinder_DeathRecipient : ::android::RefBase {
     void pruneThisTransferEntry(const ::android::sp<::android::IBinder>&, void* cookie);
 
    private:
-    // When the user of this API deletes a Bp object but not the death recipient, the
-    // TransferDeathRecipient object can't be cleaned up. This is called whenever a new
-    // TransferDeathRecipient is linked, and it ensures that mDeathRecipients can't grow unbounded.
-    void pruneDeadTransferEntriesLocked();
-
-    std::mutex mDeathRecipientsMutex;
-    std::vector<::android::sp<TransferDeathRecipient>> mDeathRecipients;
+    friend struct TransferDeathRecipient;
+    RecipientList<TransferDeathRecipient> mDeathRecipients;
     AIBinder_DeathRecipient_onBinderDied mOnDied;
     AIBinder_DeathRecipient_onBinderUnlinked mOnUnlinked;
+};
+
+// Ownership is like this (when added):
+//
+//   AIBinder_FrozenStateChangeCallback -sp-> TransferFrozenStateChangeCallback <-wp-> IBinder
+//
+// When the AIBinder_FrozenStateChangeCallback is dropped, so are the actual underlying
+// callbacks. When the IBinder dies, only a wp to it is kept.
+struct AIBinder_FrozenStateChangeCallback : ::android::RefBase {
+    // One of these is created for every addFrozenStateChangeCallback. This is to be able to recover
+    // data when a onStateChanged receipt only gives us information about the IBinder.
+    struct TransferFrozenStateChangeCallback
+        : TransferRecipient<::android::IBinder::FrozenStateChangeCallback,
+                            AIBinder_FrozenStateChangeCallback,
+                            AIBinder_FrozenStateChangeCallback_onStateChanged,
+                            AIBinder_FrozenStateChangeCallback_onBinderUnlinked> {
+        using TransferRecipient::TransferRecipient;
+        void onStateChanged(const ::android::wp<::android::IBinder>& who, State state) override;
+    };
+
+    AIBinder_FrozenStateChangeCallback(
+            AIBinder_FrozenStateChangeCallback_onStateChanged onStateChanged,
+            AIBinder_FrozenStateChangeCallback_onBinderUnlinked onUnlinked);
+    [[nodiscard]] binder_status_t addFrozenStateChangeCallback(
+            const ::android::sp<::android::IBinder>&, void* cookie);
+    [[nodiscard]] binder_status_t removeFrozenStateChangeCallback(
+            const ::android::sp<::android::IBinder>& binder, void* cookie);
+    void pruneThisTransferEntry(const ::android::sp<::android::IBinder>&, void* cookie);
+
+   private:
+    friend struct TransferFrozenStateChangeCallback;
+    RecipientList<TransferFrozenStateChangeCallback> mFrozenStateChangeCallbacks;
+    AIBinder_FrozenStateChangeCallback_onStateChanged mOnStateChanged;
+    AIBinder_FrozenStateChangeCallback_onBinderUnlinked mOnUnlinked;
 };

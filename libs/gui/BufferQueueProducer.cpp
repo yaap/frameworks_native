@@ -15,6 +15,7 @@
  */
 
 #include <inttypes.h>
+#include <string>
 
 #define LOG_TAG "BufferQueueProducer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
@@ -31,6 +32,7 @@
 #include <binder/IPCThreadState.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueCore.h>
+#include <gui/BufferQueueHelpers.h>
 #include <gui/BufferQueueProducer.h>
 
 #include <gui/FrameRateUtils.h>
@@ -94,6 +96,19 @@ BufferQueueProducer::BufferQueueProducer(const sp<BufferQueueCore>& core,
 
 BufferQueueProducer::~BufferQueueProducer() {}
 
+status_t BufferQueueProducer::getConfigForSurface(SurfaceConfig* outConfig) {
+    ATRACE_CALL();
+    if (outConfig == nullptr) {
+        return BAD_VALUE;
+    }
+
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    outConfig->consumerName = mCore->mConsumerName;
+    outConfig->slotCount = mSlots.size();
+    outConfig->isSlotExpansionAllowed = mCore->mAllowExtendedSlotCount;
+    return NO_ERROR;
+}
+
 status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     ATRACE_CALL();
     BQ_LOGV("requestBuffer: slot %d", slot);
@@ -124,7 +139,6 @@ status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     return NO_ERROR;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 status_t BufferQueueProducer::extendSlotCount(int size) {
     ATRACE_CALL();
 
@@ -165,7 +179,6 @@ status_t BufferQueueProducer::extendSlotCount(int size) {
 
     return NO_ERROR;
 }
-#endif
 
 status_t BufferQueueProducer::setMaxDequeuedBufferCount(
         int maxDequeuedBuffers) {
@@ -481,6 +494,7 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     bool attachedByConsumer = false;
 
     sp<IConsumerListener> listener;
+    bool wasBufferReleased = false;
     bool callOnFrameDequeued = false;
     uint64_t bufferId = 0; // Only used if callOnFrameDequeued == true
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
@@ -591,6 +605,9 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
                                           buffer->getLayerCount(), buffer->getUsage());
                 }
             }
+
+            wasBufferReleased = mSlots[found].mGraphicBuffer != nullptr;
+
             mSlots[found].mAcquireCalled = false;
             mSlots[found].mGraphicBuffer = nullptr;
             mSlots[found].mRequestBufferCalled = false;
@@ -653,6 +670,9 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
     } // Autolock scope
 
     if (returnFlags & BUFFER_NEEDS_REALLOCATION) {
+        if (listener != nullptr && wasBufferReleased) {
+            listener->onBuffersReleased();
+        }
         BQ_LOGV("dequeueBuffer: allocating a new buffer for slot %d", *outSlot);
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
@@ -944,6 +964,9 @@ status_t BufferQueueProducer::attachBuffer(int* outSlot,
     mSlots[*outSlot].mRequestBufferCalled = true;
     mSlots[*outSlot].mAcquireCalled = false;
     mSlots[*outSlot].mNeedsReallocation = false;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+    mSlots[*outSlot].mAdditionalOptionsGenerationId = mCore->mAdditionalOptionsGenerationId;
+#endif
     mCore->mActiveBuffers.insert(found);
     VALIDATE_CONSISTENCY();
 
@@ -1084,10 +1107,27 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         item.mSlot = slot;
         item.mFence = acquireFence;
         item.mFenceTime = acquireFenceTime;
-        item.mIsDroppable = mCore->mAsyncMode ||
-                (mConsumerIsSurfaceFlinger && mCore->mQueueBufferCanDrop) ||
-                (mCore->mLegacyBufferDrop && mCore->mQueueBufferCanDrop) ||
-                (mCore->mSharedBufferMode && mCore->mSharedBufferSlot == slot);
+        if (mCore->mAsyncMode) {
+            item.mIsDroppable = true;
+            BQ_LOGV("queueBuffer: slot %d is droppable (mAsyncMode)", slot);
+        } else if (mConsumerIsSurfaceFlinger && mCore->mQueueBufferCanDrop) {
+            item.mIsDroppable = true;
+            BQ_LOGV("queueBuffer: slot %d is droppable (mConsumerIsSurfaceFlinger && "
+                    "mQueueBufferCanDrop)",
+                    slot);
+        } else if (mCore->mLegacyBufferDrop && mCore->mQueueBufferCanDrop) {
+            item.mIsDroppable = true;
+            BQ_LOGV("queueBuffer: slot %d is droppable (mLegacyBufferDrop && mQueueBufferCanDrop)",
+                    slot);
+        } else if (mCore->mSharedBufferMode && mCore->mSharedBufferSlot == slot) {
+            item.mIsDroppable = true;
+            BQ_LOGV("queueBuffer: slot %d is droppable (mSharedBufferMode && mSharedBufferSlot == "
+                    "slot)",
+                    slot);
+        } else {
+            item.mIsDroppable = false;
+        }
+
         item.mSurfaceDamage = surfaceDamage;
         item.mQueuedBuffer = true;
         item.mAutoRefresh = mCore->mSharedBufferMode && mCore->mAutoRefresh;
@@ -1110,6 +1150,9 @@ status_t BufferQueueProducer::queueBuffer(int slot,
             // and simply queue this buffer
             mCore->mQueue.push_back(item);
             frameAvailableListener = mCore->mConsumerListener;
+            BQ_LOGV("queueBuffer: buffer added to end of queue since queue was empty "
+                    "slot=%d",
+                    slot);
         } else {
             // When the queue is not empty, we need to look at the last buffer
             // in the queue to see if we need to replace it
@@ -1132,6 +1175,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
                         mCore->mActiveBuffers.erase(last.mSlot);
                         mCore->mFreeBuffers.push_back(last.mSlot);
                         output->bufferReplaced = true;
+                        output->bufferReplacedFrameId = mSlots[last.mSlot].mFrameNumber;
                     }
                 }
 
@@ -1147,9 +1191,15 @@ status_t BufferQueueProducer::queueBuffer(int slot,
                 // Overwrite the droppable buffer with the incoming one
                 mCore->mQueue.editItemAt(mCore->mQueue.size() - 1) = item;
                 frameReplacedListener = mCore->mConsumerListener;
+                BQ_LOGV("queueBuffer: buffer replaced in queue since last was droppable "
+                        "slot=%d",
+                        slot);
             } else {
                 mCore->mQueue.push_back(item);
                 frameAvailableListener = mCore->mConsumerListener;
+                BQ_LOGV("queueBuffer: buffer added to end of queue since last was not droppable "
+                        "slot=%d",
+                        slot);
             }
         }
 
@@ -1173,8 +1223,16 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         VALIDATE_CONSISTENCY();
 
         connectedApi = mCore->mConnectedApi;
-        if (flags::bq_producer_throttles_only_async_mode()) {
-            enableEglCpuThrottling = mCore->mAsyncMode || mCore->mDequeueBufferCannotBlock;
+        if (com::android::graphics::libgui::flags::bq_producer_backpressure_control()) {
+            if (mCore->mProducerThrottlingEnabled) {
+                // throttling is enabled via setProducerThrottlingEnabled(true) [default]
+                enableEglCpuThrottling = true;
+            } else {
+                // throttling is disabled via setProducerThrottlingEnabled(false), in this case
+                // we disable it only if we're not in async mode (since async mode doesn't
+                // throttle in dequeueBuffer()) or if mDequeueBufferCannotBlock is set.
+                enableEglCpuThrottling = mCore->mAsyncMode || mCore->mDequeueBufferCannotBlock;
+            }
         }
         lastQueuedFence = std::move(mLastQueueBufferFence);
 
@@ -1369,6 +1427,9 @@ int BufferQueueProducer::query(int what, int *outValue) {
 status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
         int api, bool producerControlledByApp, QueueBufferOutput *output) {
     ATRACE_CALL();
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(REMOVE_CONTROLLED_BY_APP)
+    producerControlledByApp = false;
+#endif
     std::lock_guard<std::mutex> lock(mCore->mMutex);
     mConsumerName = mCore->mConsumerName;
     BQ_LOGV("connect: api=%d producerControlledByApp=%s", api,
@@ -1422,9 +1483,7 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
             output->nextFrameNumber = mCore->mFrameCounter + 1;
             output->bufferReplaced = false;
             output->maxBufferCount = mCore->mMaxBufferCount;
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
             output->isSlotExpansionAllowed = mCore->mAllowExtendedSlotCount;
-#endif
 
             if (listener != nullptr) {
                 // Set up a death notification so that we can disconnect
@@ -1442,6 +1501,8 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
 #endif
                 mCore->mConnectedProducerListener = listener;
                 mCore->mBufferReleasedCbEnabled = listener->needsReleaseNotify();
+                mCore->mBufferAcquiredCbEnabled = listener->needsAcquiredNotify();
+                mCore->mBufferDroppedCbEnabled = listener->needsDroppedNotify();
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
                 mCore->mBufferAttachedCbEnabled = listener->needsAttachNotify();
 #endif
@@ -1809,6 +1870,28 @@ status_t BufferQueueProducer::setLegacyBufferDrop(bool drop) {
     return NO_ERROR;
 }
 
+status_t BufferQueueProducer::setPresentMode(int32_t mode) {
+    ATRACE_CALL();
+    std::string_view mode_sv = BufferQueueHelpers::presentModeToString(mode);
+    BQ_LOGV("setPresentMode: mode = %.*s", static_cast<int>(mode_sv.length()), mode_sv.data());
+
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    switch (mode) {
+        case ANATIVEWINDOW_PRESENT_DEFAULT:
+            mCore->mLegacyBufferDrop = true;
+            mCore->mPresentMode = mode;
+            return NO_ERROR;
+        case ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY:
+            mCore->mLegacyBufferDrop = false;
+            mCore->mPresentMode = mode;
+            return NO_ERROR;
+        case ANATIVEWINDOW_PRESENT_UNKNOWN:
+        default:
+            BQ_LOGE("setPresentMode: unknown mode %d", mode);
+            return BAD_VALUE;
+    }
+}
+
 status_t BufferQueueProducer::getLastQueuedBuffer(sp<GraphicBuffer>* outBuffer,
         sp<Fence>* outFence, float outTransformMatrix[16]) {
     ATRACE_CALL();
@@ -1932,6 +2015,24 @@ status_t BufferQueueProducer::setFrameRate(float frameRate, int8_t compatibility
     if (listener != nullptr) {
         listener->onSetFrameRate(frameRate, compatibility, changeFrameRateStrategy);
     }
+    return NO_ERROR;
+}
+
+status_t BufferQueueProducer::setProducerThrottlingEnabled(bool enabled) {
+    ATRACE_FORMAT("%s(%s)", __func__, enabled ? "true" : "false");
+    BQ_LOGV("setProducerThrottlingEnabled: %s", enabled ? "true" : "false");
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    mCore->mProducerThrottlingEnabled = enabled;
+    return NO_ERROR;
+}
+
+status_t BufferQueueProducer::isProducerThrottlingEnabled(bool* outEnabled) const {
+    ATRACE_FORMAT("%s(%p)", __func__, outEnabled);
+    if (!outEnabled) {
+        return BAD_VALUE;
+    }
+    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    *outEnabled = mCore->mProducerThrottlingEnabled;
     return NO_ERROR;
 }
 

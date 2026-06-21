@@ -40,6 +40,7 @@ public:
     virtual status_t activate(void* ident, bool enabled) override;
     virtual status_t setDelay(void* ident, int handle, int64_t ns) override;
     int32_t getAccelHandle() const { return mAccelerometer.getHandle(); }
+    int32_t getAccelType() const { return mAccelerometer.getType(); }
 };
 
 // ---------------------------------------------------------------------------

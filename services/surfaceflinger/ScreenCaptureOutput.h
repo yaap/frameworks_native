@@ -66,6 +66,8 @@ protected:
     bool getSkipColorTransform() const override { return false; }
     renderengine::DisplaySettings generateClientCompositionDisplaySettings(
             const std::shared_ptr<renderengine::ExternalTexture>& buffer) const override;
+    const aidl::android::hardware::graphics::composer3::OverlayProperties* getOverlaySupport()
+            override;
 
 private:
     std::unordered_map<int32_t, aidl::android::hardware::graphics::composer3::Luts> generateLuts();

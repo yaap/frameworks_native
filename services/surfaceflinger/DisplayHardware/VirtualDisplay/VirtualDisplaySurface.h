@@ -31,8 +31,8 @@
 #include <string>
 #include <variant>
 
+#include "DisplayHardware/HwcSlotTracker.h"
 #include "SinkSurfaceHelper.h"
-#include "VirtualDisplayBufferSlotTracker.h"
 
 namespace android {
 
@@ -151,7 +151,7 @@ private:
     uint32_t mSinkWidth;
     uint32_t mSinkHeight;
     std::optional<ui::Size> mPendingResize;
-    VirtualDisplayBufferSlotTracker mSlotTracker;
+    HwcSlotTracker mSlotTracker;
 
     sp<BufferItemConsumer> mRendererConsumer;
     sp<RenderConsumerListener> mRendererListener;

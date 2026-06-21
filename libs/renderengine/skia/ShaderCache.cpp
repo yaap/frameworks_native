@@ -19,6 +19,7 @@
 #include <SkData.h>
 #include <gui/TraceUtils.h>
 #include <include/gpu/ganesh/GrDirectContext.h>
+#include <include/gpu/graphite/Context.h>
 #include <log/log.h>
 #include <openssl/sha.h>
 
@@ -36,17 +37,25 @@ namespace skiapipeline {
 // Cache size limits.
 static const size_t maxKeySize = 2048;
 static const size_t maxValueSize = 4 * 1024 * 1024;
-static const size_t maxTotalSize = 8 * 1024 * 1024;
+// We need to be prepared to store two VkPipelineCache blobs (one for unprotected, one for
+// protected), and each one could take up maxKeySize + maxValueSize. Additionally, the cache needs
+// to store a SHA256 checksum of itself (and a key).
+static const size_t maxTotalSize = maxKeySize + 256 + 2 * (maxKeySize + maxValueSize);
 static_assert(maxKeySize + maxValueSize < maxTotalSize);
 
 ShaderCache::ShaderCache() {
     // There is an "incomplete FileBlobCache type" compilation error, if ctor is moved to header.
 }
 
-ShaderCache ShaderCache::sCache;
+ShaderCache ShaderCache::sGaneshCache;
+ShaderCache ShaderCache::sGraphiteCache;
 
-ShaderCache& ShaderCache::get() {
-    return sCache;
+ShaderCache& ShaderCache::get(renderengine::RenderEngine::SkiaBackend backend) {
+    if (backend == renderengine::RenderEngine::SkiaBackend::Ganesh) {
+        return sGaneshCache;
+    } else {
+        return sGraphiteCache;
+    }
 }
 
 bool ShaderCache::validateCache(const void* identity, ssize_t size) {
@@ -186,7 +195,7 @@ void ShaderCache::store(const SkData& key, const SkData& data, const SkString& /
     mNumShadersCachedInRam++;
     mShadersCachedSinceLastCall++;
     mTotalShadersCompiled++;
-    ATRACE_FORMAT(LOG_TAG " RAM cache: %d shaders", mNumShadersCachedInRam);
+    ATRACE_FORMAT(LOG_TAG "ShaderCache::store: %d shaders", mNumShadersCachedInRam);
 
     if (!mInitialized) {
         return;
@@ -202,11 +211,11 @@ void ShaderCache::store(const SkData& key, const SkData& data, const SkString& /
     const void* value = data.data();
 
     if (mInStoreVkPipelineInProgress) {
-        if (mOldPipelineCacheSize == -1) {
+        if (mOldPipelineCacheSize == kInvalidCacheSize) {
             // Record the initial pipeline cache size stored in the file.
             mOldPipelineCacheSize = mBlobCache->get(key.data(), keySize, nullptr, 0);
         }
-        if (mNewPipelineCacheSize != -1 && mNewPipelineCacheSize == valueSize) {
+        if (mNewPipelineCacheSize != kInvalidCacheSize && mNewPipelineCacheSize == valueSize) {
             // There has not been change in pipeline cache size. Stop trying to save.
             mTryToStorePipelineCache = false;
             return;
@@ -216,7 +225,7 @@ void ShaderCache::store(const SkData& key, const SkData& data, const SkString& /
         mCacheDirty = true;
         // If there are new shaders compiled, we probably have new pipeline state too.
         // Store pipeline cache on the next flush.
-        mNewPipelineCacheSize = -1;
+        mNewPipelineCacheSize = kInvalidCacheSize;
         mTryToStorePipelineCache = true;
     }
     set(key.data(), keySize, value, valueSize);
@@ -239,7 +248,48 @@ void ShaderCache::store(const SkData& key, const SkData& data, const SkString& /
     }
 }
 
-void ShaderCache::onVkFrameFlushed(GrDirectContext* context) {
+void ShaderCache::graphiteStore(const SkData& key, const SkData& data, bool isProtected) {
+    ATRACE_NAME("ShaderCache::graphiteStore");
+    std::lock_guard lock(mMutex);
+
+    if (!mInitialized) {
+        return;
+    }
+
+    size_t valueSize = data.size();
+    size_t keySize = key.size();
+    if (keySize == 0 || valueSize == 0 || valueSize >= maxValueSize) {
+        ALOGW("ShaderCache::graphiteStore: sizes %d %d not allowed", (int)keySize, (int)valueSize);
+        return;
+    }
+
+    size_t* lastSize =
+            isProtected ? &mLastGraphiteProtectedCacheSize : &mLastGraphiteUnprotectedCacheSize;
+    if (*lastSize == kInvalidCacheSize) {
+        // Retrieve the initial pipeline cache size stored in the file.
+        *lastSize = mBlobCache->get(key.data(), keySize, nullptr, 0);
+    }
+    if (valueSize == *lastSize) {
+        return; // no change in size
+    }
+    *lastSize = valueSize;
+
+    set(key.data(), keySize, data.data(), valueSize);
+
+    // The disk cache is out of date - try to update it
+    if (!mSavePending && mDeferredSaveDelayMs > 0) {
+        mSavePending = true;
+        std::thread deferredSaveThread([this]() {
+            usleep(mDeferredSaveDelayMs * 1000); // milliseconds to microseconds
+            std::lock_guard lock(mMutex);
+            saveToDiskLocked();
+            mSavePending = false;
+        });
+        deferredSaveThread.detach();
+    }
+}
+
+void ShaderCache::onGaneshVkFrameFlushed(GrDirectContext* context) {
     {
         mMutex.lock_shared();
         if (!mInitialized || !mTryToStorePipelineCache) {
@@ -249,8 +299,20 @@ void ShaderCache::onVkFrameFlushed(GrDirectContext* context) {
         mMutex.unlock_shared();
     }
     mInStoreVkPipelineInProgress = true;
-    context->storeVkPipelineCacheData();
+    context->storeVkPipelineCacheData(maxValueSize);
     mInStoreVkPipelineInProgress = false;
+}
+
+void ShaderCache::onGraphiteVkFrameFlushed(std::shared_ptr<skgpu::graphite::Context> context) {
+    {
+        mMutex.lock_shared();
+        if (!mInitialized) {
+            mMutex.unlock_shared();
+            return;
+        }
+        mMutex.unlock_shared();
+    }
+    context->syncPipelineData(maxValueSize);
 }
 
 } /* namespace skiapipeline */

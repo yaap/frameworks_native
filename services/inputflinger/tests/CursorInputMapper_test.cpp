@@ -16,21 +16,19 @@
 
 #include "CursorInputMapper.h"
 
-#include <list>
 #include <optional>
 #include <string>
 #include <tuple>
-#include <variant>
 
 #include <android-base/logging.h>
 #include <android/configuration.h>
-#include <android_companion_virtualdevice_flags.h>
 #include <com_android_input_flags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/AccelerationCurve.h>
 #include <input/DisplayViewport.h>
-#include <input/InputEventLabels.h>
+#include <input/Input.h>
+#include <input/ScopedFlagOverride.h>
 #include <linux/input-event-codes.h>
 #include <linux/input.h>
 #include <utils/Timers.h>
@@ -39,7 +37,6 @@
 #include "InputReaderBase.h"
 #include "InterfaceMocks.h"
 #include "NotifyArgs.h"
-#include "ScopedFlagOverride.h"
 #include "TestEventMatchers.h"
 #include "ui/Rotation.h"
 
@@ -116,31 +113,27 @@ DisplayViewport createSecondaryViewport() {
 // ballistics was changed. To do this, we make some matchers that only check the sign of a
 // particular axis.
 MATCHER_P(WithPositiveAxis, axis, "MotionEvent with a positive axis value") {
-    *result_listener << "expected 1 pointer with a positive "
-                     << InputEventLookup::getAxisLabel(axis) << " axis but got "
-                     << arg.pointerCoords.size() << " pointers, with axis value "
-                     << arg.pointerCoords[0].getAxisValue(axis);
+    *result_listener << "expected 1 pointer with a positive " << MotionEvent::getLabelOrCode(axis)
+                     << " axis but got " << arg.pointerCoords.size()
+                     << " pointers, with axis value " << arg.pointerCoords[0].getAxisValue(axis);
     return arg.pointerCoords.size() == 1 && arg.pointerCoords[0].getAxisValue(axis) > 0;
 }
 
 MATCHER_P(WithZeroAxis, axis, "MotionEvent with a zero axis value") {
-    *result_listener << "expected 1 pointer with a zero " << InputEventLookup::getAxisLabel(axis)
+    *result_listener << "expected 1 pointer with a zero " << MotionEvent::getLabelOrCode(axis)
                      << " axis but got " << arg.pointerCoords.size()
                      << " pointers, with axis value " << arg.pointerCoords[0].getAxisValue(axis);
     return arg.pointerCoords.size() == 1 && arg.pointerCoords[0].getAxisValue(axis) == 0;
 }
 
 MATCHER_P(WithNegativeAxis, axis, "MotionEvent with a negative axis value") {
-    *result_listener << "expected 1 pointer with a negative "
-                     << InputEventLookup::getAxisLabel(axis) << " axis but got "
-                     << arg.pointerCoords.size() << " pointers, with axis value "
-                     << arg.pointerCoords[0].getAxisValue(axis);
+    *result_listener << "expected 1 pointer with a negative " << MotionEvent::getLabelOrCode(axis)
+                     << " axis but got " << arg.pointerCoords.size()
+                     << " pointers, with axis value " << arg.pointerCoords[0].getAxisValue(axis);
     return arg.pointerCoords.size() == 1 && arg.pointerCoords[0].getAxisValue(axis) < 0;
 }
 
 } // namespace
-
-namespace vd_flags = android::companion::virtualdevice::flags;
 
 /**
  * Unit tests for CursorInputMapper.
@@ -151,11 +144,11 @@ namespace vd_flags = android::companion::virtualdevice::flags;
  * TODO(b/283812079): move the remaining CursorInputMapper tests here. The ones that are left all
  *   depend on viewport association, for which we'll need to fake InputDeviceContext.
  */
-class CursorInputMapperUnitTestBase : public InputMapperUnitTest {
+class CursorInputMapperUnitTestBase : public VerifyingInputMapperUnitTest {
 protected:
     void SetUp() override { SetUp(BUS_USB, /*isExternal=*/false); }
     void SetUp(int bus, bool isExternal) override {
-        InputMapperUnitTest::SetUp(bus, isExternal);
+        VerifyingInputMapperUnitTest::SetUp(bus, isExternal);
 
         // Current scan code state - all keys are UP by default
         setScanCodeState(KeyState::UP,
@@ -184,12 +177,10 @@ protected:
                 enabled ? PointerCaptureMode::ABSOLUTE : PointerCaptureMode::UNCAPTURED;
         mReaderConfiguration.pointerCaptureRequest.seq = 1;
         int32_t generation = mDevice->getGeneration();
-        std::list<NotifyArgs> args =
-                mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                     InputReaderConfiguration::Change::POINTER_CAPTURE);
-        ASSERT_THAT(args,
-                    ElementsAre(VariantWith<NotifyDeviceResetArgs>(
-                            AllOf(WithDeviceId(DEVICE_ID), WithEventTime(ARBITRARY_TIME)))));
+        reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                          InputReaderConfiguration::Change::POINTER_CAPTURE);
+        mFakeListener.expectDeviceReset(
+                AllOf(WithDeviceId(DEVICE_ID), WithEventTime(ARBITRARY_TIME)));
 
         // Check that generation also got bumped
         ASSERT_GT(mDevice->getGeneration(), generation);
@@ -197,20 +188,16 @@ protected:
 
     void testRotation(int32_t originalX, int32_t originalY,
                       const testing::Matcher<NotifyMotionArgs>& coordsMatcher) {
-        std::list<NotifyArgs> args;
-        args += process(ARBITRARY_TIME, EV_REL, REL_X, originalX);
-        args += process(ARBITRARY_TIME, EV_REL, REL_Y, originalY);
-        args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-        ASSERT_THAT(args,
-                    ElementsAre(VariantWith<NotifyMotionArgs>(
-                            AllOf(WithMotionAction(ACTION_MOVE), coordsMatcher))));
+        process(ARBITRARY_TIME, EV_REL, REL_X, originalX);
+        process(ARBITRARY_TIME, EV_REL, REL_Y, originalY);
+        process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+        mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE), coordsMatcher));
     }
 };
 
 class CursorInputMapperUnitTest : public CursorInputMapperUnitTestBase {
 protected:
     void SetUp() override {
-        vd_flags::high_resolution_scroll(false);
         CursorInputMapperUnitTestBase::SetUp();
     }
 };
@@ -235,97 +222,78 @@ TEST_F(CursorInputMapperUnitTest, GetSourcesReturnsTrackballInNavigationMode) {
  */
 TEST_F(CursorInputMapperUnitTest, HoverAndLeftButtonPress) {
     createMapper();
-    std::list<NotifyArgs> args;
-
     // Move the cursor a little
-    args += process(EV_REL, REL_X, 10);
-    args += process(EV_REL, REL_Y, 20);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args, ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
+    process(EV_REL, REL_X, 10);
+    process(EV_REL, REL_Y, 20);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(WithMotionAction(HOVER_MOVE));
 
     // Now click the mouse button
-    args.clear();
-    args += process(EV_KEY, BTN_LEFT, 1);
-    args += process(EV_SYN, SYN_REPORT, 0);
+    process(EV_KEY, BTN_LEFT, 1);
+    process(EV_SYN, SYN_REPORT, 0);
 
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY)))));
-    ASSERT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN), WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
 
     // Move some more.
-    args.clear();
-    args += process(EV_REL, REL_X, 10);
-    args += process(EV_REL, REL_Y, 20);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args, ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_MOVE))));
+    process(EV_REL, REL_X, 10);
+    process(EV_REL, REL_Y, 20);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(WithMotionAction(ACTION_MOVE));
 
     // Release the button
-    args.clear();
-    args += process(EV_KEY, BTN_LEFT, 0);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_RELEASE),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY))),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
+    process(EV_KEY, BTN_LEFT, 0);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY)));
+    mFakeListener.expectMotion(WithMotionAction(ACTION_UP));
+    mFakeListener.expectMotion(WithMotionAction(HOVER_MOVE));
 }
 
 TEST_F(CursorInputMapperUnitTest, MoveAndButtonChangeInSameFrame) {
     createMapper();
-    std::list<NotifyArgs> args;
 
     // Move the cursor and press the button
-    args += process(EV_REL, REL_X, -10);
-    args += process(EV_REL, REL_Y, 20);
-    args += process(EV_KEY, BTN_LEFT, 1);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
-                                          WithNegativeAxis(AXIS_RELATIVE_X),
-                                          WithPositiveAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_DOWN),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
-                                          WithZeroAxis(AXIS_RELATIVE_X),
-                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(1.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
-                                          WithZeroAxis(AXIS_RELATIVE_X),
-                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(1.0f)))));
+    process(EV_REL, REL_X, -10);
+    process(EV_REL, REL_Y, 20);
+    process(EV_KEY, BTN_LEFT, 1);
+    process(EV_SYN, SYN_REPORT, 0);
+
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                     WithNegativeAxis(AXIS_RELATIVE_X),
+                                     WithPositiveAxis(AXIS_RELATIVE_Y), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_DOWN),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithZeroAxis(AXIS_RELATIVE_X), WithZeroAxis(AXIS_RELATIVE_Y),
+                                     WithPressure(1.0f)));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_PRESS), WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                  WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY), WithZeroAxis(AXIS_RELATIVE_X),
+                  WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(1.0f)));
 
     // Move some more and release the button
-    args.clear();
-    args += process(EV_REL, REL_X, 10);
-    args += process(EV_REL, REL_Y, -5);
-    args += process(EV_KEY, BTN_LEFT, 0);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_MOVE),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
-                                          WithPositiveAxis(AXIS_RELATIVE_X),
-                                          WithNegativeAxis(AXIS_RELATIVE_Y), WithPressure(1.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_RELEASE),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                                          WithButtonState(0), WithZeroAxis(AXIS_RELATIVE_X),
-                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
-                                          WithZeroAxis(AXIS_RELATIVE_X),
-                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
-                                          WithZeroAxis(AXIS_RELATIVE_X),
-                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f)))));
+    process(EV_REL, REL_X, 10);
+    process(EV_REL, REL_Y, -5);
+    process(EV_KEY, BTN_LEFT, 0);
+    process(EV_SYN, SYN_REPORT, 0);
+
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithPositiveAxis(AXIS_RELATIVE_X),
+                                     WithNegativeAxis(AXIS_RELATIVE_Y), WithPressure(1.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithButtonState(0), WithZeroAxis(AXIS_RELATIVE_X),
+                                     WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
+                                     WithZeroAxis(AXIS_RELATIVE_X), WithZeroAxis(AXIS_RELATIVE_Y),
+                                     WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                     WithZeroAxis(AXIS_RELATIVE_X), WithZeroAxis(AXIS_RELATIVE_Y),
+                                     WithPressure(0.0f)));
 }
 
 /**
@@ -335,62 +303,43 @@ TEST_F(CursorInputMapperUnitTest, MoveAndButtonChangeInSameFrame) {
 TEST_F(CursorInputMapperUnitTest, SwappedPrimaryButtonPress) {
     mReaderConfiguration.mouseSwapPrimaryButtonEnabled = true;
     createMapper();
-    std::list<NotifyArgs> args;
 
     // Now click the left mouse button , expect a `SECONDARY_BUTTON` button state.
-    args.clear();
-    args += process(EV_KEY, BTN_LEFT, 1);
-    args += process(EV_SYN, SYN_REPORT, 0);
+    process(EV_KEY, BTN_LEFT, 1);
+    process(EV_SYN, SYN_REPORT, 0);
 
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY)))));
-    ASSERT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN), WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY)));
 
     // Release the left button.
-    args.clear();
-    args += process(EV_KEY, BTN_LEFT, 0);
-    args += process(EV_SYN, SYN_REPORT, 0);
+    process(EV_KEY, BTN_LEFT, 0);
+    process(EV_SYN, SYN_REPORT, 0);
 
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_RELEASE),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY))),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY)));
+    mFakeListener.expectMotion(WithMotionAction(ACTION_UP));
+    mFakeListener.expectMotion(WithMotionAction(HOVER_MOVE));
 
     // Now click the right mouse button , expect a `PRIMARY_BUTTON` button state.
-    args.clear();
-    args += process(EV_KEY, BTN_RIGHT, 1);
-    args += process(EV_SYN, SYN_REPORT, 0);
+    process(EV_KEY, BTN_RIGHT, 1);
+    process(EV_SYN, SYN_REPORT, 0);
 
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY)))));
-    ASSERT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN), WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
 
     // Release the right button.
-    args.clear();
-    args += process(EV_KEY, BTN_RIGHT, 0);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
-
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_RELEASE),
-                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY))),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
+    process(EV_KEY, BTN_RIGHT, 0);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY)));
+    mFakeListener.expectMotion(WithMotionAction(ACTION_UP));
+    mFakeListener.expectMotion(WithMotionAction(HOVER_MOVE));
 }
 
 /**
@@ -405,73 +354,57 @@ TEST_F(CursorInputMapperUnitTest, SwappedPrimaryButtonPress) {
 TEST_F(CursorInputMapperUnitTest, ProcessPointerCapture) {
     createMapper();
     setPointerCapture(true);
-    std::list<NotifyArgs> args;
 
     // Move.
-    args += process(EV_REL, REL_X, 10);
-    args += process(EV_REL, REL_Y, 20);
-    args += process(EV_SYN, SYN_REPORT, 0);
+    process(EV_REL, REL_X, 10);
+    process(EV_REL, REL_Y, 20);
+    process(EV_SYN, SYN_REPORT, 0);
 
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE),
-                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE), WithCoords(10.0f, 20.0f),
-                              WithRelativeMotion(10.0f, 20.0f),
-                              WithCursorPosition(INVALID_CURSOR_POSITION,
-                                                 INVALID_CURSOR_POSITION)))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_MOVE), WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                  WithCoords(10.0f, 20.0f), WithRelativeMotion(10.0f, 20.0f),
+                  WithCursorPosition(INVALID_CURSOR_POSITION, INVALID_CURSOR_POSITION)));
 
     // Button press.
-    args.clear();
-    args += process(EV_KEY, BTN_MOUSE, 1);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_DOWN),
-                                          WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                                          WithCoords(0.0f, 0.0f), WithPressure(1.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                                          WithCoords(0.0f, 0.0f), WithPressure(1.0f)))));
+    process(EV_KEY, BTN_MOUSE, 1);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_DOWN),
+                                     WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
 
     // Button release.
-    args.clear();
-    args += process(EV_KEY, BTN_MOUSE, 0);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP))));
-    ASSERT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(AllOf(WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                                                         WithCoords(0.0f, 0.0f),
-                                                         WithPressure(0.0f)))));
+    process(EV_KEY, BTN_MOUSE, 0);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_UP),
+                                     WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
 
     // Another move.
-    args.clear();
-    args += process(EV_REL, REL_X, 30);
-    args += process(EV_REL, REL_Y, 40);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE),
-                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE), WithCoords(30.0f, 40.0f),
-                              WithRelativeMotion(30.0f, 40.0f)))));
+    process(EV_REL, REL_X, 30);
+    process(EV_REL, REL_Y, 40);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE),
+                                     WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithCoords(30.0f, 40.0f), WithRelativeMotion(30.0f, 40.0f)));
 
     // Disable pointer capture. Afterwards, events should be generated the usual way.
     setPointerCapture(false);
     const auto expectedCoords = WithCoords(0, 0);
     const auto expectedCursorPosition =
             WithCursorPosition(INVALID_CURSOR_POSITION, INVALID_CURSOR_POSITION);
-    args.clear();
-    args += process(EV_REL, REL_X, 10);
-    args += process(EV_REL, REL_Y, 20);
-    args += process(EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
-                              expectedCoords, expectedCursorPosition,
-                              WithPositiveAxis(AMOTION_EVENT_AXIS_RELATIVE_X),
-                              WithPositiveAxis(AMOTION_EVENT_AXIS_RELATIVE_Y)))));
+    process(EV_REL, REL_X, 10);
+    process(EV_REL, REL_Y, 20);
+    process(EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
+                                     expectedCoords, expectedCursorPosition,
+                                     WithPositiveAxis(AMOTION_EVENT_AXIS_RELATIVE_X),
+                                     WithPositiveAxis(AMOTION_EVENT_AXIS_RELATIVE_Y)));
 }
 
 TEST_F(CursorInputMapperUnitTest, PopulateDeviceInfoReturnsScaledRangeInNavigationMode) {
@@ -498,145 +431,104 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldSetAllFieldsAndIncludeGlobalMetaS
     EXPECT_CALL(mMockInputReaderContext, getGlobalMetaState())
             .WillRepeatedly(Return(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON));
 
-    std::list<NotifyArgs> args;
-
     // Button press.
     // Mostly testing non x/y behavior here so we don't need to check again elsewhere.
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_PRESS))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithEventTime(ARBITRARY_TIME), WithDeviceId(DEVICE_ID),
-                              WithSource(AINPUT_SOURCE_TRACKBALL),
-                              WithFlags(ftl::Flags<MotionFlag>()), WithPolicyFlags(0),
-                              WithMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON),
-                              WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY), WithPointerCount(1),
-                              WithPointerId(0, 0), WithToolType(ToolType::MOUSE),
-                              WithCoords(0.0f, 0.0f), WithPressure(1.0f),
-                              WithPrecision(TRACKBALL_MOVEMENT_THRESHOLD,
-                                            TRACKBALL_MOVEMENT_THRESHOLD),
-                              WithDownTime(ARBITRARY_TIME)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    auto commonMatcher =
+            AllOf(WithDeviceId(DEVICE_ID), WithSource(AINPUT_SOURCE_TRACKBALL),
+                  WithFlags(ftl::Flags<MotionFlag>()), WithPolicyFlags(0),
+                  WithMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON), WithPointerCount(1),
+                  WithPointerId(0, 0), WithToolType(ToolType::MOUSE), WithCoords(0.0f, 0.0f),
+                  WithPrecision(TRACKBALL_MOVEMENT_THRESHOLD, TRACKBALL_MOVEMENT_THRESHOLD),
+                  WithDownTime(ARBITRARY_TIME));
 
-    // Button release.  Should have same down time.
-    args += process(ARBITRARY_TIME + 1, EV_KEY, BTN_MOUSE, 0);
-    args += process(ARBITRARY_TIME + 1, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithEventTime(ARBITRARY_TIME + 1), WithDeviceId(DEVICE_ID),
-                              WithSource(AINPUT_SOURCE_TRACKBALL),
-                              WithFlags(ftl::Flags<MotionFlag>()), WithPolicyFlags(0),
-                              WithMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON),
-                              WithButtonState(0), WithPointerCount(1), WithPointerId(0, 0),
-                              WithToolType(ToolType::MOUSE), WithCoords(0.0f, 0.0f),
-                              WithPressure(0.0f),
-                              WithPrecision(TRACKBALL_MOVEMENT_THRESHOLD,
-                                            TRACKBALL_MOVEMENT_THRESHOLD),
-                              WithDownTime(ARBITRARY_TIME)))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN), WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                  WithPressure(1.0f), WithEventTime(ARBITRARY_TIME), commonMatcher));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_PRESS), WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                  WithPressure(1.0f), WithEventTime(ARBITRARY_TIME), commonMatcher));
+
+    // Button release. Should have same down time.
+    process(ARBITRARY_TIME + 1, EV_KEY, BTN_MOUSE, 0);
+    process(ARBITRARY_TIME + 1, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
+                                     WithPressure(0.0f), WithEventTime(ARBITRARY_TIME + 1),
+                                     commonMatcher));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
+                                     WithPressure(0.0f), WithEventTime(ARBITRARY_TIME + 1),
+                                     commonMatcher));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleIndependentXYUpdates) {
     mPropertyMap.addProperty("cursor.mode", "navigation");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
     // Motion in X but not Y.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
-                              WithPositiveAxis(AXIS_X), WithZeroAxis(AXIS_Y)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_X, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
+                                     WithPositiveAxis(AXIS_X), WithZeroAxis(AXIS_Y)));
 
     // Motion in Y but not X.
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, -2);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
-                              WithZeroAxis(AXIS_X), WithNegativeAxis(AXIS_Y)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_Y, -2);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
+                                     WithZeroAxis(AXIS_X), WithNegativeAxis(AXIS_Y)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleIndependentButtonUpdates) {
     mPropertyMap.addProperty("cursor.mode", "navigation");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
     // Button press.
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_PRESS))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithCoords(0.0f, 0.0f), WithPressure(1.0f)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN), WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_PRESS), WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
 
     // Button release.
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
+    process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_RELEASE), WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_UP), WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleCombinedXYAndButtonUpdates) {
     mPropertyMap.addProperty("cursor.mode", "navigation");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
     // Combined X, Y and Button.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 1);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, -2);
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
-                                          WithPositiveAxis(AXIS_X), WithNegativeAxis(AXIS_Y))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_DOWN), WithPressure(1.0f),
-                                          WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS), WithPressure(1.0f),
-                                          WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_X, 1);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, -2);
+    process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
+                                     WithPositiveAxis(AXIS_X), WithNegativeAxis(AXIS_Y)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_DOWN), WithPressure(1.0f),
+                                     WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS), WithPressure(1.0f),
+                                     WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y)));
 
     // Move X, Y a bit while pressed.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 2);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE), WithPressure(1.0f),
-                              WithPositiveAxis(AXIS_X), WithPositiveAxis(AXIS_Y)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_X, 2);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_MOVE), WithPressure(1.0f),
+                                     WithPositiveAxis(AXIS_X), WithPositiveAxis(AXIS_Y)));
 
     // Release Button.
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_RELEASE), WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_UP), WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessShouldNotRotateMotionsWhenOrientationAware) {
@@ -681,9 +573,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
 
     EXPECT_CALL((*mDevice), getAssociatedViewport)
             .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation90)));
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_NO_FATAL_FAILURE(testRotation( 0,  1, AllOf(WithNegativeAxis(X), WithZeroAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  1, AllOf(WithNegativeAxis(X), WithPositiveAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  0, AllOf(WithZeroAxis(X),     WithPositiveAxis(Y))));
@@ -695,8 +586,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
 
     EXPECT_CALL((*mDevice), getAssociatedViewport)
             .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation180)));
-    args = mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                InputReaderConfiguration::Change::DISPLAY_INFO);
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_NO_FATAL_FAILURE(testRotation( 0,  1, AllOf(WithZeroAxis(X),     WithNegativeAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  1, AllOf(WithNegativeAxis(X), WithNegativeAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  0, AllOf(WithNegativeAxis(X), WithZeroAxis(Y))));
@@ -708,8 +599,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
 
     EXPECT_CALL((*mDevice), getAssociatedViewport)
             .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation270)));
-    args = mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                InputReaderConfiguration::Change::DISPLAY_INFO);
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_NO_FATAL_FAILURE(testRotation( 0,  1, AllOf(WithPositiveAxis(X), WithZeroAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  1, AllOf(WithPositiveAxis(X), WithNegativeAxis(Y))));
     ASSERT_NO_FATAL_FAILURE(testRotation( 1,  0, AllOf(WithZeroAxis(X),     WithNegativeAxis(Y))));
@@ -739,10 +630,8 @@ TEST_F(CursorInputMapperUnitTest, PopulateDeviceInfoReturnsRangeFromPolicy) {
     // motion range.
     mFakePolicy->setDefaultPointerDisplayId(DISPLAY_ID);
     mFakePolicy->addDisplayViewport(createPrimaryViewport(ui::Rotation::Rotation0));
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(systemTime(), mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    ASSERT_THAT(args, testing::IsEmpty());
+    reconfigureMapper(systemTime(), mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
 
     InputDeviceInfo info2;
     mMapper->populateDeviceInfo(info2);
@@ -764,15 +653,12 @@ TEST_F(CursorInputMapperUnitTest, ConfigureDisplayIdWithAssociatedViewport) {
     EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(secondaryViewport));
     mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
-    std::list<NotifyArgs> args;
     // Ensure input events are generated for the secondary display.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
-                              WithDisplayId(SECONDARY_DISPLAY_ID), WithCoords(0.0f, 0.0f)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
+                                     WithDisplayId(SECONDARY_DISPLAY_ID), WithCoords(0.0f, 0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest,
@@ -788,83 +674,63 @@ TEST_F(CursorInputMapperUnitTest,
     // With PointerChoreographer enabled, there could be a PointerController for the associated
     // display even if it is different from the pointer display. So the mapper should generate an
     // event.
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
-                              WithDisplayId(SECONDARY_DISPLAY_ID), WithCoords(0.0f, 0.0f)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
+                                     WithDisplayId(SECONDARY_DISPLAY_ID), WithCoords(0.0f, 0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleAllButtonsWithZeroCoords) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
     // press BTN_LEFT, release BTN_LEFT
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_LEFT, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_PRESS))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY), WithCoords(0.0f, 0.0f),
-                              WithPressure(1.0f)))));
-    args.clear();
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_LEFT, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithButtonState(0), WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
-    args.clear();
+    process(ARBITRARY_TIME, EV_KEY, BTN_LEFT, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_DOWN),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    process(ARBITRARY_TIME, EV_KEY, BTN_LEFT, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
 
     // press BTN_RIGHT + BTN_MIDDLE, release BTN_RIGHT, release BTN_MIDDLE
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_RIGHT, 1);
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MIDDLE, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(ACTION_DOWN),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY |
-                                                          AMOTION_EVENT_BUTTON_TERTIARY))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY |
-                                                          AMOTION_EVENT_BUTTON_TERTIARY)))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithCoords(0.0f, 0.0f), WithPressure(1.0f)))));
-    args.clear();
-
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_RIGHT, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(BUTTON_RELEASE),
-                              WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY),
-                              WithCoords(0.0f, 0.0f), WithPressure(1.0f)))));
-    args.clear();
-
-    args += process(ARBITRARY_TIME, EV_KEY, BTN_MIDDLE, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithButtonState(0), WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
+    process(ARBITRARY_TIME, EV_KEY, BTN_RIGHT, 1);
+    process(ARBITRARY_TIME, EV_KEY, BTN_MIDDLE, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_DOWN),
+                  WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY | AMOTION_EVENT_BUTTON_TERTIARY),
+                  WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(BUTTON_PRESS),
+                  WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY | AMOTION_EVENT_BUTTON_TERTIARY),
+                  WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    process(ARBITRARY_TIME, EV_KEY, BTN_RIGHT, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE),
+                                     WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY),
+                                     WithCoords(0.0f, 0.0f), WithPressure(1.0f)));
+    process(ARBITRARY_TIME, EV_KEY, BTN_MIDDLE, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
 }
 
 class CursorInputMapperButtonKeyTest
@@ -878,27 +744,19 @@ TEST_P(CursorInputMapperButtonKeyTest, ProcessShouldHandleButtonKeyWithZeroCoord
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
-    args += process(ARBITRARY_TIME, EV_KEY, evdevCode, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyKeyArgs>(AllOf(WithKeyAction(AKEY_EVENT_ACTION_DOWN),
-                                                             WithKeyCode(expectedKeyCode))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_PRESS),
-                                          WithButtonState(expectedButtonState),
-                                          WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
-    args.clear();
-
-    args += process(ARBITRARY_TIME, EV_KEY, evdevCode, 0);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
-                                          WithCoords(0.0f, 0.0f), WithPressure(0.0f))),
-                            VariantWith<NotifyKeyArgs>(AllOf(WithKeyAction(AKEY_EVENT_ACTION_UP),
-                                                             WithKeyCode(expectedKeyCode)))));
+    process(ARBITRARY_TIME, EV_KEY, evdevCode, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectKey(
+            AllOf(WithKeyAction(AKEY_EVENT_ACTION_DOWN), WithKeyCode(expectedKeyCode)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_PRESS),
+                                     WithButtonState(expectedButtonState), WithCoords(0.0f, 0.0f),
+                                     WithPressure(0.0f)));
+    process(ARBITRARY_TIME, EV_KEY, evdevCode, 0);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f)));
+    mFakeListener.expectKey(
+            AllOf(WithKeyAction(AKEY_EVENT_ACTION_UP), WithKeyCode(expectedKeyCode)));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -913,118 +771,97 @@ TEST_F(CursorInputMapperUnitTest, ProcessWhenModeIsPointerShouldKeepZeroCoords) 
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
 
-    std::list<NotifyArgs> args;
-
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithSource(AINPUT_SOURCE_MOUSE), WithMotionAction(HOVER_MOVE),
-                              WithCoords(0.0f, 0.0f), WithPressure(0.0f), WithSize(0.0f),
-                              WithTouchDimensions(0.0f, 0.0f), WithToolDimensions(0.0f, 0.0f),
-                              WithOrientation(0.0f), WithDistance(0.0f)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithSource(AINPUT_SOURCE_MOUSE), WithMotionAction(HOVER_MOVE),
+                                     WithCoords(0.0f, 0.0f), WithPressure(0.0f), WithSize(0.0f),
+                                     WithTouchDimensions(0.0f, 0.0f),
+                                     WithToolDimensions(0.0f, 0.0f), WithOrientation(0.0f),
+                                     WithDistance(0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessRegularScroll) {
     createMapper();
 
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
-                                          WithScroll(1.0f, 1.0f)))));
-    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithSource(AINPUT_SOURCE_MOUSE))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                     WithSource(AINPUT_SOURCE_MOUSE), WithScroll(1.0f, 1.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessHighResScroll) {
-    vd_flags::high_resolution_scroll(true);
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     createMapper();
 
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
-                                          WithScroll(0.5f, 0.5f)))));
-    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithSource(AINPUT_SOURCE_MOUSE))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                     WithSource(AINPUT_SOURCE_MOUSE), WithScroll(0.5f, 0.5f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, HighResScrollIgnoresRegularScroll) {
-    vd_flags::high_resolution_scroll(true);
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     createMapper();
 
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
-                                          WithScroll(0.5f, 0.5f)))));
-    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithSource(AINPUT_SOURCE_MOUSE))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                     WithSource(AINPUT_SOURCE_MOUSE), WithScroll(0.5f, 0.5f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessReversedVerticalScroll) {
     mReaderConfiguration.mouseReverseVerticalScrollingEnabled = true;
     createMapper();
 
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
     // Reversed vertical scrolling only affects the y-axis, expect it to be -1.0f to indicate the
     // inverted scroll direction.
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
-                                          WithScroll(1.0f, -1.0f)))));
-    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithSource(AINPUT_SOURCE_MOUSE))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                     WithSource(AINPUT_SOURCE_MOUSE), WithScroll(1.0f, -1.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ProcessHighResReversedVerticalScroll) {
     mReaderConfiguration.mouseReverseVerticalScrollingEnabled = true;
-    vd_flags::high_resolution_scroll(true);
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
             .WillRepeatedly(Return(true));
     createMapper();
 
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE)),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
-                                          WithScroll(0.5f, -0.5f)))));
-    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithSource(AINPUT_SOURCE_MOUSE))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE)));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                     WithSource(AINPUT_SOURCE_MOUSE), WithScroll(0.5f, -0.5f)));
 }
 
 /**
@@ -1035,34 +872,24 @@ TEST_F(CursorInputMapperUnitTest, PointerCaptureDisablesVelocityProcessing) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
 
-    NotifyMotionArgs motionArgs;
-    std::list<NotifyArgs> args;
-
     // Move and verify scale is applied.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithSource(AINPUT_SOURCE_MOUSE), WithMotionAction(HOVER_MOVE)))));
-    motionArgs = std::get<NotifyMotionArgs>(args.front());
-    const float relX = motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X);
-    const float relY = motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y);
-    ASSERT_GT(relX, 10);
-    ASSERT_GT(relY, 20);
-    args.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    NotifyMotionArgs args = mFakeListener.expectMotion(
+            AllOf(WithSource(AINPUT_SOURCE_MOUSE), WithMotionAction(HOVER_MOVE)));
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X), 10.0f);
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.0f);
 
     // Enable Pointer Capture
     setPointerCapture(true);
 
     // Move and verify scale is not applied.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                              WithMotionAction(ACTION_MOVE), WithRelativeMotion(10, 20)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                                     WithMotionAction(ACTION_MOVE), WithRelativeMotion(10, 20)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ConfigureDisplayIdNoAssociatedViewport) {
@@ -1079,15 +906,12 @@ TEST_F(CursorInputMapperUnitTest, ConfigureDisplayIdNoAssociatedViewport) {
 
     // Ensure input events are generated without display ID or coords, because they will be decided
     // later by PointerChoreographer.
-    std::list<NotifyArgs> args;
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
-                              WithDisplayId(ui::LogicalDisplayId::INVALID),
-                              WithCoords(0.0f, 0.0f)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithSource(AINPUT_SOURCE_MOUSE),
+                                     WithDisplayId(ui::LogicalDisplayId::INVALID),
+                                     WithCoords(0.0f, 0.0f)));
 }
 
 TEST_F(CursorInputMapperUnitTest, PointerAccelerationDisabled) {
@@ -1096,26 +920,21 @@ TEST_F(CursorInputMapperUnitTest, PointerAccelerationDisabled) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
 
-    std::list<NotifyArgs> reconfigureArgs;
-
-    reconfigureArgs += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                            InputReaderConfiguration::Change::POINTER_SPEED);
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::POINTER_SPEED);
 
     std::vector<AccelerationCurveSegment> curve =
             createFlatAccelerationCurve(mReaderConfiguration.mousePointerSpeed);
     double baseGain = curve[0].baseGain;
 
-    std::list<NotifyArgs> motionArgs;
-    motionArgs += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    motionArgs += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    motionArgs += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
 
     const float expectedRelX = 10 * baseGain;
     const float expectedRelY = 20 * baseGain;
-    ASSERT_THAT(motionArgs,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(expectedRelX, expectedRelY)))));
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithRelativeMotion(expectedRelX, expectedRelY)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationWithAssociatedViewport) {
@@ -1125,32 +944,25 @@ TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationWithAssociatedViewport) {
     EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(primaryViewport));
     mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
-    std::list<NotifyArgs> args;
-
     // Verify that acceleration is being applied by default by checking that the movement is scaled.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID)))));
-    const auto& coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
-    ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X), 10.f);
-    ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.f);
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    NotifyMotionArgs args = mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID)));
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X), 10.0f);
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.0f);
 
     // Disable acceleration for the display, and verify that acceleration is no longer applied.
     mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
-    args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::POINTER_SPEED);
-    args.clear();
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::POINTER_SPEED);
 
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(AllOf(WithMotionAction(HOVER_MOVE),
-                                                                WithDisplayId(DISPLAY_ID),
-                                                                WithRelativeMotion(10, 20)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID),
+                                     WithRelativeMotion(10, 20)));
 }
 
 TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationOnDisplayChange) {
@@ -1164,51 +976,28 @@ TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationOnDisplayChange) {
     EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(std::nullopt));
     mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
-    std::list<NotifyArgs> args;
-
     // Verify that acceleration is being applied by default by checking that the movement is scaled.
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args, ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
-    const auto& coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
-    ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X), 10.f);
-    ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.f);
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    NotifyMotionArgs args = mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE)));
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X), 10.0f);
+    ASSERT_GT(args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.0f);
 
     // Now associate the device with the display, and verify that acceleration is disabled.
     EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(primaryViewport));
-    args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    args.clear();
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
 
-    args += process(ARBITRARY_TIME, EV_REL, REL_X, 10);
-    args += process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
-    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID),
-                              WithRelativeMotion(10, 20)))));
+    process(ARBITRARY_TIME, EV_REL, REL_X, 10);
+    process(ARBITRARY_TIME, EV_REL, REL_Y, 20);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID),
+                                     WithRelativeMotion(10, 20)));
 }
 
-// TODO(b/432649760): DensityDependentCursorUnitTest can be merged with
-//  XYDensityDependentCursorUnitTest when corrosponding flags are fully released
 class DensityDependentCursorUnitTest : public CursorInputMapperUnitTest {
 protected:
-    std::unique_ptr<ScopedFlagOverride> mScaleWithDpiFlagOverride;
-    std::unique_ptr<ScopedFlagOverride> mSeparateXYFlagOverride;
-
-    void SetUp() override {
-        ReadFlagValueFunction read_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
-        WriteFlagValueFunction write_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
-        mSeparateXYFlagOverride = std::make_unique<ScopedFlagOverride>(read_xy, write_xy, false);
-
-        ReadFlagValueFunction read_scale = input_flags::scale_cursor_speed_with_dpi;
-        WriteFlagValueFunction write_scale = input_flags::scale_cursor_speed_with_dpi;
-        mScaleWithDpiFlagOverride =
-                std::make_unique<ScopedFlagOverride>(read_scale, write_scale, true);
-
-        CursorInputMapperUnitTest::SetUp();
-    }
 
     void createViewport(int32_t densityDpi, float xDpi = ACONFIGURATION_DENSITY_NONE,
                         float yDpi = ACONFIGURATION_DENSITY_NONE) {
@@ -1218,12 +1007,10 @@ protected:
         EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(viewport));
     }
 
-    std::list<NotifyArgs> processRelativeMove(int32_t rawRelativeX, int32_t rawRelativeY) {
-        std::list<NotifyArgs> args;
-        args += process(ARBITRARY_TIME, EV_REL, REL_X, rawRelativeX);
-        args += process(ARBITRARY_TIME, EV_REL, REL_Y, rawRelativeY);
-        args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-        return args;
+    void processRelativeMove(int32_t rawRelativeX, int32_t rawRelativeY) {
+        process(ARBITRARY_TIME, EV_REL, REL_X, rawRelativeX);
+        process(ARBITRARY_TIME, EV_REL, REL_Y, rawRelativeY);
+        process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
     }
 
     std::tuple<float, float> getBaselineCursorMoves(int32_t rawRelativeX, int32_t rawRelativeY) {
@@ -1232,8 +1019,10 @@ protected:
         createViewport(ACONFIGURATION_DENSITY_XHIGH);
         mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
-        std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
-        auto coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
+        processRelativeMove(rawRelativeX, rawRelativeY);
+        NotifyMotionArgs args =
+                mFakeListener.expectMotion(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE));
+        auto coords = args.pointerCoords[0];
         return {coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
                 coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y)};
     }
@@ -1249,19 +1038,15 @@ TEST_F(DensityDependentCursorUnitTest, ScalesCursorMoveWithDisplayDensity) {
 
     createViewport(ACONFIGURATION_DENSITY_XXHIGH);
 
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    args.clear();
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
 
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    processRelativeMove(rawRelativeX, rawRelativeY);
     float scalingFactor = static_cast<float>(ACONFIGURATION_DENSITY_XXHIGH) /
             static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(baselineRelativeX * scalingFactor,
-                                                 baselineRelativeY * scalingFactor)))));
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE),
+                                     WithRelativeMotion(baselineRelativeX * scalingFactor,
+                                                        baselineRelativeY * scalingFactor)));
 }
 
 TEST_F(DensityDependentCursorUnitTest, FallbackToNoScalingWhenDensityUnavailable) {
@@ -1272,16 +1057,12 @@ TEST_F(DensityDependentCursorUnitTest, FallbackToNoScalingWhenDensityUnavailable
 
     // Viewport without density information should be equivalent to viewport with baseline density.
     createViewport(ACONFIGURATION_DENSITY_NONE);
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    args.clear();
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::DISPLAY_INFO);
 
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(baselineRelativeX, baselineRelativeY)))));
+    processRelativeMove(rawRelativeX, rawRelativeY);
+    mFakeListener.expectMotion(AllOf(WithMotionAction(HOVER_MOVE),
+                                     WithRelativeMotion(baselineRelativeX, baselineRelativeY)));
 }
 
 TEST_F(DensityDependentCursorUnitTest,
@@ -1294,12 +1075,9 @@ TEST_F(DensityDependentCursorUnitTest,
 
     const int32_t rawRelativeX = 10;
     const int32_t rawRelativeY = 20;
-    std::list<NotifyArgs> args;
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+    processRelativeMove(rawRelativeX, rawRelativeY);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithRelativeMotion(rawRelativeX, rawRelativeY)));
 }
 
 TEST_F(DensityDependentCursorUnitTest,
@@ -1310,18 +1088,14 @@ TEST_F(DensityDependentCursorUnitTest,
 
     // Disable scaling
     mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::POINTER_SPEED);
-    args.clear();
+    reconfigureMapper(ARBITRARY_TIME, mReaderConfiguration,
+                      InputReaderConfiguration::Change::POINTER_SPEED);
 
     const int32_t rawRelativeX = 10;
     const int32_t rawRelativeY = 20;
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+    processRelativeMove(rawRelativeX, rawRelativeY);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithRelativeMotion(rawRelativeX, rawRelativeY)));
 }
 
 TEST_F(DensityDependentCursorUnitTest, DoesNotScaleCursorMoveWithPointerCaptureEnabled) {
@@ -1335,167 +1109,12 @@ TEST_F(DensityDependentCursorUnitTest, DoesNotScaleCursorMoveWithPointerCaptureE
     // Verify pointer capture has been enabled.
     const int32_t rawRelativeX = 10;
     const int32_t rawRelativeY = 20;
-    std::list<NotifyArgs> args;
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE),
-                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                              WithCoords(rawRelativeX, rawRelativeY),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY),
-                              WithCursorPosition(INVALID_CURSOR_POSITION,
-                                                 INVALID_CURSOR_POSITION)))));
-}
-
-class XYDensityDependentCursorUnitTest : public DensityDependentCursorUnitTest {
-protected:
-    void SetUp() override {
-        ReadFlagValueFunction read_scale = input_flags::scale_cursor_speed_with_dpi;
-        WriteFlagValueFunction write_scale = input_flags::scale_cursor_speed_with_dpi;
-        mScaleWithDpiFlagOverride =
-                std::make_unique<ScopedFlagOverride>(read_scale, write_scale, true);
-
-        ReadFlagValueFunction read_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
-        WriteFlagValueFunction write_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
-        mSeparateXYFlagOverride = std::make_unique<ScopedFlagOverride>(read_xy, write_xy, true);
-
-        CursorInputMapperUnitTest::SetUp();
-    }
-
-    std::tuple<float, float> getBaselineCursorMoves(int32_t rawRelativeX, int32_t rawRelativeY) {
-        // Cursor moves are not scaled for display density ACONFIGURATION_DENSITY_XHIGH, which is
-        // considered baseline. Acceleration will still apply.
-        createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_XHIGH,
-                       /*xDpi=*/ACONFIGURATION_DENSITY_XHIGH,
-                       /*yDpi=*/ACONFIGURATION_DENSITY_XHIGH);
-        mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-
-        std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
-        auto coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
-        return {coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
-                coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y)};
-    }
-};
-
-TEST_F(XYDensityDependentCursorUnitTest, ScalesCursorMoveWithDisplayDensity) {
-    // Use same move values on different density displays, generated events should be scaled
-    // according to the display density.
-    const int32_t rawRelativeX = 10;
-    const int32_t rawRelativeY = 20;
-    const auto [baselineRelativeX, baselineRelativeY] =
-            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
-
-    // use different dpi values for X and Y direction, overall dpi is usually average of
-    // X/Y values but its ignored for this test.
-    constexpr float xDpi = ACONFIGURATION_DENSITY_XXXHIGH;
-    constexpr float yDpi = ACONFIGURATION_DENSITY_XXHIGH;
-    constexpr int32_t densityDpi = (xDpi + yDpi) / 2.0;
-    createViewport(densityDpi, xDpi, yDpi);
-
-    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    args.clear();
-
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    constexpr float xScalingFactor = xDpi / static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
-    constexpr float yScalingFactor = yDpi / static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(baselineRelativeX * xScalingFactor,
-                                                 baselineRelativeY * yScalingFactor)))));
-}
-
-TEST_F(XYDensityDependentCursorUnitTest, FallbackToNoScalingWhenDensityUnavailable) {
-    const int32_t rawRelativeX = 10;
-    const int32_t rawRelativeY = 20;
-    const auto [baselineRelativeX, baselineRelativeY] =
-            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
-
-    // Viewport without density information should be equivalent to viewport with baseline density.
-    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_NONE, /*xDpi=*/ACONFIGURATION_DENSITY_NONE,
-                   /*yDpi=*/ACONFIGURATION_DENSITY_NONE);
-
-    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-    std::list<NotifyArgs> args =
-            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    args.clear();
-
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(baselineRelativeX, baselineRelativeY)))));
-}
-
-TEST_F(XYDensityDependentCursorUnitTest,
-       DoesNotScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
-    // Create a medium density viewport and disable all scaling.
-    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
-    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
-                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
-
-    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-
-    const int32_t rawRelativeX = 10;
-    const int32_t rawRelativeY = 20;
-    std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
-}
-
-TEST_F(XYDensityDependentCursorUnitTest,
-       ResetScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
-    // Create a medium density viewport.
-    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
-                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
-
-    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-
-    std::list<NotifyArgs> args;
-    // Disables scaling
-    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
-    args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
-                                 InputReaderConfiguration::Change::POINTER_SPEED);
-    args.clear();
-
-    const int32_t rawRelativeX = 10;
-    const int32_t rawRelativeY = 20;
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
-}
-
-TEST_F(XYDensityDependentCursorUnitTest, DoesNotScaleCursorMoveWithPointerCaptureEnabled) {
-    // Create a medium density viewport, that should have scaling enabled by default.
-    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
-                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
-
-    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
-
-    // Request pointer capture after the mapper has been configured.
-    setPointerCapture(true);
-
-    // Verify pointer capture has been enabled.
-    const int32_t rawRelativeX = 10;
-    const int32_t rawRelativeY = 20;
-    std::list<NotifyArgs> args;
-    args += processRelativeMove(rawRelativeX, rawRelativeY);
-    ASSERT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(ACTION_MOVE),
-                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
-                              WithCoords(rawRelativeX, rawRelativeY),
-                              WithRelativeMotion(rawRelativeX, rawRelativeY),
-                              WithCursorPosition(INVALID_CURSOR_POSITION,
-                                                 INVALID_CURSOR_POSITION)))));
+    processRelativeMove(rawRelativeX, rawRelativeY);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(ACTION_MOVE), WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                  WithCoords(rawRelativeX, rawRelativeY),
+                  WithRelativeMotion(rawRelativeX, rawRelativeY),
+                  WithCursorPosition(INVALID_CURSOR_POSITION, INVALID_CURSOR_POSITION)));
 }
 
 namespace {
@@ -1519,16 +1138,13 @@ protected:
 TEST_F(BluetoothCursorInputMapperUnitTest, TimestampSmoothening) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
-    std::list<NotifyArgs> argsList;
 
     nsecs_t kernelEventTime = ARBITRARY_TIME;
     nsecs_t expectedEventTime = ARBITRARY_TIME;
-    argsList += process(kernelEventTime, EV_REL, REL_X, 1);
-    argsList += process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(argsList,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)))));
-    argsList.clear();
+    process(kernelEventTime, EV_REL, REL_X, 1);
+    process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
 
     // Process several events that come in quick succession, according to their timestamps.
     for (int i = 0; i < 3; i++) {
@@ -1537,28 +1153,22 @@ TEST_F(BluetoothCursorInputMapperUnitTest, TimestampSmoothening) {
         kernelEventTime += delta;
         expectedEventTime += MIN_BLUETOOTH_TIMESTAMP_DELTA;
 
-        argsList += process(kernelEventTime, EV_REL, REL_X, 1);
-        argsList += process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
-        EXPECT_THAT(argsList,
-                    ElementsAre(VariantWith<NotifyMotionArgs>(
-                            AllOf(WithMotionAction(HOVER_MOVE),
-                                  WithEventTime(expectedEventTime)))));
-        argsList.clear();
+        process(kernelEventTime, EV_REL, REL_X, 1);
+        process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
+        mFakeListener.expectMotion(
+                AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
     }
 }
 
 TEST_F(BluetoothCursorInputMapperUnitTest, TimestampSmootheningIsCapped) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
-    std::list<NotifyArgs> argsList;
 
     nsecs_t expectedEventTime = ARBITRARY_TIME;
-    argsList += process(ARBITRARY_TIME, EV_REL, REL_X, 1);
-    argsList += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(argsList,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)))));
-    argsList.clear();
+    process(ARBITRARY_TIME, EV_REL, REL_X, 1);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
 
     // Process several events with the same timestamp from the kernel.
     // Ensure that we do not generate events too far into the future.
@@ -1567,53 +1177,43 @@ TEST_F(BluetoothCursorInputMapperUnitTest, TimestampSmootheningIsCapped) {
     for (int i = 0; i < numEvents; i++) {
         expectedEventTime += MIN_BLUETOOTH_TIMESTAMP_DELTA;
 
-        argsList += process(ARBITRARY_TIME, EV_REL, REL_X, 1);
-        argsList += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-        EXPECT_THAT(argsList,
-                    ElementsAre(VariantWith<NotifyMotionArgs>(
-                            AllOf(WithMotionAction(HOVER_MOVE),
-                                  WithEventTime(expectedEventTime)))));
-        argsList.clear();
+        process(ARBITRARY_TIME, EV_REL, REL_X, 1);
+        process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+        mFakeListener.expectMotion(
+                AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
     }
 
     // By processing more events with the same timestamp, we should not generate events with a
     // timestamp that is more than the specified max time delta from the timestamp at its injection.
     const nsecs_t cappedEventTime = ARBITRARY_TIME + MAX_BLUETOOTH_SMOOTHING_DELTA;
     for (int i = 0; i < 3; i++) {
-        argsList += process(ARBITRARY_TIME, EV_REL, REL_X, 1);
-        argsList += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
-        EXPECT_THAT(argsList,
-                    ElementsAre(VariantWith<NotifyMotionArgs>(
-                            AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(cappedEventTime)))));
-        argsList.clear();
+        process(ARBITRARY_TIME, EV_REL, REL_X, 1);
+        process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+        mFakeListener.expectMotion(
+                AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(cappedEventTime)));
     }
 }
 
 TEST_F(BluetoothCursorInputMapperUnitTest, TimestampSmootheningNotUsed) {
     mPropertyMap.addProperty("cursor.mode", "pointer");
     createMapper();
-    std::list<NotifyArgs> argsList;
 
     nsecs_t kernelEventTime = ARBITRARY_TIME;
     nsecs_t expectedEventTime = ARBITRARY_TIME;
-    argsList += process(kernelEventTime, EV_REL, REL_X, 1);
-    argsList += process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(argsList,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)))));
-    argsList.clear();
+    process(kernelEventTime, EV_REL, REL_X, 1);
+    process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
 
     // If the next event has a timestamp that is sufficiently spaced out so that Bluetooth timestamp
     // smoothening is not needed, its timestamp is not affected.
     kernelEventTime += MAX_BLUETOOTH_SMOOTHING_DELTA + ms2ns(1);
     expectedEventTime = kernelEventTime;
 
-    argsList += process(kernelEventTime, EV_REL, REL_X, 1);
-    argsList += process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
-    EXPECT_THAT(argsList,
-                ElementsAre(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)))));
-    argsList.clear();
+    process(kernelEventTime, EV_REL, REL_X, 1);
+    process(kernelEventTime, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectMotion(
+            AllOf(WithMotionAction(HOVER_MOVE), WithEventTime(expectedEventTime)));
 }
 
 } // namespace android

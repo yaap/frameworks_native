@@ -135,6 +135,10 @@ public:
         // Currently latched frame number, 0 if invalid.
         uint64_t frameNumber = 0;
 
+        // Currently latched RenderCommandBuffer frameId. Likely possible to
+        // merge this with frameNumber but perhaps easier to keep it separate.
+        uint64_t renderCommandBufferFrameId = 0;
+
         // layer serial number, -1 if invalid.
         int32_t sequence = -1;
     };

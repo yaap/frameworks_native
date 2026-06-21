@@ -145,9 +145,7 @@ GLConsumer::GLConsumer(uint32_t tex, uint32_t texTarget, bool useFenceSync, bool
         mTexTarget(texTarget),
         mEglDisplay(EGL_NO_DISPLAY),
         mEglContext(EGL_NO_CONTEXT),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         mEglSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
-#endif
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mAttached(true) {
     GLC_LOGV("GLConsumer");
@@ -175,9 +173,7 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint3
         mTexTarget(texTarget),
         mEglDisplay(EGL_NO_DISPLAY),
         mEglContext(EGL_NO_CONTEXT),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         mEglSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
-#endif
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mAttached(true) {
     GLC_LOGV("GLConsumer");
@@ -202,9 +198,7 @@ GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledB
         mTexTarget(texTarget),
         mEglDisplay(EGL_NO_DISPLAY),
         mEglContext(EGL_NO_CONTEXT),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         mEglSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
-#endif
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mAttached(false) {
     GLC_LOGV("GLConsumer");
@@ -230,9 +224,7 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
         mTexTarget(texTarget),
         mEglDisplay(EGL_NO_DISPLAY),
         mEglContext(EGL_NO_CONTEXT),
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         mEglSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
-#endif
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mAttached(false) {
     GLC_LOGV("GLConsumer");
@@ -412,10 +404,11 @@ sp<GraphicBuffer> GLConsumer::getDebugTexImageBuffer() {
     return sReleasedTexImageBuffer;
 }
 
-status_t GLConsumer::acquireBufferLocked(BufferItem *item,
-        nsecs_t presentWhen, uint64_t maxFrameNumber) {
-    status_t err = ConsumerBase::acquireBufferLocked(item, presentWhen,
-            maxFrameNumber);
+status_t GLConsumer::acquireBufferLocked(BufferItem* item, nsecs_t presentWhen,
+                                         uint64_t maxFrameNumber,
+                                         BufferFreedCallback onBufferFreed) {
+    status_t err =
+            ConsumerBase::acquireBufferLocked(item, presentWhen, maxFrameNumber, onBufferFreed);
     if (err != NO_ERROR) {
         return err;
     }
@@ -431,7 +424,6 @@ status_t GLConsumer::acquireBufferLocked(BufferItem *item,
     return NO_ERROR;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 void GLConsumer::onSlotCountChanged(int slotCount) {
     ConsumerBase::onSlotCountChanged(slotCount);
 
@@ -440,16 +432,17 @@ void GLConsumer::onSlotCountChanged(int slotCount) {
         mEglSlots.resize(slotCount);
     }
 }
-#endif
 
 #if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-status_t GLConsumer::releaseBufferLocked(int buf, sp<GraphicBuffer> graphicBuffer,
-                                         EGLDisplay display, EGLSyncKHR eglFence) {
+status_t GLConsumer::releaseBufferLocked(int buf, const sp<GraphicBuffer>& graphicBuffer,
+                                         EGLDisplay display, EGLSyncKHR eglFence,
+                                         BufferFreedCallback onBufferFreed) {
     // release the buffer if it hasn't already been discarded by the
     // BufferQueue. This can happen, for example, when the producer of this
     // buffer has reallocated the original buffer slot after this buffer
     // was acquired.
-    status_t err = ConsumerBase::releaseBufferLocked(buf, graphicBuffer, display, eglFence);
+    status_t err =
+            ConsumerBase::releaseBufferLocked(buf, graphicBuffer, display, eglFence, onBufferFreed);
     mEglSlots[buf].mEglFence = EGL_NO_SYNC_KHR;
     return err;
 }
@@ -1008,19 +1001,19 @@ status_t GLConsumer::doGLFenceWaitLocked() const {
     return NO_ERROR;
 }
 
-void GLConsumer::freeBufferLocked(int slotIndex) {
+void GLConsumer::freeBufferLocked(int slotIndex, BufferFreedCallback onBufferFreed) {
     GLC_LOGV("freeBufferLocked: slotIndex=%d", slotIndex);
     if (slotIndex == mCurrentTexture) {
         mCurrentTexture = BufferQueue::INVALID_BUFFER_SLOT;
     }
     mEglSlots[slotIndex].mEglImage.clear();
-    ConsumerBase::freeBufferLocked(slotIndex);
+    ConsumerBase::freeBufferLocked(slotIndex, onBufferFreed);
 }
 
-void GLConsumer::abandonLocked() {
+void GLConsumer::abandonLocked(BufferFreedCallback onBufferFreed) {
     GLC_LOGV("abandonLocked");
     mCurrentTextureImage.clear();
-    ConsumerBase::abandonLocked();
+    ConsumerBase::abandonLocked(onBufferFreed);
 }
 
 status_t GLConsumer::setConsumerUsageBits(uint64_t usage) {
@@ -1039,11 +1032,10 @@ void GLConsumer::dumpLocked(String8& result, const char* prefix) const
     ConsumerBase::dumpLocked(result, prefix);
 }
 
-GLConsumer::EglImage::EglImage(sp<GraphicBuffer> graphicBuffer) :
-    mGraphicBuffer(graphicBuffer),
-    mEglImage(EGL_NO_IMAGE_KHR),
-    mEglDisplay(EGL_NO_DISPLAY) {
-}
+GLConsumer::EglImage::EglImage(sp<GraphicBuffer> graphicBuffer)
+      : mGraphicBuffer(std::move(graphicBuffer)),
+        mEglImage(EGL_NO_IMAGE_KHR),
+        mEglDisplay(EGL_NO_DISPLAY) {}
 
 GLConsumer::EglImage::~EglImage() {
     if (mEglImage != EGL_NO_IMAGE_KHR) {

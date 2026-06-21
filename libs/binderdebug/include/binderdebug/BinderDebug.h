@@ -20,6 +20,8 @@
 #include <map>
 #include <vector>
 
+#include <binderdebug/FileReader.h>
+
 namespace android {
 
 struct BinderPidInfo {
@@ -33,7 +35,16 @@ enum class BinderDebugContext {
     HWBINDER,
     VNDBINDER,
 };
-
+#ifdef BINDER_DEBUG_TEST
+status_t getBinderPidInfo(BinderDebugContext context, pid_t pid,
+                          std::unique_ptr<binderdebug::FileReader> fileReader,
+                          BinderPidInfo* pidInfo);
+status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servicePid,
+                             int32_t handle, std::unique_ptr<binderdebug::FileReader> fileReader,
+                             std::vector<pid_t>* pids);
+status_t getBinderTransactions(pid_t pid, std::unique_ptr<binderdebug::FileReader> fileReader,
+                               std::string& transactionOutput);
+#endif
 /**
  * pid is the pid of the service
  */

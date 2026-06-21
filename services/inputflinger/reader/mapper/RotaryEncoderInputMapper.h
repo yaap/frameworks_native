@@ -55,7 +55,7 @@ private:
      * the IDC file, or if a non-positive value is provided, the telemetry will be disabled, and
      * this value is set to the empty optional.
      */
-    std::optional<int32_t> mMinRotationsToLog;
+    std::optional<float> mMinRotationsToLog;
     /**
      * A function to log count for telemetry.
      * The char* is the logging key, and the int64_t is the value to log.

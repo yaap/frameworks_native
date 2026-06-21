@@ -25,6 +25,12 @@ interface IInputConstants
     // android.os.InputConstants.DEFAULT_DISPATCHING_TIMEOUT_MILLIS.
     const int UNMULTIPLIED_DEFAULT_DISPATCHING_TIMEOUT_MILLIS = 5000; // 5 seconds
 
+
+    // The minimum time window before a pre-ANR warning is sent to the application when there is
+    // no focused window. This should be multiplied by the value of the system property
+    // ro.hw_timeout_multiplier before use.
+    const int UNMULTIPLIED_DEFAULT_PRE_ANR_TIMEOUT_WINDOW_MILLIS = 2000; // 2 seconds
+
     // Indicate invalid battery capacity
     const int INVALID_BATTERY_CAPACITY = -1;
 
@@ -88,9 +94,6 @@ interface IInputConstants
      * when a pointer move event is sent but the pointer is not down.
      */
     const int INPUT_EVENT_FLAG_TAINTED = 0x80000000;
-
-    /* The default pointer acceleration value. */
-    const int DEFAULT_POINTER_ACCELERATION = 3;
 
     /* The default mouse wheel acceleration value. */
     const int DEFAULT_MOUSE_WHEEL_ACCELERATION = 4;

@@ -302,7 +302,7 @@ std::vector<tonemap::ShaderUniform> buildLinearEffectUniforms(
     // When there is no custom OETF, the wrapped working color space shader declares the output
     // space to be `inputColorSpace` with a linear gamma. This allows Skia to optimally transform
     // to the output space depending on its GPU backend.
-    const bool needsCustomOETF = (linearEffect.fakeOutputDataspace & HAL_DATASPACE_TRANSFER_MASK) !=
+    const bool needsCustomOETF = (linearEffect.fakeOutputDataspace & HAL_DATASPACE_TRANSFER_MASK) ==
             HAL_DATASPACE_TRANSFER_GAMMA2_2;
 
     auto gamutTransform = mat3();

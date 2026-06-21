@@ -48,11 +48,7 @@ struct RpcWireHeader;
 #define LOG_RPC_DETAIL(...) ALOGV(__VA_ARGS__) // for type checking
 #endif
 
-// DO NOT ENABLE IN PRODUCTION
-#define RPC_FLAKE_PRONE false
-// DO NOT ENABLE IN PRODUCTION
-
-#if RPC_FLAKE_PRONE
+#ifdef RPC_FLAKE_PRONE
 LIBBINDER_INTERNAL_EXPORTED bool rpcMaybeFlake();
 LIBBINDER_INTERNAL_EXPORTED void rpcMaybeWaitToFlake();
 #define MAYBE_TRUE_IN_FLAKE_MODE rpcMaybeFlake()
@@ -73,25 +69,23 @@ public:
 
     [[nodiscard]] static bool validateProtocolVersion(uint32_t version);
 
-    [[nodiscard]] status_t readNewSessionResponse(const sp<RpcSession::RpcConnection>& connection,
-                                                  const sp<RpcSession>& session, uint32_t* version);
-    [[nodiscard]] status_t sendConnectionInit(const sp<RpcSession::RpcConnection>& connection,
-                                              const sp<RpcSession>& session);
-    [[nodiscard]] status_t readConnectionInit(const sp<RpcSession::RpcConnection>& connection,
-                                              const sp<RpcSession>& session);
+    [[nodiscard]] status_t readNewSessionResponse(RpcSession::RpcConnection& connection,
+                                                  RpcSession& session, uint32_t* version);
+    [[nodiscard]] status_t sendConnectionInit(RpcSession::RpcConnection& connection,
+                                              RpcSession& session);
+    [[nodiscard]] status_t readConnectionInit(RpcSession::RpcConnection& connection,
+                                              RpcSession& session);
 
     // TODO(b/182940634): combine some special transactions into one "getServerInfo" call?
-    sp<IBinder> getRootObject(const sp<RpcSession::RpcConnection>& connection,
-                              const sp<RpcSession>& session);
-    [[nodiscard]] status_t getMaxThreads(const sp<RpcSession::RpcConnection>& connection,
-                                         const sp<RpcSession>& session, size_t* maxThreadsOut);
-    [[nodiscard]] status_t getSessionId(const sp<RpcSession::RpcConnection>& connection,
-                                        const sp<RpcSession>& session,
+    sp<IBinder> getRootObject(RpcSession::RpcConnection& connection, RpcSession& session);
+    [[nodiscard]] status_t getMaxThreads(RpcSession::RpcConnection& connection, RpcSession& session,
+                                         size_t* maxThreadsOut);
+    [[nodiscard]] status_t getSessionId(RpcSession::RpcConnection& connection, RpcSession& session,
                                         std::vector<uint8_t>* sessionIdOut);
 
-    [[nodiscard]] status_t transact(const sp<RpcSession::RpcConnection>& connection,
+    [[nodiscard]] status_t transact(RpcSession::RpcConnection& connection,
                                     const sp<IBinder>& address, uint32_t code, const Parcel& data,
-                                    const sp<RpcSession>& session, Parcel* reply, uint32_t flags);
+                                    RpcSession& session, Parcel* reply, uint32_t flags);
     /**
      * The ownership model here carries an implicit strong refcount whenever a
      * binder is sent across processes. Since we have a local strong count in
@@ -111,18 +105,18 @@ public:
      * can cause leaks, since even remote binders carry an implicit strong ref
      * when they are sent to another process.
      */
-    [[nodiscard]] status_t sendDecStrongToTarget(const sp<RpcSession::RpcConnection>& connection,
-                                                 const sp<RpcSession>& session, uint64_t address,
+    [[nodiscard]] status_t sendDecStrongToTarget(RpcSession::RpcConnection& connection,
+                                                 RpcSession& session, uint64_t address,
                                                  size_t target);
 
     enum class CommandType {
         ANY,
         CONTROL_ONLY,
     };
-    [[nodiscard]] status_t getAndExecuteCommand(const sp<RpcSession::RpcConnection>& connection,
-                                                const sp<RpcSession>& session, CommandType type);
-    [[nodiscard]] status_t drainCommands(const sp<RpcSession::RpcConnection>& connection,
-                                         const sp<RpcSession>& session, CommandType type);
+    [[nodiscard]] status_t getAndExecuteCommand(RpcSession::RpcConnection& connection,
+                                                RpcSession& session, CommandType type);
+    [[nodiscard]] status_t drainCommands(RpcSession::RpcConnection& connection, RpcSession& session,
+                                         CommandType type);
 
     [[nodiscard]] sp<IBinder> lookupAddress(uint64_t address);
 
@@ -130,34 +124,34 @@ public:
      * Called by Parcel for outgoing binders. This implies one refcount of
      * ownership to the outgoing binder.
      */
-    [[nodiscard]] status_t onBinderLeaving(const sp<RpcSession>& session, const sp<IBinder>& binder,
+    [[nodiscard]] status_t onBinderLeaving(RpcSession& session, const sp<IBinder>& binder,
                                            uint64_t* outAddress);
 
     /**
      * If a Parcel is not sent, this is called to cancel the address reservation by
      * decreasing the refcount by 1.
      */
-    [[nodiscard]] status_t cancelBinderLeaving(const sp<RpcSession>& session, uint64_t address);
+    [[nodiscard]] status_t cancelBinderLeaving(RpcSession& session, uint64_t address);
 
     /**
      * Called by Parcel for incoming binders. This either returns the refcount
      * to the process, if this process already has one, or it takes ownership of
      * that refcount
      */
-    [[nodiscard]] status_t onBinderEntering(const sp<RpcSession>& session, uint64_t address,
+    [[nodiscard]] status_t onBinderEntering(RpcSession& session, uint64_t address,
                                             sp<IBinder>* out);
     /**
      * Called on incoming binders to update refcounting information. This should
      * only be called when it is done as part of making progress on a
      * transaction.
      */
-    [[nodiscard]] status_t flushExcessBinderRefs(const sp<RpcSession>& session, uint64_t address,
+    [[nodiscard]] status_t flushExcessBinderRefs(RpcSession& session, uint64_t address,
                                                  const sp<IBinder>& binder);
     /**
      * Called when the RpcSession is shutdown.
      * Send obituaries for each known remote binder with this session.
      */
-    [[nodiscard]] status_t sendObituaries(const sp<RpcSession>& session);
+    [[nodiscard]] status_t sendObituaries(RpcSession& session);
 
     LIBBINDER_INTERNAL_EXPORTED size_t countBinders();
     LIBBINDER_INTERNAL_EXPORTED void dump();
@@ -199,48 +193,44 @@ private:
     };
 
     [[nodiscard]] status_t rpcSend(
-            const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
-            const char* what, iovec* iovs, int niovs,
+            RpcSession::RpcConnection& connection, RpcSession& session, const char* what,
+            iovec* iovs, int niovs,
             const std::optional<binder::impl::SmallFunction<status_t()>>& altPoll,
             const std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>* ancillaryFds =
                     nullptr);
-    [[nodiscard]] status_t rpcRec(const sp<RpcSession::RpcConnection>& connection,
-                                  const sp<RpcSession>& session, const char* what, iovec* iovs,
-                                  int niovs,
+    [[nodiscard]] status_t rpcRec(RpcSession::RpcConnection& connection, RpcSession& session,
+                                  const char* what, iovec* iovs, int niovs,
                                   std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>*
                                           ancillaryFds = nullptr);
 
-    [[nodiscard]] status_t waitForReply(const sp<RpcSession::RpcConnection>& connection,
-                                        const sp<RpcSession>& session, Parcel* reply);
+    [[nodiscard]] status_t waitForReply(RpcSession::RpcConnection& connection, RpcSession& session,
+                                        Parcel* reply);
     [[nodiscard]] status_t processCommand(
-            const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
+            RpcSession::RpcConnection& connection, RpcSession& session,
             const RpcWireHeader& command, CommandType type,
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>&& ancillaryFds);
     [[nodiscard]] status_t processTransact(
-            const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
+            RpcSession::RpcConnection& connection, RpcSession& session,
             const RpcWireHeader& command,
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>&& ancillaryFds);
     [[nodiscard]] status_t processTransactInternal(
-            const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
-            CommandData transactionData,
+            RpcSession::RpcConnection& connection, RpcSession& session, CommandData transactionData,
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>&& ancillaryFds);
-    [[nodiscard]] status_t processDecStrong(const sp<RpcSession::RpcConnection>& connection,
-                                            const sp<RpcSession>& session,
-                                            const RpcWireHeader& command);
-    [[nodiscard]] status_t doDecStrong(const sp<RpcSession>& session, uint64_t address,
-                                       uint32_t amount);
+    [[nodiscard]] status_t processDecStrong(RpcSession::RpcConnection& connection,
+                                            RpcSession& session, const RpcWireHeader& command);
+    [[nodiscard]] status_t doDecStrong(RpcSession& session, uint64_t address, uint32_t amount);
 
     // Whether `parcel` is compatible with `session`.
-    [[nodiscard]] static status_t validateParcel(const sp<RpcSession>& session,
-                                                 const Parcel& parcel, std::string* errorMsg);
+    [[nodiscard]] static status_t validateParcel(RpcSession& session, const Parcel& parcel,
+                                                 std::string* errorMsg);
 
     // Exactly the same as transact, but you can do a special transaction which we
     // don't want to export outside of RpcState. A special transaction is on address
     // '0', such as getting the root object.
-    [[nodiscard]] status_t transactInternal(const sp<RpcSession::RpcConnection>& connection,
+    [[nodiscard]] status_t transactInternal(RpcSession::RpcConnection& connection,
                                             const sp<IBinder>& maybeBinder, uint32_t code,
-                                            const Parcel& data, const sp<RpcSession>& session,
-                                            Parcel* reply, uint32_t flags);
+                                            const Parcel& data, RpcSession& session, Parcel* reply,
+                                            uint32_t flags);
 
     struct BinderNode {
         // Two cases:
@@ -304,7 +294,7 @@ private:
     // this introduces the posssibility that another thread calls
     // getRootBinder and thinks it is valid, rather than immediately getting
     // an error.
-    sp<IBinder> tryEraseNode(const sp<RpcSession>& session, RpcMutexUniqueLock nodeLock,
+    sp<IBinder> tryEraseNode(RpcSession& session, RpcMutexUniqueLock nodeLock,
                              std::map<uint64_t, BinderNode>::iterator& it);
 
     // true - success

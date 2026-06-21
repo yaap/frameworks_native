@@ -16,15 +16,18 @@
 
 #include "InputMapperTest.h"
 
-#include <InputReaderBase.h>
+#include <android-base/result-gmock.h>
+#include <android-base/result.h>
 #include <gtest/gtest.h>
 #include <ui/Rotation.h>
 #include <utils/Timers.h>
 
+#include "InputReaderBase.h"
 #include "NotifyArgs.h"
 
 namespace android {
 
+using android::base::testing::Ok;
 using testing::_;
 using testing::NiceMock;
 using testing::Return;
@@ -94,18 +97,17 @@ void InputMapperUnitTest::setSwitchState(int32_t state, std::set<int32_t> switch
     }
 }
 
-std::list<NotifyArgs> InputMapperUnitTest::process(int32_t type, int32_t code, int32_t value) {
+void InputMapperUnitTest::process(int32_t type, int32_t code, int32_t value) {
     nsecs_t when = systemTime(SYSTEM_TIME_MONOTONIC);
-    return process(when, type, code, value);
+    process(when, type, code, value);
 }
 
-std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, int32_t type, int32_t code,
-                                                   int32_t value) {
-    return process(when, when, type, code, value);
+void InputMapperUnitTest::process(nsecs_t when, int32_t type, int32_t code, int32_t value) {
+    process(when, when, type, code, value);
 }
 
-std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, nsecs_t readTime, int32_t type,
-                                                   int32_t code, int32_t value) {
+void InputMapperUnitTest::process(nsecs_t when, nsecs_t readTime, int32_t type, int32_t code,
+                                  int32_t value) {
     RawEvent event;
     event.when = when;
     event.readTime = readTime;
@@ -113,7 +115,63 @@ std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, nsecs_t readTim
     event.type = type;
     event.code = code;
     event.value = value;
-    return mMapper->process(event);
+    processArgs(mMapper->process(event));
+}
+
+void InputMapperUnitTest::processArgs(const std::list<NotifyArgs>& args) {
+    for (const NotifyArgs& arg : args) {
+        mFakeListener.addEvent(arg);
+    }
+}
+
+VerifyingInputMapperUnitTest::VerifyingInputMapperUnitTest() : mVerifier("Test verifier") {}
+
+void VerifyingInputMapperUnitTest::process(nsecs_t when, nsecs_t readTime, int32_t type,
+                                           int32_t code, int32_t value) {
+    InputMapperUnitTest::process(when, readTime, type, code, value);
+}
+
+void VerifyingInputMapperUnitTest::reconfigureMapper(nsecs_t when,
+                                                     const InputReaderConfiguration& config,
+                                                     ConfigurationChanges changes) {
+    processArgs(mMapper->reconfigure(when, config, changes));
+}
+
+void VerifyingInputMapperUnitTest::resetMapper(nsecs_t when) {
+    processArgs(mMapper->reset(when));
+    mVerifier.resetDevice(DEVICE_ID);
+}
+
+void VerifyingInputMapperUnitTest::processArgs(const std::list<NotifyArgs>& args) {
+    InputMapperUnitTest::processArgs(args);
+    processMotionArgs(args);
+}
+
+void VerifyingInputMapperUnitTest::processMotionArgs(const std::list<NotifyArgs>& args) {
+    for (const NotifyArgs& notifyArg : args) {
+        if (std::holds_alternative<NotifyDeviceResetArgs>(notifyArg)) {
+            const NotifyDeviceResetArgs& arg = std::get<NotifyDeviceResetArgs>(notifyArg);
+            mVerifier.resetDevice(arg.deviceId);
+        } else if (std::holds_alternative<NotifyMotionArgs>(notifyArg)) {
+            const NotifyMotionArgs& arg = std::get<NotifyMotionArgs>(notifyArg);
+            // We use an EXPECT rather than an ASSERT here, because if an ASSERT fails, we abort the
+            // method immediately and don't send any more events from this batch to the verifier.
+            // However, the test that's running may not abort, feeding further events to the
+            // verifier which it now rejects not because of new inconsistencies in the stream but
+            // because it didn't receive other events from the batch containing the initial
+            // inconsistency. This leads to multiple failures in the test log, of which only the
+            // earliest one is useful. Using EXPECT means that we pass all the events to the
+            // verifier and makes test failures less confusing.
+            EXPECT_THAT(mVerifier.processMovement(arg.deviceId, arg.eventTime, arg.source,
+                                                  arg.action, arg.actionButton,
+                                                  arg.getPointerCount(),
+                                                  arg.pointerProperties.data(),
+                                                  arg.pointerCoords.data(), arg.flags,
+                                                  arg.buttonState, arg.downTime),
+                        Ok())
+                    << "when processing " << arg.dump();
+        }
+    }
 }
 
 const char* InputMapperTest::DEVICE_NAME = "device";
@@ -129,6 +187,7 @@ void InputMapperTest::SetUp(ftl::Flags<InputDeviceClass> classes, int bus) {
     mDevice = newDevice(DEVICE_ID, DEVICE_NAME, DEVICE_LOCATION, EVENTHUB_ID, classes, bus);
     // Consume the device reset notification generated when adding a new device.
     mFakeListener->assertNotifyDeviceResetWasCalled();
+    mFakeListener->assertNotifyInputDevicesChangedWasCalled();
 }
 
 void InputMapperTest::SetUp() {
@@ -149,7 +208,7 @@ std::list<NotifyArgs> InputMapperTest::configureDevice(ConfigurationChanges chan
     if (!changes.any() ||
         (changes.any(InputReaderConfiguration::Change::DISPLAY_INFO |
                      InputReaderConfiguration::Change::POINTER_CAPTURE |
-                     InputReaderConfiguration::Change::DEVICE_TYPE))) {
+                     InputReaderConfiguration::Change::DEVICE_CONFIGURATION_OVERRIDES))) {
         mReader->requestRefreshConfiguration(changes);
         mReader->loopOnce();
     }

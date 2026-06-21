@@ -139,7 +139,6 @@
                         "maxSampleMaskWords": 1,
                         "discreteQueuePriorities": 2,
                         "pointSizeGranularity": 1,
-                        "pointSizeRange": [1.0, 511],
                         "standardSampleLocations": true
                     }
                 },

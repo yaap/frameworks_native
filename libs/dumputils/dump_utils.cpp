@@ -65,7 +65,6 @@ static const char* hidl_hal_interfaces_to_dump[] {
         "android.hardware.automotive.can@1.0::ICanBus",
         "android.hardware.automotive.can@1.0::ICanController",
         "android.hardware.automotive.evs@1.0::IEvsCamera",
-        "android.hardware.automotive.sv@1.0::ISurroundViewService",
         "android.hardware.automotive.vehicle@2.0::IVehicle",
         "android.hardware.biometrics.face@1.0::IBiometricsFace",
         "android.hardware.biometrics.fingerprint@2.1::IBiometricsFingerprint",
@@ -118,6 +117,8 @@ static const std::vector<std::string> aidl_interfaces_to_dump {
 // This is filled when dumpstate is called.
 static std::set<std::string> extra_hal_interfaces_to_dump;
 
+static std::set<std::string> extra_aidl_interfaces_to_dump;
+
 static void read_extra_hals_to_dump_from_property() {
     // extra hals to dump are already filled
     if (!extra_hal_interfaces_to_dump.empty()) {
@@ -134,6 +135,21 @@ static void read_extra_hals_to_dump_from_property() {
     }
 }
 
+static void read_extra_aidl_to_dump_from_property() {
+    if (!extra_aidl_interfaces_to_dump.empty()) {
+        return;
+    }
+    std::string value = android::base::GetProperty("ro.dump.aidl.extra", "");
+    std::vector<std::string> tokens = android::base::Split(value, ",");
+    for (const auto &token : tokens) {
+        std::string trimmed_token = android::base::Trim(token);
+        if (trimmed_token.length() == 0) {
+            continue;
+        }
+        extra_aidl_interfaces_to_dump.insert(std::move(trimmed_token));
+    }
+}
+
 // check if interface is included in either default hal list or extra hal list
 bool should_dump_hal_interface(const std::string& interface) {
     for (const char** i = hidl_hal_interfaces_to_dump; *i; i++) {
@@ -142,6 +158,20 @@ bool should_dump_hal_interface(const std::string& interface) {
         }
     }
     return extra_hal_interfaces_to_dump.find(interface) != extra_hal_interfaces_to_dump.end();
+}
+
+bool should_dump_aidl_interface(const std::string& interface) {
+    for (const auto &aidl_prefix : aidl_interfaces_to_dump) {
+        if (interface.rfind(aidl_prefix, 0) == 0) {
+            return true;
+        }
+    }
+    for (const auto &extra_aidl_prefix : extra_aidl_interfaces_to_dump) {
+        if (interface.rfind(extra_aidl_prefix, 0) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool should_dump_native_traces(const char* path) {
@@ -166,12 +196,11 @@ static void get_interesting_aidl_pids(std::set<int> &pids) {
     using ServiceDebugInfo = android::IServiceManager::ServiceDebugInfo;
     auto sm = android::defaultServiceManager();
     std::vector<ServiceDebugInfo> serviceDebugInfos = sm->getServiceDebugInfo();
+    read_extra_aidl_to_dump_from_property();
+
     for (const auto & serviceDebugInfo : serviceDebugInfos) {
-        for (const auto &aidl_prefix : aidl_interfaces_to_dump) {
-            // Check for prefix match with aidl interface to dump
-            if (serviceDebugInfo.name.rfind(aidl_prefix, 0) == 0) {
-                pids.insert(serviceDebugInfo.pid);
-            }
+        if (should_dump_aidl_interface(serviceDebugInfo.name)) {
+            pids.insert(serviceDebugInfo.pid);
         }
     }
 }

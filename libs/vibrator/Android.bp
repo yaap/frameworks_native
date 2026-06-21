@@ -51,6 +51,7 @@ cc_library {
     defaults: ["libvibrator_defaults"],
 
     shared_libs: [
+        "libbase",
         "libbinder",
         "liblog",
         "libutils",
@@ -103,5 +104,6 @@ cc_library {
         "//frameworks/native/libs/vibrator",
         "//frameworks/native/libs/vibrator/tests",
         "//frameworks/av/media/libeffects/hapticgenerator",
+        "//vendor:__subpackages__",
     ],
 }

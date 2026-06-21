@@ -53,47 +53,6 @@ int64_t = ctypes.c_int64
 uint16_t = ctypes.c_uint16
 VkFlags64 = uint64_t
 """
-# TODO: b/415706521 (Refactor EXTRA_STRUCTURES_CONTENT Logic to Use XML Generation)
-EXTRA_STRUCTURES_CONTENT = """
-@dataclass
-class VkExtent3D:
-    width: uint32_t
-    height: uint32_t
-    depth: uint32_t
-
-@dataclass
-class VkImageFormatProperties:
-    maxExtent: VkExtent3D
-    maxMipLevels: uint32_t
-    maxArrayLayers: uint32_t
-    sampleCounts: VkSampleCountFlags
-    maxResourceSize: VkDeviceSize
-
-@dataclass
-class VkExtensionProperties:
-    extensionName: str
-    specVersion: uint32_t
-
-@dataclass
-class VkFormatProperties:
-    linearTilingFeatures: VkFormatFeatureFlags
-    optimalTilingFeatures: VkFormatFeatureFlags
-    bufferFeatures: VkFormatFeatureFlags
-
-@dataclass
-class VkLayerProperties:
-    layerName: str
-    specVersion: uint32_t
-    implementationVersion: uint32_t
-    description: str
-
-@dataclass
-class VkQueueFamilyProperties:
-    queueFlags: VkQueueFlags
-    queueCount: uint32_t
-    timestampValidBits: uint32_t
-    minImageTransferGranularity: VkExtent3D
-"""
 
 # TODO: b/415706507 (Find a way to identify this structs from vk.xml API_1_0 tag)
 VULKAN_API_1_0_STRUCTS_CONTENT = """# --- STRUCTS USED BY VULKAN_API_1_0 ---
@@ -137,7 +96,7 @@ VALID_ALIAS_FLAGS = ("VkFlags", "VkFlags64")
 VK_STRUCTURE_TYPE = "VkStructureType"
 VK_API_CONSTANTS = "API Constants"
 
-VK_API_FILTER = "vulkan,vulkansc"
+VK_API_FILTER = "vulkan,vulkansc,vulkanbase"
 VK_VULKAN_FILTER = "vulkan"
 VK_VULKAN_SC_FILTER = "vulkansc"
 
@@ -209,6 +168,16 @@ CORE_MAPPING_STRUCT_LIST = []  # Physical device structs that match the CORE_VER
 VK_PHYSICAL_DEVICE_DEPENDENT_STRUCTURES_LIST = []  # Structs that physical device structs depend on
 REQUIRED_STRUCT_NAMES = []  # All structs deemed necessary (physical device + dependencies)
 REQUIRED_DATA_MEMBERS = []
+
+# Array of struct names that are added manually to vkjson* files
+EXTRA_STRUCTURES_CONTENT = [
+    "VkExtent3D",
+    "VkImageFormatProperties",
+    "VkExtensionProperties",
+    "VkFormatProperties",
+    "VkLayerProperties",
+    "VkQueueFamilyProperties",
+]
 
 # Mappings derived from parsing
 alias_map: Dict[str, str] = {}  # Maps alias name to original name
@@ -504,8 +473,89 @@ def fetch_struct_handles(root: ET.Element):
     return created_class_names
 
 
+def generate_dataclasses_from_xml(root: ET.Element, struct_names: List[str]) -> str:
+    """Generates Python dataclass for a given list of struct names from vk.xml."""
+    content = ""
+    for struct_name in struct_names:
+        struct_elem = root.find(f".//type[@name='{struct_name}'][@category='struct']")
+        if struct_elem is None:
+            continue
+
+        content += "@dataclass\n"
+        content += f"class {struct_name}:\n"
+
+        members = []
+        for member_elem in struct_elem.findall('member'):
+            details = extract_member_details(member_elem)
+            if not details:
+                continue
+
+            member_name, member_type_c, member_array_size = details
+
+            try:
+                python_type_hint = format_data_types(member_type_c, member_array_size, struct_name)
+            except Exception:
+                python_type_hint = member_type_c
+                if member_type_c == 'char' and member_array_size:
+                    python_type_hint = 'str'
+
+            members.append(f"    {member_name}: {python_type_hint}\n")
+
+        if members:
+            content += "".join(members)
+        else:
+            content += "    pass\n"
+        content += "\n"
+    return content
+
+def extract_member_details(
+    member_elem: ET.Element,
+) -> Optional[Tuple[str, str, Optional[str]]]:
+    """Extracts name, type, and array size from a member XML element."""
+    member_type_tag = member_elem.find(TAG_TYPE)
+    member_name_tag = member_elem.find(TAG_NAME)
+
+    if member_type_tag is None or member_name_tag is None:
+        return None
+
+    member_type_c = get_element_text(member_type_tag)  # C type (e.g., 'uint32_t', 'const char*')
+    member_name = get_element_text(member_name_tag) # Member variable name
+
+    # Skip standard Vulkan struct members (sType, pNext)
+    if member_name in STANDARD_MEMBER_NAMES_TO_SKIP:
+        return None
+
+    member_array_size: Optional[str] = None # Extracted array size (like 'VK_UUID_SIZE')
+    # --- Determine Array Size (from 'len' attribute or '[size]' notation) ---
+    len_attr = member_elem.get(ATTR_LEN)
+    if len_attr and len_attr.strip().lower() != "null-terminated":
+        member_array_size = len_attr.strip()
+    elif member_name_tag is not None:  # Check for '[size]' notation after <name> tag
+        tail_text = member_name_tag.tail.strip() if member_name_tag.tail else ""
+        next_tag = find_next_tag(member_elem, member_name_tag)
+        # Case 2a: Size defined by an adjacent <enum> tag: <name>type_name</name>[<enum>SIZE</enum>]
+        if tail_text.startswith("[") and next_tag is not None and next_tag.tag == TAG_ENUM:
+            enum_text = get_element_text(next_tag)
+            enum_tail = next_tag.tail.strip() if next_tag.tail else ""
+            if enum_text and enum_tail.endswith("]"):
+                member_array_size = enum_text
+        # Case 2b: Size defined in plain text in tail: <name>type_name</name>[32]
+        elif not member_array_size:
+            match = ARRAY_TAIL_REGEX.search(tail_text)
+            if match:
+                member_array_size = match.group(1).strip()
+
+    return member_name, member_type_c, member_array_size
+
+def write_extra_structures(root: ET.Element, vk_py_file_handle: IO[str]):
+    """Generates and writes dataclasses for extra structures."""
+    content = "\n# --- Pre-defined Struct Definitions ---\n"
+    content += generate_dataclasses_from_xml(root, EXTRA_STRUCTURES_CONTENT)
+    write_py_file(vk_py_file_handle, content)
+
+
 def write_empty_dataclasses(dataclasses_list: List[str], vk_py_file_handle: IO[str]):
-    """Generates empty Python dataclasses for Vulkan handle types and adds predefined common structs."""
+    """Generates empty Python dataclasses for Vulkan handle types."""
     created_class_names = set()  # Track generated classes to avoid duplicates
     content_to_append = "\n# --- Empty Handle Dataclasses ---\n"
 
@@ -519,10 +569,6 @@ def write_empty_dataclasses(dataclasses_list: List[str], vk_py_file_handle: IO[s
             content_to_append += f"    pass\n\n"
             created_class_names.add(class_name)
 
-    # Add manually defined common Vulkan struct definitions
-    content_to_append += "# --- Pre-defined Struct Definitions ---\n"
-    content_to_append += EXTRA_STRUCTURES_CONTENT
-    content_to_append += "\n"
     write_py_file(vk_py_file_handle, content_to_append)
 
 
@@ -661,39 +707,14 @@ def fetch_all_structs_and_aliases(
         struct_members: List[Tuple[str, str, Optional[str]]] = []
         # Iterate through <member> tags within the struct definition
         for member_elem in struct_elem.findall(TAG_MEMBER):
-            member_type_tag = member_elem.find(TAG_TYPE)
-            member_name_tag = member_elem.find(TAG_NAME)
-
-            member_type = get_element_text(member_type_tag)  # C type (e.g., 'uint32_t', 'const char*')
-            member_name = get_element_text(member_name_tag)  # Member variable name
-            member_array_size: Optional[str] = None  # Extracted array size (like 'VK_UUID_SIZE')
-            member_type_c = member_type  # Keep the original C type string
-
-            # Skip standard Vulkan struct members (sType, pNext)
-            if member_name in STANDARD_MEMBER_NAMES_TO_SKIP:
+            details = extract_member_details(member_elem)
+            if not details:
                 continue
+
+            member_name, member_type_c, member_array_size = details
 
             # Determine base type for dependency checking (strip const/pointer)
             base_type_for_necessity_check = member_type_c.replace("const", "").replace("*", "").strip()
-
-            # --- Determine Array Size (from 'len' attribute or '[size]' notation) ---
-            len_attr = member_elem.get(ATTR_LEN)
-            if len_attr and len_attr.strip().lower() != "null-terminated":
-                member_array_size = len_attr.strip()
-            elif member_name_tag is not None:  # Check for '[size]' notation after <name> tag
-                tail_text = member_name_tag.tail.strip() if member_name_tag.tail else ""
-                next_tag = find_next_tag(member_elem, member_name_tag)
-                # Case 2a: Size defined by an adjacent <enum> tag: <name>type_name</name>[<enum>SIZE</enum>]
-                if tail_text.startswith("[") and next_tag is not None and next_tag.tag == TAG_ENUM:
-                    enum_text = get_element_text(next_tag)
-                    enum_tail = next_tag.tail.strip() if next_tag.tail else ""
-                    if enum_text and enum_tail.endswith("]"):
-                        member_array_size = enum_text
-                # Case 2b: Size defined in plain text in tail: <name>type_name</name>[32]
-                elif not member_array_size:
-                    match = ARRAY_TAIL_REGEX.search(tail_text)
-                    if match:
-                        member_array_size = match.group(1).strip()
 
             # --- Dependency Tracking ---
             # If parsing a physical device struct and a member is a non-primitive type,
@@ -707,14 +728,14 @@ def fetch_all_structs_and_aliases(
                     if base_type_for_necessity_check not in VK_PHYSICAL_DEVICE_DEPENDENT_STRUCTURES_LIST:
                         VK_PHYSICAL_DEVICE_DEPENDENT_STRUCTURES_LIST.append(base_type_for_necessity_check)
 
-            if member_type and member_name:
+            if member_type_c and member_name:
                 if struct_name in REQUIRED_STRUCT_NAMES:
                     # Adding all required ENUMs
                     if base_type_for_necessity_check in ALL_ENUM_NAMES and base_type_for_necessity_check not in NECESSARY_ENUMS:
                         NECESSARY_ENUMS.append(base_type_for_necessity_check)
                 if base_type_for_necessity_check not in REQUIRED_DATA_MEMBERS:
                     REQUIRED_DATA_MEMBERS.append(base_type_for_necessity_check)
-                struct_members.append((member_name, member_type, member_array_size))
+                struct_members.append((member_name, member_type_c, member_array_size))
 
         if struct_name:
             parsed_structs[struct_name] = struct_members
@@ -1285,7 +1306,20 @@ def generate_vk_py_content(
 # Format: {feature_name: [{struct_name: sType_enum_value}, ...]}"""
     content += "# --- Vulkan Feature to Struct Mappings ---\n"
     content += feature_comment + "\n"
-    feature_map_str = pprint.pformat(feature_map, indent=4, width=100)
+    versionNumberToStructs = {}
+    for key in feature_map:
+        versionNum = key[-3:]
+        assert re.match(r'[0-9]_[0-9]', versionNum)
+        versionNumberToStructs[versionNum] = []
+
+    for key, value in feature_map.items():
+        versionNum = key[-3:]
+        versionNumberToStructs[versionNum].extend(value)
+
+    for version, struct_list in versionNumberToStructs.items():
+        struct_list.sort(key=lambda x: next(iter(x)))
+
+    feature_map_str = pprint.pformat(versionNumberToStructs, indent=4, width=100)
     content += f"VULKAN_VERSIONS_AND_STRUCTS_MAPPING = {feature_map_str}\n\n"
     return content
 
@@ -1432,6 +1466,7 @@ def gen_vk(xml_path = None, output_path = None):
         write_constants(xml_root, vk_py_file_handle)
         write_api_constants(xml_root, vk_py_file_handle)
         write_aliases(vk_py_file_handle, aliases_vk_flags_data, "# --- VkFlags Type Aliases ---", filter_required_data_members=True)
+        write_extra_structures(xml_root, vk_py_file_handle)
         write_empty_dataclasses(empty_dataclass_names, vk_py_file_handle)
         write_structs(vk_py_file_handle, all_structs_data)
         write_aliases(vk_py_file_handle, struct_alias_data, "# --- Physical Device Struct Aliases ---")

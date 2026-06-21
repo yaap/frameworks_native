@@ -2,7 +2,11 @@ per-file HdrSdrRatioOverlay_test.cpp = alecmouri@google.com, sallyqi@google.com,
 
 # Most layer-related files are owned by WM
 per-file Layer* = set noparent
-per-file Layer* = pdwilliams@google.com, vishnun@google.com, melodymhsu@google.com
+per-file Layer* = pdwilliams@google.com, vishnun@google.com, melodymhsu@google.com, racarr@google.com
+
+# Effects-related files are owned by A11y
+per-file Daltonizer* = set noparent
+per-file Daltonizer* = file:/platform/frameworks/base:/services/accessibility/OWNERS
 
 per-file LayerHistoryIntegrationTest.cpp = file:/services/surfaceflinger/OWNERS
 per-file LayerInfoTest.cpp = file:/services/surfaceflinger/OWNERS

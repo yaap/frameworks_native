@@ -36,3 +36,29 @@ cc_library {
     export_include_dirs: ["include"],
     export_static_lib_headers: ["libguiflags"],
 }
+
+cc_test {
+    name: "bufferqueueconverter_unit_tests",
+    srcs: ["BufferQueueConverter_test.cpp"],
+    shared_libs: [
+        "libbufferqueueconverter",
+        "libgui",
+        "libui",
+        "libutils",
+        "libbase",
+        "liblog",
+    ],
+    data_libs: [
+        "libbufferqueueconverter",
+    ],
+    static_libs: [
+        "libgtest_main",
+        "libgmock",
+    ],
+    cflags: [
+        "-Werror",
+        "-Wno-missing-field-initializers",
+    ],
+    test_suites: ["device-tests"],
+    header_libs: ["libbufferqueueconverter_headers"],
+}

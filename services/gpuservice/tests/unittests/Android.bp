@@ -21,11 +21,6 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
-cc_aconfig_library {
-    name: "gpuservice_unittest_flags_c_lib",
-    aconfig_declarations: "graphicsenv_flags",
-}
-
 genrule_defaults {
     name: "gpuservice_unittest_feature_config_pb_defaults",
     tools: ["aprotoc"],
@@ -60,7 +55,6 @@ cc_test {
     name: "gpuservice_unittest",
     test_suites: ["device-tests"],
     defaults: [
-        "aconfig_lib_cc_static_link.defaults",
         "libgpuservice_defaults",
     ],
     srcs: [
@@ -85,7 +79,6 @@ cc_test {
         "libutils",
     ],
     static_libs: [
-        "gpuservice_unittest_flags_c_lib",
         "libgmock",
         "libgpuservice",
         "libperfetto_client_experimental",

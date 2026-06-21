@@ -15,6 +15,7 @@
  */
 
 #include "../InputProcessor.h"
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "TestInputListener.h"
@@ -93,9 +94,7 @@ TEST_F(InputProcessorTest, SendToNextStage_NotifySwitchArgs) {
                           /*switchValues=*/4, /*switchMask=*/5);
 
     mProcessor->notifySwitch(args);
-    NotifySwitchArgs outArgs;
-    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifySwitchWasCalled(&outArgs));
-    ASSERT_EQ(args, outArgs);
+    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifySwitchWasCalled(testing::Eq(args)));
 }
 
 /**
@@ -106,9 +105,7 @@ TEST_F(InputProcessorTest, SendToNextStage_NotifyDeviceResetArgs) {
     NotifyDeviceResetArgs args(/*sequenceNum=*/1, /*eventTime=*/2, /*deviceId=*/3);
 
     mProcessor->notifyDeviceReset(args);
-    NotifyDeviceResetArgs outArgs;
-    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyDeviceResetWasCalled(&outArgs));
-    ASSERT_EQ(args, outArgs);
+    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyDeviceResetWasCalled(testing::Eq(args)));
 }
 
 TEST_F(InputProcessorTest, SetMotionClassifier_Enabled) {

@@ -37,6 +37,7 @@ namespace android {
 namespace installd {
 
 using IFsveritySetupAuthToken = android::os::IInstalld::IFsveritySetupAuthToken;
+using IAppDataOperationCallback = android::os::IInstalld::IAppDataOperationCallback;
 
 class InstalldNativeService : public BinderService<InstalldNativeService>, public os::BnInstalld {
 public:
@@ -68,7 +69,8 @@ public:
                                  const std::string& packageName, int32_t userId, int32_t flags,
                                  int32_t appId, int32_t previousAppId, const std::string& seInfo,
                                  int32_t targetSdkVersion, int64_t* ceDataInode,
-                                 int64_t* deDataInode);
+                                 int64_t* deDataInode, int64_t* pccCeDataInode,
+                                 int64_t* pccDeDataInode, int32_t pccUid, int32_t previousPccUid);
 
     binder::Status createAppData(
             const android::os::CreateAppDataArgs& args,
@@ -86,18 +88,26 @@ public:
     binder::Status migrateAppData(const std::optional<std::string>& uuid,
             const std::string& packageName, int32_t userId, int32_t flags);
     binder::Status clearAppData(const std::optional<std::string>& uuid,
-            const std::string& packageName, int32_t userId, int32_t flags, int64_t ceDataInode);
+                                const std::string& packageName, int32_t userId, int32_t flags,
+                                int64_t ceDataInode, int64_t pccCeDataInode);
     binder::Status destroyAppData(const std::optional<std::string>& uuid,
-            const std::string& packageName, int32_t userId, int32_t flags, int64_t ceDataInode);
-
+                                  const std::string& packageName, int32_t userId, int32_t flags,
+                                  int64_t ceDataInode, int64_t pccCeDataInode);
+    binder::Status destroyPccData(const std::optional<std::string>& uuid,
+                                  const std::string& packageName, int32_t userId, int32_t flags,
+                                  int64_t ceDataInode);
     binder::Status fixupAppData(const std::optional<std::string>& uuid, int32_t flags);
 
     binder::Status snapshotAppData(const std::optional<std::string>& volumeUuid,
-            const std::string& packageName, const int32_t user, const int32_t snapshotId,
-            int32_t storageFlags, int64_t* _aidl_return);
+                                   const std::string& packageName, const int32_t user,
+                                   const int32_t snapshotId, int32_t storageFlags,
+                                   int64_t* _aidl_return);
+
     binder::Status restoreAppDataSnapshot(const std::optional<std::string>& volumeUuid,
-            const std::string& packageName, const int32_t appId, const std::string& seInfo,
-            const int32_t user, const int32_t snapshotId, int32_t storageFlags);
+                                          const std::string& packageName, const int32_t appId,
+                                          const int32_t pccId, const std::string& seInfo,
+                                          const int32_t user, const int32_t snapshotId,
+                                          int32_t storageFlags);
     binder::Status destroyAppDataSnapshot(const std::optional<std::string> &volumeUuid,
             const std::string& packageName, const int32_t user, const int64_t ceSnapshotInode,
             const int32_t snapshotId, int32_t storageFlags);
@@ -105,12 +115,15 @@ public:
             const int32_t user, const std::vector<int32_t>& retainSnapshotIds);
 
     binder::Status getAppSize(const std::optional<std::string>& uuid,
-            const std::vector<std::string>& packageNames, int32_t userId, int32_t flags,
-            int32_t appId, const std::vector<int64_t>& ceDataInodes,
-            const std::vector<std::string>& codePaths, std::vector<int64_t>* _aidl_return);
-    binder::Status getUserSize(const std::optional<std::string>& uuid,
-            int32_t userId, int32_t flags, const std::vector<int32_t>& appIds,
-            std::vector<int64_t>* _aidl_return);
+                              const std::vector<std::string>& packageNames, int32_t userId,
+                              int32_t flags, int32_t appId, int32_t pccId,
+                              const std::vector<int64_t>& ceDataInodes,
+                              const std::vector<std::string>& codePaths,
+                              std::vector<int64_t>* _aidl_return);
+    binder::Status getUserSize(const std::optional<std::string>& uuid, int32_t userId,
+                               int32_t flags, const std::vector<int32_t>& appIds,
+                               const std::vector<int32_t>& pccIds,
+                               std::vector<int64_t>* _aidl_return);
     binder::Status getExternalSize(const std::optional<std::string>& uuid,
             int32_t userId, int32_t flags, const std::vector<int32_t>& appIds,
             std::vector<int64_t>* _aidl_return);
@@ -129,9 +142,10 @@ public:
             int32_t userId, int32_t appId, int64_t cacheQuota);
 
     binder::Status moveCompleteApp(const std::optional<std::string>& fromUuid,
-            const std::optional<std::string>& toUuid, const std::string& packageName,
-            int32_t appId, const std::string& seInfo,
-            int32_t targetSdkVersion, const std::string& fromCodePath);
+                                   const std::optional<std::string>& toUuid,
+                                   const std::string& packageName, int32_t appId, int32_t pccId,
+                                   const std::string& seInfo, int32_t targetSdkVersion,
+                                   const std::string& fromCodePath);
 
     binder::Status dexopt(const std::string& apkPath, int32_t uid, const std::string& packageName,
                           const std::string& instructionSet, int32_t dexoptNeeded,
@@ -215,6 +229,17 @@ public:
                                   const std::string& filePath, const std::string& packageName,
                                   int32_t* _aidl_return);
 
+    binder::Status copyAppDataPath(const std::optional<std::string>& uuid,
+                                   const std::string& fromPath, const std::string& toPath,
+                                   int32_t userId, int32_t appId, const std::string& seInfo,
+                                   int32_t flags, int32_t callerUid,
+                                   const android::sp<IAppDataOperationCallback>& callback);
+    binder::Status moveAppDataPath(const std::optional<std::string>& uuid,
+                                   const std::string& fromPath, const std::string& toPath,
+                                   int32_t userId, int32_t appId, const std::string& seInfo,
+                                   int32_t flags, int32_t callerUid,
+                                   const android::sp<IAppDataOperationCallback>& callback);
+
 private:
     std::recursive_mutex mLock;
     std::unordered_map<userid_t, std::weak_ptr<std::shared_mutex>> mUserIdLock;
@@ -235,7 +260,9 @@ private:
                                        const std::string& packageName, int32_t userId,
                                        int32_t flags, int32_t appId, int32_t previousAppId,
                                        const std::string& seInfo, int32_t targetSdkVersion,
-                                       int64_t* ceDataInode, int64_t* deDataInode);
+                                       int64_t* ceDataInode, int64_t* deDataInode,
+                                       int64_t* pccCeDataInode, int64_t* pccDeDataInode,
+                                       int32_t pccId, int32_t previousPccId);
     binder::Status restoreconAppDataLocked(const std::optional<std::string>& uuid,
                                            const std::string& packageName, int32_t userId,
                                            int32_t flags, int32_t appId, const std::string& seInfo);
@@ -258,6 +285,16 @@ private:
     binder::Status restoreconSdkDataLocked(const std::optional<std::string>& uuid,
                                            const std::string& packageName, int32_t userId,
                                            int32_t flags, int32_t appId, const std::string& seInfo);
+
+    binder::Status clearCeDirectoryLocked(const std::string& path, int32_t flags);
+
+    binder::Status clearDeDirectoryLocked(const std::string& path, const std::string& suffix);
+
+    binder::Status createOrDeletePccDirectoryLocked(const char* volumeUuid, userid_t userId,
+                                                    const char* packageName, int32_t pccId,
+                                                    int32_t previousPccId,
+                                                    const std::string& seInfo, mode_t targetMode,
+                                                    bool isCeStorage, int64_t* pccDataInode);
 };
 
 }  // namespace installd

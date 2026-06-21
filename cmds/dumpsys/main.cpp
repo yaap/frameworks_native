@@ -21,6 +21,7 @@
 #include "dumpsys.h"
 
 #include <binder/IServiceManager.h>
+#include <binder/ProcessState.h>
 
 #include <iostream>
 #include <signal.h>
@@ -29,6 +30,7 @@ using namespace android;
 
 int main(int argc, char* const argv[]) {
     signal(SIGPIPE, SIG_IGN);
+    ProcessState::self()->startThreadPool();
     sp<IServiceManager> sm = defaultServiceManager();
     fflush(stdout);
     if (sm == nullptr) {

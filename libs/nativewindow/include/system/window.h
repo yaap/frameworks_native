@@ -260,7 +260,37 @@ enum {
     NATIVE_WINDOW_SET_FRAME_TIMELINE_INFO         = 48,    /* private */
     NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER2         = 49,    /* private */
     NATIVE_WINDOW_SET_BUFFERS_ADDITIONAL_OPTIONS  = 50,
+    NATIVE_WINDOW_SET_PRODUCER_THROTTLING_ENABLED = 51,
+    NATIVE_WINDOW_GET_PRODUCER_THROTTLING_ENABLED = 52,
+    NATIVE_WINDOW_SET_PRESENT_MODE                = 53,
+    NATIVE_WINDOW_GET_LAST_REPLACED_FRAME_ID      = 54,
+    NATIVE_WINDOW_API_SET_ON_ACQUIRED_CALLBACK    = 55,
+    NATIVE_WINDOW_API_SET_ON_DROPPED_CALLBACK     = 56,
+    NATIVE_WINDOW_API_CONNECT_WITH_LISTENER       = 57,
     // clang-format on
+};
+
+/* parameter for NATIVE_WINDOW_SET_PRESENT_MODE */
+enum {
+    /*
+     * No present mode has been explicitly set. The behavior is implementation-dependent
+     * and may differ from ANATIVEWINDOW_PRESENT_DEFAULT.
+     */
+    ANATIVEWINDOW_PRESENT_UNKNOWN = 0,
+
+    /*
+     * The consumer acquires the oldest buffer in the queue. This is the
+     * default behavior.
+     */
+    ANATIVEWINDOW_PRESENT_DEFAULT = 1,
+
+    /*
+     * The consumer acquires the latest buffer in the queue, dropping any
+     * previously queued buffers. This behavior is applied on a frame-by-frame
+     * basis, ensuring that already queued buffers are not overwritten, and is
+     * particularly useful for latency-sensitive applications.
+     */
+    ANATIVEWINDOW_PRESENT_FIFO_LATEST_READY = 2,
 };
 
 /* parameter for NATIVE_WINDOW_[API_][DIS]CONNECT */
@@ -865,6 +895,19 @@ static inline int native_window_api_connect(
 }
 
 /*
+ * Indentical to native_window_api_connect(..., int api) but also connects a
+ * listener which can be used by setting native_window_set_on_acquired_callback
+ * and native_window_set_on_dropped_callback
+ */
+static inline int native_window_api_connect_with_listener(struct ANativeWindow* window, int api,
+                                                          bool needsReleaseNotify,
+                                                          bool needsAcquiredNotify,
+                                                          bool needsDroppedNotify) {
+    return window->perform(window, NATIVE_WINDOW_API_CONNECT_WITH_LISTENER, api, needsReleaseNotify,
+                           needsAcquiredNotify, needsDroppedNotify);
+}
+
+/*
  * native_window_api_disconnect(..., int api)
  * disconnect the API from this window.
  * An error is returned if for instance the window wasn't connected in the
@@ -952,6 +995,11 @@ static inline int native_window_get_refresh_cycle_duration(
 {
     return window->perform(window, NATIVE_WINDOW_GET_REFRESH_CYCLE_DURATION,
             outRefreshDuration);
+}
+
+static inline int native_window_get_last_replaced_frame_id(struct ANativeWindow* window,
+                                                           uint64_t* frameId) {
+    return window->perform(window, NATIVE_WINDOW_GET_LAST_REPLACED_FRAME_ID, frameId);
 }
 
 static inline int native_window_get_next_frame_id(
@@ -1151,6 +1199,48 @@ static inline int native_window_set_frame_rate(struct ANativeWindow* window, flo
                            (int)compatibility, (int)changeFrameRateStrategy);
 }
 
+typedef void (*ANativeWindow_OnAcquiredCallback)(uint64_t bufferId, uint64_t frameId, void* data);
+
+typedef void (*ANativeWindow_OnDroppedCallback)(uint64_t bufferId, uint64_t frameId, void* data);
+
+/*
+ * Sets a callback fro when a buffer is acquired in BufferQueueConsumer::acquireBuffer.
+ * For this to work a native_window_api_connect_with_listener must be called beforehand.
+ */
+static inline int native_window_set_on_acquired_callback(struct ANativeWindow* window,
+                                                         ANativeWindow_OnAcquiredCallback callback,
+                                                         void* data) {
+    return window->perform(window, NATIVE_WINDOW_API_SET_ON_ACQUIRED_CALLBACK, callback, data);
+}
+
+/*
+ * Sets a callback for when a buffer is dropped in
+ * BufferQueueConsumer::acquireBuffer or in BufferQueueProducer
+ * For this to work a native_window_api_connect_with_listener must be called beforehand.
+ */
+static inline int native_window_set_on_dropped_callback(struct ANativeWindow* window,
+                                                        ANativeWindow_OnDroppedCallback callback,
+                                                        void* data) {
+    return window->perform(window, NATIVE_WINDOW_API_SET_ON_DROPPED_CALLBACK, callback, data);
+}
+
+/*
+ * Control BufferQueueProducer throttling when queuing a buffer
+ */
+static inline int native_window_set_producer_throttling_enabled(struct ANativeWindow* window,
+                                                                bool enabled) {
+    return window->perform(window, NATIVE_WINDOW_SET_PRODUCER_THROTTLING_ENABLED, enabled);
+}
+
+static inline int native_window_set_present_mode(struct ANativeWindow* window, int32_t mode) {
+    return window->perform(window, NATIVE_WINDOW_SET_PRESENT_MODE, mode);
+}
+
+static inline int native_window_is_producer_throttling_enabled(struct ANativeWindow* window,
+                                                               bool* outEnabled) {
+    return window->perform(window, NATIVE_WINDOW_GET_PRODUCER_THROTTLING_ENABLED, outEnabled);
+}
+
 struct ANativeWindowFrameTimelineInfo {
     // Frame Id received from ANativeWindow_getNextFrameId.
     uint64_t frameNumber;
@@ -1173,6 +1263,16 @@ struct ANativeWindowFrameTimelineInfo {
 
     // The start time of a frame that was not drawn and squashed into this frame.
     int64_t skippedFrameStartTimeNanos;
+
+    // The amount of fixup added to the vsync time by the app to correct for jitter.
+    int64_t vsyncResyncedJitterNanos;
+
+    // The amount of time spent in dequeueBuffer waiting for an available buffer.
+    int64_t dequeueBufferDurationNanos;
+
+    // Time used by animations to compute progress and render frames.
+    // 0 is first frame of animation / non-animated frame.
+    int64_t animationTime;
 };
 
 static inline int native_window_set_frame_timeline_info(

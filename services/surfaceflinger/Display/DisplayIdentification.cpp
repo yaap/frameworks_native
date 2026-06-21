@@ -239,7 +239,7 @@ std::optional<Edid> parseEdid(const DisplayIdentificationData& edid) {
     uint8_t edidStructureVersion = 0;
     uint8_t edidStructureRevision = 0;
     bool isDigital = false;
-    if (FlagManager::getInstance().parse_edid_version_and_input_type()) {
+    if (FlagManager::getInstance().parse_edid_version_and_input_type_v2()) {
         constexpr uint8_t kEdidStructureVersionOffset = 18;
         if (edid.size() < kEdidStructureVersionOffset + sizeof(uint16_t)) {
             ALOGE("Invalid EDID: EDID structure version is truncated.");
@@ -473,13 +473,20 @@ PhysicalDisplayId getVirtualDisplayId(uint32_t id) {
 }
 
 PhysicalDisplayId generateEdidDisplayId(const Edid& edid) {
+    // Prioritize the DTD's physical size to generate a more stable ID across
+    // inconsistent ports. The value's consistency is what matters, not its
+    // units (mm vs cm), so mixing them is acceptable. Fall back to the main EDID size.
+    const ui::Size physicalSize = edid.preferredDetailedTimingDescriptor
+            ? edid.preferredDetailedTimingDescriptor->physicalSizeInMm
+            : edid.physicalSizeInCm;
+
     const ftl::Concat displayDetailsString{edid.manufacturerId,
                                            edid.productId,
                                            ftl::truncated<13>(edid.displayName),
                                            edid.manufactureWeek,
                                            edid.manufactureOrModelYear,
-                                           edid.physicalSizeInCm.getWidth(),
-                                           edid.physicalSizeInCm.getHeight()};
+                                           physicalSize.getWidth(),
+                                           physicalSize.getHeight()};
 
     // String has to be cropped to 64 characters (at most) for ftl::stable_hash.
     // This is fine as the accuracy or completeness of the above fields is not

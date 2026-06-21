@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <android/sensor.h>
 #include <utils/Errors.h>
 #include <utils/Mutex.h>
 #include <utils/RefBase.h>
@@ -30,7 +31,6 @@
 // ----------------------------------------------------------------------------
 #define WAKE_UP_SENSOR_EVENT_NEEDS_ACK (1U << 31)
 struct ALooper;
-struct ASensorEvent;
 
 // Concrete types for the NDK
 struct ASensorEventQueue {
@@ -109,7 +109,7 @@ private:
     sp<BitTube> mSensorChannel;
     mutable Mutex mLock;
     mutable sp<Looper> mLooper;
-    ASensorEvent* mRecBuffer;
+    ASensorEvent mRecBuffer[MAX_RECEIVE_BUFFER_EVENT_COUNT];
     SensorManager& mSensorManager;
     String8 mPackageName;
     size_t mAvailable;

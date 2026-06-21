@@ -32,7 +32,7 @@
 // test suite.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     FuzzedDataProvider fdp(data, size);
-    CapturedStderr cap;
+    android::base::CapturedStderr cap;
 
     while (fdp.remaining_bytes() > 1) {
         switch (fdp.ConsumeIntegral<uint8_t>() % 3) {

@@ -23,6 +23,7 @@
 #include <android-base/expected.h>
 #include <ftl/ignore.h>
 
+#include "ftl/non_null.h"
 #include "test_framework/core/DisplayConfiguration.h"
 #include "test_framework/core/TestService.h"
 #include "test_framework/hwc3/Hwc3Controller.h"
@@ -33,10 +34,10 @@ namespace android::surfaceflinger::tests::end2end::test_framework::core {
 struct TestService::Passkey final {};
 
 auto TestService::startWithDisplays(const std::vector<DisplayConfiguration>& displays)
-        -> base::expected<std::unique_ptr<TestService>, std::string> {
+        -> base::expected<std::shared_ptr<TestService>, std::string> {
     using namespace std::string_literals;
 
-    auto service = std::make_unique<TestService>(TestService::Passkey{});
+    auto service = std::make_shared<TestService>(TestService::Passkey{});
     if (service == nullptr) {
         return base::unexpected("Failed to construct the TestService instance."s);
     }
@@ -56,13 +57,13 @@ auto TestService::init(std::span<const DisplayConfiguration> displays)
         -> base::expected<void, std::string> {
     using namespace std::string_literals;
 
-    auto hwcResult = hwc3::Hwc3Controller::make(displays);
+    auto hwcResult = hwc3::Hwc3Controller::make(ftl::as_non_null(shared_from_this()), displays);
     if (!hwcResult) {
         return base::unexpected(std::move(hwcResult).error());
     }
     auto hwc = *std::move(hwcResult);
 
-    auto flingerResult = surfaceflinger::SFController::make();
+    auto flingerResult = surfaceflinger::SFController::make(ftl::as_non_null(shared_from_this()));
     if (!flingerResult) {
         return base::unexpected(std::move(flingerResult).error());
     }

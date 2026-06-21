@@ -14,13 +14,24 @@
  * limitations under the License.
  */
 
-use crate::session::FileDescriptorTransportMode;
+use crate::session::{FileDescriptorTransportMode, RpcSessionRef};
 use binder::{unstable_api::AsNative, SpIBinder};
-use binder_rpc_unstable_bindgen::ARpcServer;
+use binder_rpc_unstable_bindgen::{ARpcServer, ARpcSession};
 use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
-use std::ffi::{c_uint, CString};
+use std::ffi::{c_uint, c_void, CString};
 use std::io::{Error, ErrorKind};
 use std::os::unix::io::{IntoRawFd, OwnedFd};
+
+/// Trait alias for the factory callback passed into the per-session constructor of the RpcServer.
+pub trait RpcServerFactory:
+    Fn(&RpcSessionRef, &[u8]) -> Option<SpIBinder> + Send + Sync + 'static
+{
+}
+
+impl<T> RpcServerFactory for T where
+    T: Fn(&RpcSessionRef, &[u8]) -> Option<SpIBinder> + Send + Sync + 'static
+{
+}
 
 foreign_type! {
     type CType = binder_rpc_unstable_bindgen::ARpcServer;
@@ -84,6 +95,27 @@ impl RpcServer {
                 service,
                 socket_fd.into_raw_fd(),
             ))
+        }
+    }
+
+    /// Creates a binder RPC server, serving per-session root objects from the given factory on the
+    /// given socket file descriptor. The socket should be bound to an address before calling this
+    /// function.
+    pub fn new_bound_socket_with_factory<F: RpcServerFactory>(
+        socket_fd: OwnedFd,
+        factory: F,
+    ) -> Result<RpcServer, Error> {
+        let userfactory = Box::into_raw(Box::new(factory)).cast::<c_void>();
+        // SAFETY: The server takes ownership of the socket FD as well as the factory method
+        unsafe {
+            Self::checked_from_ptr(
+                binder_rpc_unstable_bindgen::ARpcServer_newBoundSocketWithFactory(
+                    socket_fd.into_raw_fd(),
+                    Some(per_session_factory_wrapper::<F>),
+                    userfactory,
+                    Some(per_session_factory_deleter_wrapper::<F>),
+                ),
+            )
         }
     }
 
@@ -195,4 +227,52 @@ impl RpcServerRef {
             Err(Error::from(ErrorKind::UnexpectedEof))
         }
     }
+}
+
+// This reconstructs the closure (i.e the factory method passed by the user) from `userfactory` and calls it.
+/// # Safety
+///
+/// This function is called from C++ and must satisfy the following requirements:
+/// * `session` must be a valid pointer to an `ARpcSession`.
+/// * `client_info_data` must point to a valid memory region of size `client_info_len` bytes.
+/// * `userfactory` must be a valid pointer to `F` (the factory closure) that outlives this call.
+unsafe extern "C" fn per_session_factory_wrapper<F: RpcServerFactory>(
+    session: *mut ARpcSession,
+    client_info_data: *const c_void,
+    client_info_len: usize,
+    userfactory: *mut c_void,
+) -> *mut binder_ndk_sys::AIBinder {
+    // SAFETY: userfactory is a valid pointer to F passed from `new_bound_socket_with_factory`.
+    let factory = unsafe { &*(userfactory.cast::<F>()) };
+    // SAFETY: The session pointer is guaranteed to be valid for the duration of this callback.
+    let session_ref = unsafe { RpcSessionRef::from_ptr(session) };
+
+    // SAFETY: client_info_data is guaranteed to be a valid pointer for client_info_len bytes
+    // for the duration of this callback.
+    let client_info_slice =
+        unsafe { std::slice::from_raw_parts(client_info_data.cast::<u8>(), client_info_len) };
+
+    match factory(session_ref, client_info_slice) {
+        Some(binder) => {
+            // Prevent Rust from dropping the SpIBinder, as ownership is being transferred to C++.
+            let mut binder = std::mem::ManuallyDrop::new(binder);
+            binder.as_native_mut()
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
+// This is called by the C++ side when the `std::shared_ptr` managing the `userfactory`
+// goes out of scope, ensuring the Rust closure is properly dropped.
+/// # Safety
+///
+/// This function is called from C++ and must satisfy the following requirements:
+/// * `userfactory` must be a valid pointer to `F` (the factory closure) that was
+///   originally created from Box::<F> and has not been freed.
+/// * `userfactory` will be consumed in this function, so it must not be used afterwards.
+unsafe extern "C" fn per_session_factory_deleter_wrapper<F: RpcServerFactory>(
+    userfactory: *mut c_void,
+) {
+    // SAFETY: Reconstruct the Box and drop it to free the memory.
+    let _ = unsafe { Box::from_raw(userfactory.cast::<F>()) };
 }

@@ -307,10 +307,16 @@ public:
     RankedFrameRates getRankedFrameRates(const std::vector<LayerRequirement>&, GlobalSignals,
                                          Fps pacesetterFps = {}) const EXCLUDES(mLock);
 
-    FpsRange getSupportedRefreshRateRange() const EXCLUDES(mLock) {
+    FpsRange getConfigGroupSupportedRefreshRateRange() const EXCLUDES(mLock) {
         std::lock_guard lock(mLock);
-        return {mMinRefreshRateModeIt->second->getPeakFps(),
-                mMaxRefreshRateModeIt->second->getPeakFps()};
+        return {mConfigGroupMinRefreshRateModeIt->second->getPeakFps(),
+                mConfigGroupMaxRefreshRateModeIt->second->getPeakFps()};
+    }
+
+    FpsRange getGlobalSupportedRefreshRateRange() const EXCLUDES(mLock) {
+        std::lock_guard lock(mLock);
+        return {mGlobalMinRefreshRateModeIt->second->getPeakFps(),
+                mGlobalMaxRefreshRateModeIt->second->getPeakFps()};
     }
 
     ftl::Optional<FrameRateMode> onKernelTimerChanged(ftl::Optional<DisplayModeId> desiredModeIdOpt,
@@ -320,7 +326,6 @@ public:
 
     // See mActiveModeOpt for thread safety.
     FrameRateMode getActiveMode() const EXCLUDES(mLock);
-    bool hasActiveMode() const EXCLUDES(mLock);
 
     // Returns a known frame rate that is the closest to frameRate
     Fps findClosestKnownFrameRate(Fps frameRate) const;
@@ -549,13 +554,12 @@ private:
     }
 
     std::vector<FrameRateMode> createFrameRateModes(
-            const Policy&, std::function<bool(const DisplayMode&)>&& filterModes,
-            const FpsRange&) const REQUIRES(mLock);
+            const Policy&, std::function<bool(const DisplayMode&)>&& filterModes, const FpsRange&,
+            bool onlyDivisorsForSameGroup = false) const REQUIRES(mLock);
 
     using PreferredFpsForMode = ftl::SmallMap<DisplayModeId, Fps, 8>;
     PreferredFpsForMode getPreferredFpsForMode(std::optional<int> anchorGroupOpt,
                                                RefreshRateOrder) const REQUIRES(mLock);
-    PreferredFpsForMode getMaxFpsForMode(std::optional<int> anchorGroupOpt) const REQUIRES(mLock);
 
     // The display modes of the active display. The DisplayModeIterators below are pointers into
     // this container, so must be invalidated whenever the DisplayModes change. The Policy below
@@ -564,8 +568,10 @@ private:
 
     ftl::Optional<FrameRateMode> mActiveModeOpt GUARDED_BY(mLock);
 
-    DisplayModeIterator mMinRefreshRateModeIt GUARDED_BY(mLock);
-    DisplayModeIterator mMaxRefreshRateModeIt GUARDED_BY(mLock);
+    DisplayModeIterator mConfigGroupMinRefreshRateModeIt GUARDED_BY(mLock);
+    DisplayModeIterator mConfigGroupMaxRefreshRateModeIt GUARDED_BY(mLock);
+    DisplayModeIterator mGlobalMinRefreshRateModeIt GUARDED_BY(mLock);
+    DisplayModeIterator mGlobalMaxRefreshRateModeIt GUARDED_BY(mLock);
 
     // Display modes that satisfy the Policy's ranges, filtered and sorted by refresh rate.
     std::vector<FrameRateMode> mPrimaryFrameRates GUARDED_BY(mLock);

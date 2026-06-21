@@ -32,9 +32,9 @@
 #include <compositionengine/RenderSurface.h>
 #include <compositionengine/RenderSurfaceCreationArgs.h>
 #include <compositionengine/impl/OutputCompositionState.h>
-#include <configstore/Utils.h>
 #include <ftl/concat.h>
 #include <log/log.h>
+#include <scheduler/Fps.h>
 #include <system/window.h>
 
 #include "DisplayDevice.h"
@@ -156,6 +156,7 @@ auto DisplayDevice::getFrontEndInfo() const -> frontend::DisplayInfo {
     info.logicalHeight = getLayerStackSpaceRect().height();
 
     return {.info = info,
+            .displayId = getId(),
             .transform = displayTransform,
             .receivesInput = receivesInput(),
             .isSecure = isSecure(),
@@ -282,7 +283,8 @@ void DisplayDevice::dump(utils::Dumper& dumper) const {
 
     dumper.dump("name"sv, '"' + mDisplayName + '"');
     dumper.dump("powerMode"sv, mPowerMode);
-    dumper.dump("optimizationPolicy"sv, mOptimizationPolicy);
+    dumper.dump("forceOptimizationPolicyForPower"sv, mForceOptimizationPolicyForPower);
+    dumper.dump("optimizationPolicy"sv, getOptimizationPolicy());
 
     if (mRefreshRateSelector) {
         mRefreshRateSelector->dump(dumper);
@@ -310,12 +312,17 @@ void DisplayDevice::setSecure(bool secure) {
 }
 
 gui::ISurfaceComposer::OptimizationPolicy DisplayDevice::getOptimizationPolicy() const {
-    return mOptimizationPolicy;
+    if (mForceOptimizationPolicyForPower) {
+        return gui::ISurfaceComposer::OptimizationPolicy::optimizeForPower;
+    }
+    if (mFlags & eOptimizationPolicyPower) {
+        return gui::ISurfaceComposer::OptimizationPolicy::optimizeForPower;
+    }
+    return gui::ISurfaceComposer::OptimizationPolicy::optimizeForPerformance;
 }
 
-void DisplayDevice::setOptimizationPolicy(
-        gui::ISurfaceComposer::OptimizationPolicy optimizationPolicy) {
-    mOptimizationPolicy = optimizationPolicy;
+void DisplayDevice::enableForceOptimizationPolicyForPower() {
+    mForceOptimizationPolicyForPower = true;
 }
 
 const Rect DisplayDevice::getBounds() const {
@@ -437,7 +444,7 @@ void DisplayDevice::enableRefreshRateOverlay(bool enable, bool setByHwc, Fps ref
         features |= RefreshRateOverlay::Features::SetByHwc;
     }
 
-    const auto fpsRange = mRefreshRateSelector->getSupportedRefreshRateRange();
+    const auto fpsRange = mRefreshRateSelector->getGlobalSupportedRefreshRateRange();
     mRefreshRateOverlay = RefreshRateOverlay::create(fpsRange, features);
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->setLayerStack(getLayerStack());
@@ -524,6 +531,16 @@ void DisplayDevice::adjustRefreshRate(Fps pacesetterDisplayRefreshRate) {
     }
 
     mAdjustedRefreshRate = pacesetterDisplayRefreshRate / divisor;
+}
+
+DisplayDeviceState DisplayDeviceState::createPhysical(PhysicalDisplayId id,
+                                                      hal::HWDisplayId hwcDisplayId, uint8_t port,
+                                                      DisplayModePtr activeMode) {
+    return DisplayDeviceState(Physical{id, hwcDisplayId, port, std::move(activeMode)});
+}
+
+DisplayDeviceState DisplayDeviceState::createVirtual(uid_t ownerUid) {
+    return DisplayDeviceState(Virtual{ownerUid});
 }
 
 std::atomic<int32_t> DisplayDeviceState::sNextSequenceId(1);

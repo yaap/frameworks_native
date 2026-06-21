@@ -19,6 +19,8 @@ package android.gui;
 import android.gui.CaptureArgs;
 import android.gui.Color;
 import android.gui.CompositionPreference;
+import android.gui.GraphicBuffersRegisterInfo;
+import android.gui.GraphicBuffersUnregisterInfo;
 import android.gui.ContentSamplingAttributes;
 import android.gui.DisplayBrightness;
 import android.gui.DisplayCaptureArgs;
@@ -58,11 +60,6 @@ import android.gui.WindowInfosListenerInfo;
 /** @hide */
 interface ISurfaceComposer {
 
-    enum VsyncSource {
-        eVsyncSourceApp = 0,
-        eVsyncSourceSurfaceFlinger = 1
-    }
-
     enum EventRegistration {
         modeChanged = 1 << 0,
         frameRateOverride = 1 << 1,
@@ -89,7 +86,7 @@ interface ISurfaceComposer {
      *     surface creation, see ISurfaceComposerClient::createSurface. Set to null if no layer
      *     association should be made.
      */
-    @nullable IDisplayEventConnection createDisplayEventConnection(VsyncSource vsyncSource,
+    @nullable IDisplayEventConnection createDisplayEventConnection(
             EventRegistration eventRegistration, @nullable IBinder layerHandle);
 
     /**
@@ -110,6 +107,9 @@ interface ISurfaceComposer {
      *     which will guarantee performance for all of the other displays.
      * uniqueId
      *     The unique ID for the display.
+     * ownerUid
+     *     The owner UID for the display. If the caller is trusted and a valid UID is passed in,
+     *     that value is used. In all other cases, this falls back to using the calling binder's UID.
      * requestedRefreshRate
      *     The refresh rate, frames per second, to request on the virtual display.
      *     This is just a request, the actual rate may be adjusted to align well
@@ -119,7 +119,7 @@ interface ISurfaceComposer {
      * requires ACCESS_SURFACE_FLINGER permission.
      */
     @nullable IBinder createVirtualDisplay(@utf8InCpp String displayName, boolean isSecure,
-            OptimizationPolicy optimizationPolicy, @utf8InCpp String uniqueId, float requestedRefreshRate);
+            OptimizationPolicy optimizationPolicy, @utf8InCpp String uniqueId, int /* uid_t */ ownerUid, float requestedRefreshRate);
 
     /**
      * Destroy a virtual display.
@@ -198,7 +198,6 @@ interface ISurfaceComposer {
      *      NAME_NOT_FOUND if the display is invalid, or
      *      BAD_VALUE      if the output parameter is invalid.
      */
-    // TODO(b/213909104) : Add unit tests to verify surface flinger boot time APIs
     boolean getBootDisplayModeSupport();
 
     /**
@@ -421,11 +420,19 @@ interface ISurfaceComposer {
     void removeTunnelModeEnabledListener(ITunnelModeEnabledListener listener);
 
     /**
-     * Sets the refresh rate boundaries for the display.
+     * Specifies the desired display mode(s) that should be applied atomically.
+     * To change modes, the client must first request the `DisplayModeSpecs#defaultMode`
+     * for the new modes, then commit a display transaction with the same `applyToken`. The
+     * `DisplayModeSpecs` and transaction will then be applied atomically. To atomically change
+     * modes for multiple displays, the client must pass multiple `DesiredDisplayModeSpecs` and
+     * pass the same `applyToken` in the subsequent display transaction that commits all displays.
      *
-     * @see DisplayModeSpecs.aidl for details.
+     * applyToken
+     *     The mode apply token with which the specs should apply.
+     * desiredDisplayModeSpecs
+     *     The new desired display mode specs.
      */
-    void setDesiredDisplayModeSpecs(IBinder displayToken, in DisplayModeSpecs specs);
+    void setDesiredDisplayModeSpecs(IBinder applyToken, in DisplayModeSpecs[] specs);
 
     DisplayModeSpecs getDesiredDisplayModeSpecs(IBinder displayToken);
 
@@ -475,6 +482,17 @@ interface ISurfaceComposer {
      *
      */
     void removeHdrLayerInfoListener(IBinder displayToken, IHdrLayerInfoListener listener);
+
+    /**
+     * Associates the given IBinder token with the AGSL shaderString. After registration the
+     * IBinder token can be used to apply shader effects to layers.
+     */
+    void registerShader(IBinder token, @utf8InCpp String uniqueShaderName, @utf8InCpp String shaderString);
+
+    /**
+     * Removes the association between the given IBinder token and the AGSL shaderString.
+     */
+    void unregisterShader(IBinder token);
 
     /**
      * Sends a power boost to the composer. This function is asynchronous.

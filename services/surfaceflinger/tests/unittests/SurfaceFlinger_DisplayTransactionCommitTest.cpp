@@ -22,10 +22,13 @@
 #include <gui/Surface.h>
 #include <ui/ScreenPartStatus.h>
 
+#include "DisplayDevice.h"
 #include "DisplayTransactionTestHelpers.h"
 
 namespace android {
 namespace {
+
+constexpr uid_t kOwnerUid = 123;
 
 template <typename Id>
 class MockDisplayIdGenerator : public DisplayIdGenerator<Id> {
@@ -119,13 +122,17 @@ void DisplayTransactionCommitTest::verifyDisplayIsConnected(const sp<IBinder>& d
     ASSERT_TRUE(hasCurrentDisplayState(displayToken));
     const auto& current = getCurrentDisplayState(displayToken);
     EXPECT_EQ(static_cast<bool>(Case::Display::VIRTUAL), current.isVirtual());
-    EXPECT_EQ(expectedPhysical, current.physical);
+    if (expectedPhysical) {
+        EXPECT_EQ(expectedPhysical, current.getPhysical());
+    }
 
     // The display should have been set up in the drawing display state
     ASSERT_TRUE(hasDrawingDisplayState(displayToken));
     const auto& draw = getDrawingDisplayState(displayToken);
     EXPECT_EQ(static_cast<bool>(Case::Display::VIRTUAL), draw.isVirtual());
-    EXPECT_EQ(expectedPhysical, draw.physical);
+    if (expectedPhysical) {
+        EXPECT_EQ(expectedPhysical, draw.getPhysical());
+    }
 }
 
 template <typename Case>
@@ -438,15 +445,15 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAdded) {
     // surface(producer)
     sp<BBinder> displayToken = sp<BBinder>::make();
 
-    DisplayDeviceState state;
+    DisplayDeviceState state = DisplayDeviceState::createVirtual(kOwnerUid);
     state.isSecure = static_cast<bool>(Case::Display::SECURE);
 
     auto [consumer, surface] = BufferItemConsumer::create(0);
     ASSERT_EQ(OK, consumer->setDefaultBufferSize(Case::Display::WIDTH, Case::Display::HEIGHT));
     ASSERT_EQ(OK, consumer->setDefaultBufferFormat(DEFAULT_VIRTUAL_DISPLAY_SURFACE_FORMAT));
-    state.surface = surface->getIGraphicBufferProducer();
+    state.getVirtual().surface = surface;
 
-    mFlinger.mutableCurrentState().displays.add(displayToken, state);
+    mFlinger.mutableCurrentState().displays.emplace_or_replace(displayToken, state);
 
     // --------------------------------------------------------------------
     // Call Expectations
@@ -473,8 +480,8 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAdded) {
             .WillOnce(Return(Error::NONE));
 
     // Cleanup
-    mFlinger.mutableCurrentState().displays.removeItem(displayToken);
-    mFlinger.mutableDrawingState().displays.removeItem(displayToken);
+    mFlinger.mutableCurrentState().displays.erase(displayToken);
+    mFlinger.mutableDrawingState().displays.erase(displayToken);
 
     // Deletion will happen on its own thread. Give it time to remove itself.
     std::this_thread::sleep_for(1s);
@@ -495,10 +502,10 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAddedWithNoSurface) 
     // surface.
     sp<BBinder> displayToken = sp<BBinder>::make();
 
-    DisplayDeviceState state;
+    DisplayDeviceState state = DisplayDeviceState::createVirtual(kOwnerUid);
     state.isSecure = static_cast<bool>(Case::Display::SECURE);
 
-    mFlinger.mutableCurrentState().displays.add(displayToken, state);
+    mFlinger.mutableCurrentState().displays.emplace_or_replace(displayToken, state);
 
     // --------------------------------------------------------------------
     // Call Expectations
@@ -533,7 +540,7 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayRemoval) {
     Case::Display::injectHwcDisplay(this);
     auto existing = Case::Display::makeFakeExistingDisplayInjector(this);
     existing.inject();
-    mFlinger.mutableCurrentState().displays.removeItem(existing.token());
+    mFlinger.mutableCurrentState().displays.erase(existing.token());
 
     // --------------------------------------------------------------------
     // Invocation

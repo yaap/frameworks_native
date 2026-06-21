@@ -158,6 +158,7 @@ struct Listener : android::gui::BnRegionSamplingListener {
     void reset() {
         std::unique_lock<decltype(mutex)> lk(mutex);
         received = false;
+        mLuma = 0.0f;
     }
 
 private:
@@ -292,6 +293,8 @@ TEST_F(RegionSamplingTest, CollectsLuma) {
     sampleArea.bottom = 200;
     composer->addRegionSamplingListener(sampleArea, mTopLayer->getHandle(), listener);
 
+    fill_render(rgba_green);
+
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_green, error_margin);
@@ -314,6 +317,8 @@ TEST_F(RegionSamplingTest, CollectsLumaForSecureLayer) {
     sampleArea.bottom = 200;
     composer->addRegionSamplingListener(sampleArea, mTopLayer->getHandle(), listener);
 
+    fill_render(rgba_green);
+
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_green, error_margin);
@@ -321,7 +326,7 @@ TEST_F(RegionSamplingTest, CollectsLumaForSecureLayer) {
     composer->removeRegionSamplingListener(listener);
 }
 
-TEST_F(RegionSamplingTest, DISABLED_CollectsChangingLuma) {
+TEST_F(RegionSamplingTest, CollectsChangingLuma) {
     fill_render(rgba_green);
 
     sp<gui::ISurfaceComposer> composer = ComposerServiceAIDL::getComposerService();
@@ -332,6 +337,8 @@ TEST_F(RegionSamplingTest, DISABLED_CollectsChangingLuma) {
     sampleArea.right = 200;
     sampleArea.bottom = 200;
     composer->addRegionSamplingListener(sampleArea, mTopLayer->getHandle(), listener);
+
+    fill_render(rgba_green);
 
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
@@ -347,7 +354,7 @@ TEST_F(RegionSamplingTest, DISABLED_CollectsChangingLuma) {
     composer->removeRegionSamplingListener(listener);
 }
 
-TEST_F(RegionSamplingTest, DISABLED_CollectsLumaFromTwoRegions) {
+TEST_F(RegionSamplingTest, CollectsLumaFromTwoRegions) {
     fill_render(rgba_green);
     sp<gui::ISurfaceComposer> composer = ComposerServiceAIDL::getComposerService();
     sp<Listener> greenListener = new Listener();
@@ -365,6 +372,8 @@ TEST_F(RegionSamplingTest, DISABLED_CollectsLumaFromTwoRegions) {
     graySampleArea.right = 600;
     graySampleArea.bottom = 200;
     composer->addRegionSamplingListener(graySampleArea, mTopLayer->getHandle(), grayListener);
+
+    fill_render(rgba_green);
 
     EXPECT_TRUE(grayListener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
@@ -435,7 +444,7 @@ TEST_F(RegionSamplingTest, TestCallbackAfterRemoveListener) {
             << "callback should stop after remove the region sampling listener";
 }
 
-TEST_F(RegionSamplingTest, DISABLED_CollectsLumaFromMovingLayer) {
+TEST_F(RegionSamplingTest, CollectsLumaFromMovingLayer) {
     sp<gui::ISurfaceComposer> composer = ComposerServiceAIDL::getComposerService();
     sp<Listener> listener = new Listener();
     Rect sampleArea{100, 100, 200, 200};
@@ -448,15 +457,24 @@ TEST_F(RegionSamplingTest, DISABLED_CollectsLumaFromMovingLayer) {
     // Test: listener in (100, 100). See layer before move, no layer after move.
     fill_render(rgba_blue);
     composer->addRegionSamplingListener(sampleAreaA, mTopLayer->getHandle(), listener);
+    fill_render(rgba_blue);
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_blue, error_margin);
     listener->reset();
-    SurfaceComposerClient::Transaction{}.setPosition(mContentLayer, 600, 600).apply();
+    SurfaceComposerClient::Transaction{}
+            .setPosition(mContentLayer, 600, 600)
+            .apply(/*synchronous=*/true);
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_gray, error_margin);
     composer->removeRegionSamplingListener(listener);
+
+    // Reset layer position
+    SurfaceComposerClient::Transaction{}
+            .setPosition(mContentLayer, 100, 100)
+            .apply(/*synchronous=*/true);
+    listener->reset();
 
     // Test: listener offset to (600, 600). No layer before move, see layer after move.
     fill_render(rgba_green);
@@ -466,11 +484,14 @@ TEST_F(RegionSamplingTest, DISABLED_CollectsLumaFromMovingLayer) {
     sampleAreaA.right = sampleArea.right;
     sampleAreaA.bottom = sampleArea.bottom;
     composer->addRegionSamplingListener(sampleAreaA, mTopLayer->getHandle(), listener);
+    fill_render(rgba_green);
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_gray, error_margin);
     listener->reset();
-    SurfaceComposerClient::Transaction{}.setPosition(mContentLayer, 600, 600).apply();
+    SurfaceComposerClient::Transaction{}
+            .setPosition(mContentLayer, 600, 600)
+            .apply(/*synchronous=*/true);
     EXPECT_TRUE(listener->wait_event(EVENT_WAIT_TIME_MS))
             << "timed out waiting for luma event to be received";
     EXPECT_NEAR(listener->luma(), luma_green, error_margin);

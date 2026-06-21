@@ -8,11 +8,6 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
-cc_aconfig_library {
-    name: "libegl_flags_c_lib",
-    aconfig_declarations: "graphicsenv_flags",
-}
-
 cc_library {
     name: "libETC1",
     srcs: ["ETC1/etc1.cpp"],
@@ -52,6 +47,13 @@ ndk_library {
     symbol_file: "libGLESv1_CM.map.txt",
     first_version: "9",
     unversioned_until: "current",
+    // Lower GLES have an empty denylist because some of the symbols conflict
+    // with GLESv3.
+    //
+    // This means that we will have incomplete denylist coverage for apps
+    // that link to GLESv1CM or GLESv2, but these are rare, and GPU does
+    // not work in isolated processes anyway.
+    bypass_artless_denylist: true,
 }
 
 ndk_library {
@@ -59,6 +61,7 @@ ndk_library {
     symbol_file: "libGLESv2.map.txt",
     first_version: "9",
     unversioned_until: "current",
+    bypass_artless_denylist: true,
 }
 
 ndk_library {
@@ -161,7 +164,6 @@ cc_library_static {
 cc_library_shared {
     name: "libEGL",
     defaults: [
-        "aconfig_lib_cc_static_link.defaults",
         "egl_libs_defaults",
     ],
     cflags: select(soong_config_variable("EGL", "USE_DISPLAY_ARRAY"), {
@@ -189,8 +191,6 @@ cc_library_shared {
     shared_libs: [
         "libapexsupport",
         "libvndksupport",
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore-utils",
         "libbase",
         "libegl_flags",
         "libhidlbase",
@@ -204,7 +204,6 @@ cc_library_shared {
     static_libs: [
         "libEGL_getProcAddress",
         "libEGL_blobCache",
-        "libegl_flags_c_lib",
     ],
     ldflags: [
         "-Wl,--exclude-libs=libEGL_getProcAddress.a",

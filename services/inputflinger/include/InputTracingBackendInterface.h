@@ -26,6 +26,8 @@
 #include <variant>
 #include <vector>
 
+#include "input/InputDevice.h"
+#include "reader/include/RawAbsoluteAxisInfo.h"
 #include "reader/include/RawEvent.h"
 
 namespace android::input_trace {
@@ -119,6 +121,24 @@ struct WindowDispatchArgs {
     int32_t resolvedKeyRepeatCount;
 };
 
+/** Information about an evdev device. */
+struct TracedEvdevDevice {
+    RawDeviceId eventHubId;
+    // The number of the device's /dev/input/event<X> node.
+    uint32_t evdevNodeNumber;
+    InputDeviceIdentifier identifier;
+
+    std::vector<uint32_t> evBitmask;
+    std::vector<uint32_t> propBitmask;
+    std::map<uint32_t /* axisType */, std::vector<uint32_t>> eventTypeBitmasks;
+    std::map<uint32_t /* axis */, RawAbsoluteAxisInfo> absInfos;
+    // The current values of each of the device's axes. If a supported axis is not present, assume
+    // its value is 0.
+    std::map<uint32_t /* axisType */, std::map<uint32_t /* axis */, int32_t /* value */>>
+            axisStates;
+    std::map<uint32_t /* axis */, std::vector<int32_t>> absMtStates;
+};
+
 /**
  * An interface for the tracing backend, used for setting a custom backend for testing.
  */
@@ -136,7 +156,15 @@ public:
     virtual void traceWindowDispatch(const WindowDispatchArgs&, const TracedEventMetadata&) = 0;
 
     /** Trace a raw event being received. */
-    virtual void traceRawEvent(const RawEvent&) = 0;
+    virtual void traceRawEvent(const RawEvent& event, const TracedEventMetadata& metadata) = 0;
+
+    /** Trace an evdev device being registered with the system. */
+    virtual void traceEvdevDeviceAddition(const TracedEvdevDevice& device,
+                                          const TracedEventMetadata& metadata) = 0;
+
+    /** Trace an evdev device being removed from the system. */
+    virtual void traceEvdevDeviceRemoval(RawDeviceId deviceId,
+                                         const TracedEventMetadata& metadata) = 0;
 };
 
 } // namespace android::input_trace

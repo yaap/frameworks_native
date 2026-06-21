@@ -72,7 +72,7 @@ public:
     Connection(std::unique_ptr<InputChannel> inputChannel, bool isFocusMonitor,
                const IdGenerator& idGenerator);
 
-    inline const std::string getInputChannelName() const {
+    inline const std::string& getInputChannelName() const {
         return inputPublisher.getChannel().getName();
     }
 

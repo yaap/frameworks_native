@@ -20,6 +20,8 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
 
+#include <atomic>
+
 #include <com_android_graphics_libgui_flags.h>
 #include <cutils/atomic.h>
 #include <ftl/fake_guard.h>
@@ -46,6 +48,8 @@
 
 #include <com_android_graphics_libgui_flags.h>
 
+#include "AsyncWorker.h"
+
 using namespace com::android::graphics::libgui;
 using namespace std::chrono_literals;
 
@@ -67,14 +71,6 @@ private:
 
 inline const char* boolToString(bool b) {
     return b ? "true" : "false";
-}
-
-timespec timespecFromNanos(nsecs_t duration) {
-    timespec result;
-    int64_t nsecPerSec = 1'000'000'000;
-    result.tv_sec = duration / nsecPerSec;
-    result.tv_nsec = duration % nsecPerSec;
-    return result;
 }
 
 } // namespace
@@ -244,6 +240,21 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, bool updateDestinati
 
 BLASTBufferQueue::~BLASTBufferQueue() {
     TransactionCompletedListener::getInstance()->removeQueueStallListener(this);
+
+    std::function<void(SurfaceComposerClient::Transaction*)> callback;
+    SurfaceComposerClient::Transaction* transaction;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        callback = mTransactionReadyCallback;
+        transaction = mSyncTransaction;
+        mTransactionReadyCallback = nullptr;
+        mSyncTransaction = nullptr;
+    }
+
+    if (callback) {
+        callback(transaction);
+    }
+
     if (mPendingTransactions.empty()) {
         return;
     }
@@ -253,10 +264,6 @@ BLASTBufferQueue::~BLASTBufferQueue() {
     mergePendingTransactions(&t, std::numeric_limits<uint64_t>::max() /* frameNumber */);
     // All transactions on our apply token are one-way. See comment on mAppliedLastTransaction
     t.setApplyToken(mApplyToken).apply(false, true);
-
-    if (mTransactionReadyCallback) {
-        mTransactionReadyCallback(mSyncTransaction);
-    }
 }
 
 void BLASTBufferQueue::onFirstRef() {
@@ -401,10 +408,14 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
                 }
 
                 if (stat.cornerRadii.has_value()) {
-                    BQA_LOGV("updated cornerRadii=%s", stat.cornerRadii.value().toString().c_str());
-                    std::function<void(const gui::CornerRadii)> callbackCopy =
-                            getCornerRadiiCallback();
-                    if (callbackCopy) callbackCopy(stat.cornerRadii.value());
+                    const gui::CornerRadii& newRadii = stat.cornerRadii.value();
+                    if (mLastCornerRadii != newRadii) {
+                        mLastCornerRadii = newRadii;
+                        std::function<void(const gui::CornerRadii)> callbackCopy =
+                                getCornerRadiiCallback();
+                        if (callbackCopy) callbackCopy(newRadii);
+                        BQA_LOGV("updated cornerRadii=%s", newRadii.toString().c_str());
+                    }
                 }
                 // Update frametime stamps if the frame was latched and presented, indicated by a
                 // valid latch time.
@@ -717,6 +728,14 @@ status_t BLASTBufferQueue::acquireNextBufferLocked(
     if (applyTransaction) {
         // All transactions on our apply token are one-way. See comment on mAppliedLastTransaction
         status_t status = t->setApplyToken(mApplyToken).apply(false, true);
+        if (status != OK) {
+            BQA_LOGE("Transaction Failure Details: Status: %d (%s), Pending Transactions Merged: "
+                     "%zu, Transaction ID: %" PRIu64 ", Frame Number: %" PRIu64
+                     ", Buffer Size: %dx%d",
+                     status, statusToString(status).c_str(), mPendingTransactions.size(),
+                     t->getId(), bufferItem.mFrameNumber, bufferItem.mGraphicBuffer->getWidth(),
+                     bufferItem.mGraphicBuffer->getHeight());
+        }
         LOG_ALWAYS_FATAL_IF(status != OK,
                             "[%s] acquireNextBufferLocked failed to apply transaction. status=%d",
                             mName.c_str(), status);
@@ -855,7 +874,7 @@ void BLASTBufferQueue::onFrameAvailable(const BufferItem& item) {
 }
 
 void BLASTBufferQueue::onFrameReplaced(const BufferItem& item) {
-    BQA_LOGV("onFrameReplaced framenumber=%" PRIu64, item.mFrameNumber);
+    ALOGV("[%s] onFrameReplaced framenumber=%" PRIu64, mName.c_str(), item.mFrameNumber);
     // Do nothing since we are not storing unacquired buffer items locally.
 }
 
@@ -883,7 +902,7 @@ bool BLASTBufferQueue::syncNextTransaction(
         return false;
     }
 
-    mTransactionReadyCallback = callback;
+    mTransactionReadyCallback = std::move(callback);
     mSyncTransaction = new SurfaceComposerClient::Transaction();
     mAcquireSingleBuffer = acquireSingleBuffer;
     return true;
@@ -943,27 +962,89 @@ private:
     std::mutex mMutex;
     sp<BLASTBufferQueue> mBbq GUARDED_BY(mMutex);
     bool mDestroyed GUARDED_BY(mMutex) = false;
+    AsyncWorker mAllocWorker;
+    std::atomic<pid_t> mAllocWorkerTid{-1};
 
 public:
     BBQSurface(const sp<IGraphicBufferProducer>& igbp, bool controlledByApp,
                const sp<IBinder>& scHandle, const sp<BLASTBufferQueue>& bbq)
-          : Surface(igbp, controlledByApp, scHandle), mBbq(bbq) {}
+          : Surface(igbp, controlledByApp, scHandle), mBbq(bbq) {
+        if (com_android_graphics_libgui_flags_allocate_buffer_priority_inheritance()) {
+            mAllocWorker.post([this] {
+                androidSetThreadName("allocateBuffers");
+                mAllocWorkerTid.store(gettid(), std::memory_order_relaxed);
+            });
+        }
+    }
 
     void allocateBuffers() override {
         ATRACE_CALL();
         uint32_t reqWidth = mReqWidth ? mReqWidth : mUserWidth;
         uint32_t reqHeight = mReqHeight ? mReqHeight : mUserHeight;
+        if (com_android_graphics_libgui_flags_allocate_buffer_priority_inheritance()) {
+            allocateBuffersCallerPriority(reqWidth, reqHeight);
+        } else {
+            allocateBuffersStaticPriority(reqWidth, reqHeight);
+        }
+    }
+
+    void allocateBuffersStaticPriority(uint32_t reqWidth, uint32_t reqHeight) {
         auto gbp = getIGraphicBufferProducer();
         std::thread allocateThread([reqWidth, reqHeight, gbp = getIGraphicBufferProducer(),
                                     reqFormat = mReqFormat, reqUsage = mReqUsage]() {
             androidSetThreadName("allocateBuffers");
             pid_t tid = gettid();
             androidSetThreadPriority(tid, ANDROID_PRIORITY_DISPLAY);
+            gbp->allocateBuffers(reqWidth, reqHeight, reqFormat, reqUsage);
+        });
+        allocateThread.detach();
+    }
 
+    void allocateBuffersCallerPriority(uint32_t reqWidth, uint32_t reqHeight) {
+        std::optional<int> callerPriority;
+        pid_t workerTid = mAllocWorkerTid.load(std::memory_order_relaxed);
+        int callerScheduler = sched_getscheduler(0);
+        switch (callerScheduler & ~SCHED_RESET_ON_FORK) {
+            // For fair policies, we can set worker thread's priority
+            // to the caller thread's priority.
+            case SCHED_OTHER: // i.e. SCHED_NORMAL
+            case SCHED_BATCH:
+            case SCHED_EXT:
+                callerPriority = androidGetThreadPriority(gettid());
+                break;
+            // For realtime policies, this process doesn't necessarily have
+            // the capability to switch the worker thread to a realtime
+            // policy. As such, just use the highest generic priority.
+            case SCHED_FIFO:
+            case SCHED_RR:
+            case SCHED_DEADLINE:
+                callerPriority = -10; // Process.THREAD_PRIORITY_TOP_APP_BOOST
+                break;
+            // Priority doesn't matter for SCHED_IDLE.
+            case SCHED_IDLE:
+                break;
+            default:
+                ALOGW("Unknown scheduling class %d", callerScheduler);
+        }
+
+        // If the allocation thread is already running, set its priority here so that the
+        // scheduler has the right priority when we wake it up. On the rare chance we're
+        // here before the allocation thread has started, the best we can do is have the
+        // allocation thread update its own priority.
+        if (callerPriority.has_value() && workerTid != -1) {
+            androidSetThreadPriority(workerTid, *callerPriority);
+        }
+
+        auto gbp = getIGraphicBufferProducer();
+        mAllocWorker.post([reqWidth, reqHeight, gbp = getIGraphicBufferProducer(),
+                           reqFormat = mReqFormat, reqUsage = mReqUsage, workerTid,
+                           callerPriority]() {
+            if (callerPriority.has_value() && workerTid == -1) {
+                androidSetThreadPriority(gettid(), *callerPriority);
+            }
             gbp->allocateBuffers(reqWidth, reqHeight,
                                  reqFormat, reqUsage);
         });
-        allocateThread.detach();
     }
 
     status_t setFrameTimelineInfo(uint64_t frameNumber,
@@ -1068,56 +1149,10 @@ SurfaceComposerClient::Transaction* BLASTBufferQueue::gatherPendingTransactions(
     return t;
 }
 
-// Maintains a single worker thread per process that services a list of runnables.
-class AsyncWorker : public Singleton<AsyncWorker> {
-private:
-    std::thread mThread;
-    bool mDone = false;
-    std::deque<std::function<void()>> mRunnables;
-    std::mutex mMutex;
-    std::condition_variable mCv;
-    void run() {
-        std::unique_lock<std::mutex> lock(mMutex);
-        while (!mDone) {
-            while (!mRunnables.empty()) {
-                std::deque<std::function<void()>> runnables = std::move(mRunnables);
-                mRunnables.clear();
-                lock.unlock();
-                // Run outside the lock since the runnable might trigger another
-                // post to the async worker.
-                execute(runnables);
-                lock.lock();
-            }
-            mCv.wait(lock);
-        }
-    }
-
-    void execute(std::deque<std::function<void()>>& runnables) {
-        while (!runnables.empty()) {
-            std::function<void()> runnable = runnables.front();
-            runnables.pop_front();
-            runnable();
-        }
-    }
-
-public:
-    AsyncWorker() : Singleton<AsyncWorker>() { mThread = std::thread(&AsyncWorker::run, this); }
-
-    ~AsyncWorker() {
-        mDone = true;
-        mCv.notify_all();
-        if (mThread.joinable()) {
-            mThread.join();
-        }
-    }
-
-    void post(std::function<void()> runnable) {
-        std::unique_lock<std::mutex> lock(mMutex);
-        mRunnables.emplace_back(std::move(runnable));
-        mCv.notify_one();
-    }
-};
-ANDROID_SINGLETON_STATIC_INSTANCE(AsyncWorker);
+// Per-process AsyncWorker that emulates a single 'binder thread'.
+class AsyncProducerListenerWorker : public AsyncWorker,
+                                    public Singleton<AsyncProducerListenerWorker> {};
+ANDROID_SINGLETON_STATIC_INSTANCE(AsyncProducerListenerWorker);
 
 // Asynchronously calls ProducerListener functions so we can emulate one way binder calls.
 class AsyncProducerListener : public BnProducerListener {
@@ -1127,23 +1162,45 @@ private:
     friend class sp<AsyncProducerListener>;
 
 public:
+    bool needsAcquiredNotify() override { return mListener->needsAcquiredNotify(); }
+
+    bool needsDroppedNotify() override { return mListener->needsDroppedNotify(); }
+
     void onBufferReleased() override {
-        AsyncWorker::getInstance().post([listener = mListener]() { listener->onBufferReleased(); });
+        AsyncProducerListenerWorker::getInstance().post(
+                [listener = mListener]() { listener->onBufferReleased(); });
     }
 
     void onBuffersDiscarded(const std::vector<int32_t>& slots) override {
-        AsyncWorker::getInstance().post(
+        AsyncProducerListenerWorker::getInstance().post(
                 [listener = mListener, slots = slots]() { listener->onBuffersDiscarded(slots); });
     }
 
-    void onBufferDetached(int slot) override {
-        AsyncWorker::getInstance().post(
-                [listener = mListener, slot = slot]() { listener->onBufferDetached(slot); });
+    void onBufferDetached(int slot, uint64_t bufferId) override {
+        AsyncProducerListenerWorker::getInstance().post(
+                [listener = mListener, slot = slot, bufferId = bufferId]() {
+                    listener->onBufferDetached(slot, bufferId);
+                });
     }
+
+    void onBufferAcquired(uint64_t bufferId, uint64_t frameNumber) override {
+        AsyncProducerListenerWorker::getInstance().post(
+                [listener = mListener, bufferId = bufferId, frameNumber = frameNumber]() {
+                    listener->onBufferAcquired(bufferId, frameNumber);
+                });
+    };
+
+    void onBufferDropped(uint64_t bufferId, uint64_t frameNumber) override {
+        AsyncProducerListenerWorker::getInstance().post(
+                [listener = mListener, bufferId = bufferId, frameNumber = frameNumber]() {
+                    listener->onBufferDropped(bufferId, frameNumber);
+                });
+    };
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
     void onBufferAttached() override {
-        AsyncWorker::getInstance().post([listener = mListener]() { listener->onBufferAttached(); });
+        AsyncProducerListenerWorker::getInstance().post(
+                [listener = mListener]() { listener->onBufferAttached(); });
     }
 #endif
 };
@@ -1327,7 +1384,6 @@ void BLASTBufferQueue::resizeFrameEventHistory(size_t newSize) {
     // point in time, so just ignore. This can go away once the class relationships and lifetimes of
     // objects are cleaned up with a major refactor of BufferQueue as a whole.
     if (mBufferItemConsumer != nullptr) {
-        std::unique_lock _lock{mMutex};
         mBufferItemConsumer->resizeFrameEventHistory(newSize);
     }
 }
@@ -1402,14 +1458,10 @@ void BLASTBufferQueue::updateBufferReleaseProducer() {
     // SELinux policy may prevent this process from sending the BufferReleaseChannel's file
     // descriptor to SurfaceFlinger, causing the entire transaction to be dropped. We send this
     // transaction independently of any other updates to ensure those updates aren't lost.
-    SurfaceComposerClient::Transaction t;
-    status_t status = t.setApplyToken(mApplyToken)
-                              .setBufferReleaseChannel(mSurfaceControl, mBufferReleaseProducer)
-                              .apply(false /* synchronous */, true /* oneWay */);
-    if (status != OK) {
-        ALOGW("[%s] %s - failed to set buffer release channel on %s", mName.c_str(),
-              statusToString(status).c_str(), mSurfaceControl->getName().c_str());
-    }
+    SurfaceComposerClient::Transaction()
+            .setApplyToken(mApplyToken)
+            .setBufferReleaseChannel(mSurfaceControl, mBufferReleaseProducer)
+            .apply(false /* synchronous */, true /* oneWay */);
 }
 
 void BLASTBufferQueue::drainBufferReleaseConsumer() {
@@ -1463,16 +1515,28 @@ BufferReleaseReader::BufferReleaseReader(
 
 status_t BufferReleaseReader::readBlocking(ReleaseCallbackId& outId, sp<Fence>& outFence,
                                            uint32_t& outMaxAcquiredBufferCount, nsecs_t timeout) {
-    std::optional<timespec> timespec;
-    if (timeout >= 0) {
-        timespec = timespecFromNanos(timeout);
+    // TODO(b/363290953) epoll_wait only has millisecond timeout precision. If timeout is less than
+    // 1ms, then we round timeout up to 1ms. Otherwise, we round timeout to the nearest
+    // millisecond. Once epoll_pwait2 can be used in libgui, we can specify timeout with nanosecond
+    // precision.
+    int timeoutMs = -1;
+    if (timeout == 0) {
+        timeoutMs = 0;
+    } else if (timeout > 0) {
+        const int nsPerMs = 1000000;
+        if (timeout < nsPerMs) {
+            timeoutMs = 1;
+        } else {
+            timeoutMs = static_cast<int>(
+                    std::chrono::round<std::chrono::milliseconds>(std::chrono::nanoseconds{timeout})
+                            .count());
+        }
     }
 
     epoll_event event{};
     int eventCount;
     do {
-        eventCount = epoll_pwait2(mEpollFd.get(), &event, 1 /*maxevents*/,
-                                  timespec ? &(*timespec) : nullptr, nullptr /*sigmask*/);
+        eventCount = epoll_wait(mEpollFd.get(), &event, 1 /*maxevents*/, timeoutMs);
     } while (eventCount == -1 && errno == EINTR);
 
     if (eventCount == -1) {

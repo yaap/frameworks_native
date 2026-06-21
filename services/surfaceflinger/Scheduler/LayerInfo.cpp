@@ -337,8 +337,10 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(nsecs_t now) {
             const auto voteType = mLayerVote.type == LayerHistory::LayerVoteType::NoVote
                     ? LayerHistory::LayerVoteType::NoVote
                     : LayerHistory::LayerVoteType::ExplicitCategory;
-            SFTRACE_FORMAT_INSTANT("Vote %s (category=%s)", ftl::enum_string(voteType).c_str(),
-                                   ftl::enum_string(mLayerVote.category).c_str());
+            if (CC_UNLIKELY(SFTRACE_ENABLED())) {
+                SFTRACE_FORMAT_INSTANT("Vote %s (category=%s)", ftl::enum_string(voteType).c_str(),
+                                       ftl::enum_string(mLayerVote.category).c_str());
+            }
             ALOGV("%s voted %s with category: %s", mName.c_str(),
                   ftl::enum_string(voteType).c_str(),
                   ftl::enum_string(mLayerVote.category).c_str());
@@ -348,7 +350,9 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(nsecs_t now) {
 
         if (mLayerVote.fps.isValid() ||
             mLayerVote.type != LayerHistory::LayerVoteType::ExplicitDefault) {
-            SFTRACE_FORMAT_INSTANT("Vote %s", ftl::enum_string(mLayerVote.type).c_str());
+            if (CC_UNLIKELY(SFTRACE_ENABLED())) {
+                SFTRACE_FORMAT_INSTANT("Vote %s", ftl::enum_string(mLayerVote.type).c_str());
+            }
             ALOGV("%s voted %d", mName.c_str(), static_cast<int>(mLayerVote.type));
             votes.push_back({mLayerVote.type, mLayerVote.fps, mLayerVote.seamlessness,
                              FrameRateCategory::Default, mLayerVote.categorySmoothSwitchOnly});
@@ -402,7 +406,9 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(nsecs_t now) {
 
     auto refreshRate = calculateRefreshRateIfPossible(now);
     if (refreshRate.has_value()) {
-        SFTRACE_FORMAT_INSTANT("calculated (%s)", to_string(*refreshRate).c_str());
+        if (CC_UNLIKELY(SFTRACE_ENABLED())) {
+            SFTRACE_FORMAT_INSTANT("calculated (%s)", to_string(*refreshRate).c_str());
+        }
         ALOGV("%s calculated refresh rate: %s", mName.c_str(), to_string(*refreshRate).c_str());
         votes.push_back({LayerHistory::LayerVoteType::Heuristic, refreshRate.value()});
         return votes;
@@ -499,15 +505,6 @@ Fps LayerInfo::RefreshRateHistory::selectRefreshRate(const RefreshRateSelector& 
 
     const auto maxClosestRate = selector.findClosestKnownFrameRate(max->refreshRate);
     const bool consistent = [&](Fps maxFps, Fps minFps) {
-        if (FlagManager::getInstance().use_known_refresh_rate_for_fps_consistency()) {
-            if (maxFps.getValue() - minFps.getValue() <
-                MARGIN_CONSISTENT_FPS_FOR_CLOSEST_REFRESH_RATE) {
-                const auto minClosestRate = selector.findClosestKnownFrameRate(minFps);
-                using fps_approx_ops::operator==;
-                return maxClosestRate == minClosestRate;
-            }
-            return false;
-        }
         return maxFps.getValue() - minFps.getValue() < MARGIN_CONSISTENT_FPS;
     }(max->refreshRate, min->refreshRate);
 
@@ -593,8 +590,7 @@ LayerInfo::FrameRateSelectionStrategy LayerInfo::convertFrameRateSelectionStrate
 
 bool LayerInfo::FrameRate::isNoVote() const {
     // A desired frame rate greater than or equal to 0 is treated as NoVote.
-    bool isNoVoteGte = FlagManager::getInstance().arr_setframerate_gte_enum() &&
-            vote.type == FrameRateCompatibility::Gte && !vote.rate.isValid();
+    bool isNoVoteGte = vote.type == FrameRateCompatibility::Gte && !vote.rate.isValid();
     return vote.type == FrameRateCompatibility::NoVote || isNoVoteGte;
 }
 

@@ -17,7 +17,6 @@
 #define LOG_TAG "Sensors"
 #define ATRACE_TAG ATRACE_TAG_SYSTEM_SERVER
 
-#include <android/sensor.h>
 #include <com_android_hardware_libsensor_flags.h>
 #include <cutils/trace.h>
 #include <hardware/sensors-base.h>
@@ -44,18 +43,13 @@ namespace android {
 SensorEventQueue::SensorEventQueue(const sp<ISensorEventConnection>& connection,
                                    SensorManager& sensorManager, String8 packageName)
       : mSensorEventConnection(connection),
-        mRecBuffer(nullptr),
         mSensorManager(sensorManager),
         mPackageName(packageName),
         mAvailable(0),
         mConsumed(0),
-        mNumAcksToSend(0) {
-    mRecBuffer = new ASensorEvent[MAX_RECEIVE_BUFFER_EVENT_COUNT];
-}
+        mNumAcksToSend(0) {}
 
-SensorEventQueue::~SensorEventQueue() {
-    delete [] mRecBuffer;
-}
+SensorEventQueue::~SensorEventQueue() {}
 
 void SensorEventQueue::onFirstRef()
 {
@@ -74,23 +68,50 @@ ssize_t SensorEventQueue::write(const sp<BitTube>& tube,
 }
 
 ssize_t SensorEventQueue::read(ASensorEvent* events, size_t numEvents) {
-    if (mAvailable == 0) {
-        ssize_t err =
-                BitTube::recvObjects(mSensorChannel, mRecBuffer, MAX_RECEIVE_BUFFER_EVENT_COUNT);
-        if (err < 0) {
-            return err;
+    size_t count = 0;
+    if (mAvailable > 0) {
+        // Start by draining any remaining events.
+        count = std::min(numEvents, mAvailable);
+        memcpy(events, &mRecBuffer[mConsumed], count * sizeof(ASensorEvent));
+        mAvailable -= count;
+        mConsumed += count;
+        // If we found data in the buffer, deliver the remaining events without
+        // triggering a new syscall. This avoids a redundant syscall and ensures
+        // that the next call will be perfectly aligned for a potential direct read.
+    } else {
+        if (numEvents >= MAX_RECEIVE_BUFFER_EVENT_COUNT) {
+            // If the original request is large enough, read directly into it.
+            // This ensures that we reach a "steady state" where subsequent large
+            // reads bypass buffering entirely and avoid memcpy.
+            ssize_t result = BitTube::recvObjects(mSensorChannel, events, numEvents);
+            if (result > 0) {
+                count = static_cast<size_t>(result);
+            } else {
+                return result;
+            }
+        } else {
+            // If the original request is small, refill the intermediate buffer
+            // and satisfy the remainder of the request.
+            ssize_t result = BitTube::recvObjects(mSensorChannel, mRecBuffer,
+                                                  MAX_RECEIVE_BUFFER_EVENT_COUNT);
+            if (result > 0) {
+                size_t actualRead = static_cast<size_t>(result);
+                count = std::min(numEvents, actualRead);
+                memcpy(events, mRecBuffer, count * sizeof(ASensorEvent));
+
+                mConsumed = count;
+                mAvailable = actualRead - count;
+            } else {
+                return result;
+            }
         }
-        mAvailable = static_cast<size_t>(err);
-        mConsumed = 0;
     }
-    size_t count = min(numEvents, mAvailable);
-    memcpy(events, mRecBuffer + mConsumed, count * sizeof(ASensorEvent));
 
     if (CC_UNLIKELY(ATRACE_ENABLED()) &&
         libsensor_flags::sensor_event_queue_report_sensor_usage_in_tracing()) {
         for (size_t i = 0; i < count; i++) {
             std::optional<std::string_view> sensorName =
-                    mSensorManager.getSensorNameByHandle(events->sensor);
+                    mSensorManager.getSensorNameByHandle(events[i].sensor);
             if (sensorName.has_value()) {
                 char buffer[UINT8_MAX];
                 IPCThreadState* thread = IPCThreadState::self();
@@ -102,8 +123,6 @@ ssize_t SensorEventQueue::read(ASensorEvent* events, size_t numEvents) {
             }
         }
     }
-    mAvailable -= count;
-    mConsumed += count;
     return static_cast<ssize_t>(count);
 }
 
@@ -264,4 +283,3 @@ ssize_t SensorEventQueue::filterEvents(ASensorEvent* events, size_t count) const
 
 // ----------------------------------------------------------------------------
 }; // namespace android
-

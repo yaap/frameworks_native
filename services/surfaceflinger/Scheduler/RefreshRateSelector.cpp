@@ -210,7 +210,7 @@ std::vector<unsigned> getModeDivisors(const DisplayMode& mode, FpsRange range,
         return {1};
     }
 
-    if (FlagManager::getInstance().anchor_list() && mode.getVrrConfig().has_value()) {
+    if (mode.getVrrConfig().has_value()) {
         return getModeDivisorsFromAnchorList(mode, range, anchorList, numFrameRates);
     }
 
@@ -258,7 +258,8 @@ std::string toString(const RefreshRateSelector::PolicyVariant& policy) {
 
 auto RefreshRateSelector::createFrameRateModes(
         const Policy& policy, std::function<bool(const DisplayMode&)>&& filterModes,
-        const FpsRange& renderRange) const -> std::vector<FrameRateMode> {
+        const FpsRange& renderRange, bool onlyDivisorsForSameGroup) const
+        -> std::vector<FrameRateMode> {
     struct Key {
         Fps fps;
         int32_t group;
@@ -278,6 +279,7 @@ auto RefreshRateSelector::createFrameRateModes(
         }
     };
 
+    const auto& defaultMode = mDisplayModes.get(policy.defaultMode)->get();
     std::map<Key, DisplayModeIterator, KeyLess> ratesMap;
     for (auto it = mDisplayModes.begin(); it != mDisplayModes.end(); ++it) {
         const auto& [id, mode] = *it;
@@ -287,14 +289,21 @@ auto RefreshRateSelector::createFrameRateModes(
         }
         const auto vsyncRate = mode->getVsyncRate();
         const auto peakFps = mode->getPeakFps();
+
+        bool enableFrameRateOverride = mConfig.enableFrameRateOverride;
+        if (onlyDivisorsForSameGroup) {
+            if (mode->getGroup() != defaultMode->getGroup()) {
+                enableFrameRateOverride = false;
+            }
+        }
+
         const auto divisors = getModeDivisors(*mode, renderRange, kFpsAnchorList, kNumFrameRates,
-                                              mConfig.enableFrameRateOverride);
+                                              enableFrameRateOverride);
         for (auto divisor : divisors) {
             const auto fps = vsyncRate / divisor;
             using fps_approx_ops::operator<;
-            const bool usingAnchorList =
-                    mode->getVrrConfig().has_value() && FlagManager::getInstance().anchor_list();
-            if (divisor > 1 && (!usingAnchorList && fps < kMinSupportedFrameRate)) {
+            if (divisor > 1 &&
+                (!mode->getVrrConfig().has_value() && fps < kMinSupportedFrameRate)) {
                 break;
             }
 
@@ -364,9 +373,7 @@ struct RefreshRateSelector::RefreshRateScoreComparator {
     bool operator()(const RefreshRateScore& lhs, const RefreshRateScore& rhs) const {
         const auto& [frameRateMode, overallScore, _] = lhs;
 
-        std::string name = to_string(frameRateMode);
-
-        ALOGV("%s sorting scores %.2f", name.c_str(), overallScore);
+        ALOGV("%s sorting scores %.2f", to_string(frameRateMode).c_str(), overallScore);
 
         if (!ScoredFrameRate::scoresEqual(overallScore, rhs.overallScore)) {
             return overallScore > rhs.overallScore;
@@ -608,7 +615,7 @@ LayerRequirementPtrs filterLayersForOutput(
         const std::vector<RefreshRateSelector::LayerRequirement>& layers,
         LayerFilter outputFilter) {
     const bool allowArbitraryFollowerRates =
-            FlagManager::getInstance().follower_arbitrary_refresh_rate_selection();
+            FlagManager::getInstance().follower_arbitrary_refresh_rate_selection_combined();
     LayerRequirementPtrs filteredLayers;
     for (const auto& layer : layers) {
         if (!allowArbitraryFollowerRates ||
@@ -632,7 +639,7 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
     const auto& activeMode = *getActiveModeLocked().modePtr;
 
     if (pacesetterFps.isValid() &&
-        !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection_combined()) {
         ALOGV("Follower display");
 
         const auto ranking = rankFrameRates(activeMode.getGroup(), RefreshRateOrder::Descending,
@@ -1124,9 +1131,8 @@ auto RefreshRateSelector::getFrameRateOverrides(const std::vector<LayerRequireme
 
     ALOGV("%s: %zu allLayers, %zu layers", __func__, allLayers.size(), layers.size());
 
-    const bool useAnchorList = FlagManager::getInstance().anchor_list() && mIsVrrDisplay;
     std::vector<std::pair<Fps, float>> scoredFrameRates;
-    if (!useAnchorList) {
+    if (!mIsVrrDisplay) {
         // We don't want to run lower than 30fps
         const auto* policyPtr = getCurrentPolicyLocked();
         const Fps minFrameRate =
@@ -1278,7 +1284,7 @@ ftl::Optional<FrameRateMode> RefreshRateSelector::onKernelTimerChanged(
                     })
                     .value();
 
-    const DisplayModePtr& min = mMinRefreshRateModeIt->second;
+    const DisplayModePtr& min = mConfigGroupMinRefreshRateModeIt->second;
     if (current.modePtr->getId() == min->getId()) {
         return {};
     }
@@ -1330,29 +1336,6 @@ const DisplayModePtr& RefreshRateSelector::getMaxRefreshRateByPolicyLocked(int a
     return max->get();
 }
 
-auto RefreshRateSelector::getMaxFpsForMode(std::optional<int> anchorGroupOpt) const
-        -> PreferredFpsForMode {
-    // find the highest frame rate for each display mode
-    PreferredFpsForMode maxRenderRateForMode;
-
-    // Use the highest frame rate for each mode to avoid increased latency due to SF waking up
-    // accoring to the render rate.
-    for (const auto& frameRateMode : mPrimaryFrameRates) {
-        if (anchorGroupOpt && frameRateMode.modePtr->getGroup() != anchorGroupOpt) {
-            continue;
-        }
-
-        const auto [iter, _] =
-                maxRenderRateForMode.try_emplace(frameRateMode.modePtr->getId(), frameRateMode.fps);
-        using fps_approx_ops::operator<;
-        if (iter->second < frameRateMode.fps) {
-            iter->second = frameRateMode.fps;
-        }
-    }
-
-    return maxRenderRateForMode;
-}
-
 auto RefreshRateSelector::getPreferredFpsForMode(std::optional<int> anchorGroupOpt,
                                                  RefreshRateOrder refreshRateOrder) const
         -> PreferredFpsForMode {
@@ -1360,10 +1343,6 @@ auto RefreshRateSelector::getPreferredFpsForMode(std::optional<int> anchorGroupO
 
     const bool ascending = (refreshRateOrder == RefreshRateOrder::Ascending);
     if (!ascending) return {};
-
-    if (!FlagManager::getInstance().use_at_least_60_for_min_vote()) {
-        return getMaxFpsForMode(anchorGroupOpt);
-    }
 
     // find the lowest >=60  frame rate for each display mode
     PreferredFpsForMode preferredFpsForMode;
@@ -1402,18 +1381,11 @@ auto RefreshRateSelector::rankFrameRates(std::optional<int> anchorGroupOpt,
 
         const auto id = modePtr->getId();
         const auto fpsOpt = preferredFpsForMode.get(id);
-        if (FlagManager::getInstance().use_at_least_60_for_min_vote()) {
-            if (fpsOpt && frameRateMode.fps != *fpsOpt) {
-                return;
-            }
-        } else {
-            if (ascending && frameRateMode.fps < *fpsOpt) {
-                return;
-            }
+        if (fpsOpt && frameRateMode.fps != *fpsOpt) {
+           return;
         }
 
         float score = calculateDistanceScoreFromMaxLocked(frameRateMode.fps);
-
         if (ascending) {
             score = 1.0f / score;
         }
@@ -1462,11 +1434,6 @@ FrameRateMode RefreshRateSelector::getActiveMode() const {
 
 const FrameRateMode& RefreshRateSelector::getActiveModeLocked() const {
     return *mActiveModeOpt;
-}
-
-bool RefreshRateSelector::hasActiveMode() const {
-    std::lock_guard lock(mLock);
-    return mActiveModeOpt.has_value();
 }
 
 void RefreshRateSelector::setActiveMode(DisplayModeId modeId, Fps renderFrameRate) {
@@ -1524,10 +1491,6 @@ void RefreshRateSelector::updateDisplayModes(DisplayModes modes, DisplayModeId a
     mIsVrrDisplay = activeModeOpt->get()->getVrrConfig().has_value();
 
     const auto sortedModes = sortByRefreshRate(mDisplayModes);
-    if (!FlagManager::getInstance().filter_refresh_rates_within_config_group()) {
-        mMinRefreshRateModeIt = sortedModes.front();
-        mMaxRefreshRateModeIt = sortedModes.back();
-    }
 
     // Reset the policy because the old one may no longer be valid.
     mDisplayManagerPolicy = {};
@@ -1677,36 +1640,43 @@ void RefreshRateSelector::constructAvailableRefreshRates() {
     ALOGV("%s: %s ", __func__, policy->toString().c_str());
 
     const auto& defaultMode = mDisplayModes.get(policy->defaultMode)->get();
-    if (FlagManager::getInstance().filter_refresh_rates_within_config_group()) {
-        const auto sortedModes = sortByRefreshRate(mDisplayModes);
-        mMinRefreshRateModeIt = *std::find_if(sortedModes.cbegin(), sortedModes.cend(),
-                                              [group = defaultMode->getGroup()](const auto& it) {
-                                                  return it->second->getGroup() == group;
-                                              });
-        mMaxRefreshRateModeIt = *std::find_if(sortedModes.crbegin(), sortedModes.crend(),
-                                              [group = defaultMode->getGroup()](const auto& it) {
-                                                  return it->second->getGroup() == group;
-                                              });
-    }
+    const auto sortedModes = sortByRefreshRate(mDisplayModes);
+    mGlobalMinRefreshRateModeIt = sortedModes.front();
+    mGlobalMaxRefreshRateModeIt = sortedModes.back();
+    mConfigGroupMinRefreshRateModeIt = *std::find_if(sortedModes.cbegin(), sortedModes.cend(),
+                                            [group = defaultMode->getGroup()](const auto& it) {
+                                                return it->second->getGroup() == group;
+                                            });
+    mConfigGroupMaxRefreshRateModeIt = *std::find_if(sortedModes.crbegin(), sortedModes.crend(),
+                                            [group = defaultMode->getGroup()](const auto& it) {
+                                                return it->second->getGroup() == group;
+                                            });
 
-    const auto filterRefreshRates = [&](const FpsRanges& ranges,
-                                        const char* rangeName) REQUIRES(mLock) {
+    const auto filterRefreshRates = [&](const FpsRanges& ranges, const char* rangeName,
+                                        bool allowAllGroups = false) REQUIRES(mLock) {
         const auto filterModes = [&](const DisplayMode& mode) {
+            bool hdrOutputTypeMatches = FlagManager::getInstance().enable_user_preferred_hdr_mode()
+                    ? mode.getHdrOutputType() == defaultMode->getHdrOutputType()
+                    : true;
             return mode.getResolution() == defaultMode->getResolution() &&
                     mode.getDpi() == defaultMode->getDpi() &&
-                    (policy->allowGroupSwitching || mode.getGroup() == defaultMode->getGroup()) &&
+                    (allowAllGroups || policy->allowGroupSwitching ||
+                     mode.getGroup() == defaultMode->getGroup()) &&
                     ranges.physical.includes(mode.getPeakFps()) &&
-                    (supportsFrameRateOverride() || ranges.render.includes(mode.getPeakFps()));
+                    (supportsFrameRateOverride() || ranges.render.includes(mode.getPeakFps())) &&
+                    hdrOutputTypeMatches;
         };
 
-        auto frameRateModes = createFrameRateModes(*policy, filterModes, ranges.render);
+        auto frameRateModes = createFrameRateModes(*policy, filterModes, ranges.render,
+                                                   allowAllGroups && !mIsVrrDisplay);
         if (frameRateModes.empty()) {
             ALOGW("No matching frame rate modes for %s range. policy: %s", rangeName,
                   policy->toString().c_str());
             // TODO(b/292105422): Ideally DisplayManager should not send render ranges smaller than
             // the min supported. See b/292047939.
             //  For not we just ignore the render ranges.
-            frameRateModes = createFrameRateModes(*policy, filterModes, {});
+            frameRateModes = createFrameRateModes(*policy, filterModes, {},
+                                                  allowAllGroups && !mIsVrrDisplay);
         }
         LOG_ALWAYS_FATAL_IF(frameRateModes.empty(),
                             "No matching frame rate modes for %s range even after ignoring the "
@@ -1728,9 +1698,15 @@ void RefreshRateSelector::constructAvailableRefreshRates() {
 
     mPrimaryFrameRates = filterRefreshRates(policy->primaryRanges, "primary");
     mAppRequestFrameRates = filterRefreshRates(policy->appRequestRanges, "app request");
-    mAllFrameRates = filterRefreshRates(FpsRanges(getSupportedFrameRateRangeLocked(),
-                                                  getSupportedFrameRateRangeLocked()),
-                                        "full frame rates");
+
+    const bool useMrrFullList =
+            FlagManager::getInstance().mrr_full_frame_rate_list() && !mIsVrrDisplay;
+    const FpsRange fullRange = useMrrFullList
+            ? FpsRange{0_Hz, mGlobalMaxRefreshRateModeIt->second->getPeakFps()}
+            : getSupportedFrameRateRangeLocked();
+
+    mAllFrameRates =
+            filterRefreshRates(FpsRanges(fullRange, fullRange), "full frame rates", useMrrFullList);
 }
 
 bool RefreshRateSelector::isVrrDisplay() const {
@@ -1758,8 +1734,7 @@ Fps RefreshRateSelector::findClosestKnownFrameRate(Fps frameRate) const {
 
 std::vector<float> RefreshRateSelector::getSupportedFrameRates() const {
     std::scoped_lock lock(mLock);
-    const size_t frameRatesSize = FlagManager::getInstance().anchor_list() && mIsVrrDisplay
-            ? mAllFrameRates.size()
+    const size_t frameRatesSize = mIsVrrDisplay ? mAllFrameRates.size()
             : std::min<size_t>(11, mAllFrameRates.size());
     std::vector<float> supportedFrameRates;
     supportedFrameRates.reserve(frameRatesSize);
@@ -1776,25 +1751,13 @@ void RefreshRateSelector::setLayerFilter(LayerFilter layerFilter) {
 }
 
 FpsRange RefreshRateSelector::getSupportedFrameRateRangeLocked() const {
-    if ((FlagManager::getInstance().anchor_list() && mIsVrrDisplay) ||
-        FlagManager::getInstance().supported_refresh_rate_update()) {
-        // When supported_refresh_rate_update is enabled include all the modes below 20Fps for MRR,
-        // and for VRR results are capped with the kMinSupportedRefreshRate, these checks
-        // are enforced in createFrameRateModes, that's why the range here starts with 0.
-        return {0_Hz, mMaxRefreshRateModeIt->second->getPeakFps()};
-    }
-
-    using fps_approx_ops::operator<;
-    if (mMaxRefreshRateModeIt->second->getPeakFps() < kMinSupportedFrameRate) {
-        return {mMaxRefreshRateModeIt->second->getPeakFps(), kMinSupportedFrameRate};
-    }
-    return {kMinSupportedFrameRate, mMaxRefreshRateModeIt->second->getPeakFps()};
+    return {0_Hz, mConfigGroupMaxRefreshRateModeIt->second->getPeakFps()};
 }
 
 auto RefreshRateSelector::getIdleTimerAction() const -> KernelIdleTimerAction {
     std::lock_guard lock(mLock);
 
-    const Fps deviceMinFps = mMinRefreshRateModeIt->second->getPeakFps();
+    const Fps deviceMinFps = mConfigGroupMinRefreshRateModeIt->second->getPeakFps();
     const DisplayModePtr& minByPolicy = getMinRefreshRateByPolicyLocked();
 
     // Kernel idle timer will set the refresh rate to the device min. If DisplayManager says that

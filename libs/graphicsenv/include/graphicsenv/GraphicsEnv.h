@@ -130,6 +130,7 @@ public:
     std::string nativeGetPersistGraphicsEgl();
     bool shouldUseSystemAngle();
     bool shouldUseNativeDriver();
+    bool isZygoteDisableGlPreload();
 
     /*
      * Apis for debug layer
@@ -159,7 +160,7 @@ private:
     // Send the initial complete GpuStats to GpuService.
     void sendGpuStatsLocked(GpuStatsInfo::Api api, bool isDriverLoaded, int64_t driverLoadingTime);
 
-    GraphicsEnv() = default;
+    GraphicsEnv();
 
     // This mutex protects the namespace creation.
     std::mutex mNamespaceMutex;
@@ -192,6 +193,8 @@ private:
     bool mShouldUseNativeDriver = false;
     // ANGLE namespace.
     android_namespace_t* mAngleNamespace = nullptr;
+    // ro.zygote.disable_gl_preload status
+    bool mZygoteDisableGlPreload;
 
     /**
      * GPU metrics.

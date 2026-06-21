@@ -44,10 +44,6 @@ namespace android::Hwc2 {
 using aidl::android::hardware::graphics::common::DisplayDecorationSupport;
 using aidl::android::hardware::graphics::common::HdrConversionCapability;
 using aidl::android::hardware::graphics::common::HdrConversionStrategy;
-using aidl::android::hardware::graphics::composer3::ComposerClientReader;
-using aidl::android::hardware::graphics::composer3::ComposerClientWriter;
-using aidl::android::hardware::graphics::composer3::Luts;
-using aidl::android::hardware::graphics::composer3::OverlayProperties;
 
 class AidlIComposerCallbackWrapper;
 
@@ -58,13 +54,15 @@ public:
     static bool namesAnAidlComposerService(std::string_view serviceName);
 
     explicit AidlComposer(const std::string& serviceName);
+    explicit AidlComposer(
+        std::shared_ptr<aidl::android::hardware::graphics::composer3::IComposer> composer);
     ~AidlComposer() override;
 
-    bool isSupported(OptionalFeature) const;
-    bool isVrrSupported() const;
+    bool isSupported(OptionalFeature) const override;
+    bool isVrrSupported() const override;
+    bool isDisplayCommandModesetSupported() const override;
 
-    std::vector<aidl::android::hardware::graphics::composer3::Capability> getCapabilities()
-            override;
+    std::vector<composer3::Capability> getCapabilities() override;
     std::string dumpDebugInfo() override;
 
     void registerCallback(HWC2::ComposerCallback& callback) override;
@@ -83,10 +81,8 @@ public:
     Error destroyLayer(Display display, Layer layer) override;
 
     Error getActiveConfig(Display display, Config* outConfig) override;
-    Error getChangedCompositionTypes(
-            Display display, std::vector<Layer>* outLayers,
-            std::vector<aidl::android::hardware::graphics::composer3::Composition>* outTypes)
-            override;
+    Error getChangedCompositionTypes(Display display, std::vector<Layer>* outLayers,
+                                     std::vector<composer3::Composition>* outTypes) override;
     Error getColorModes(Display display, std::vector<ColorMode>* outModes) override;
     Error getDisplayAttribute(Display display, Config config, IComposerClient::Attribute attribute,
                               int32_t* outValue) override;
@@ -153,9 +149,8 @@ public:
                                 const std::vector<IComposerClient::Rect>& damage) override;
     Error setLayerBlendMode(Display display, Layer layer, IComposerClient::BlendMode mode) override;
     Error setLayerColor(Display display, Layer layer, const Color& color) override;
-    Error setLayerCompositionType(
-            Display display, Layer layer,
-            aidl::android::hardware::graphics::composer3::Composition type) override;
+    Error setLayerCompositionType(Display display, Layer layer,
+                                  composer3::Composition type) override;
     Error setLayerDataspace(Display display, Layer layer, Dataspace dataspace) override;
     Error setLayerDisplayFrame(Display display, Layer layer,
                                const IComposerClient::Rect& frame) override;
@@ -199,9 +194,7 @@ public:
 
     // Composer HAL 2.4
     Error getDisplayCapabilities(
-            Display display,
-            std::vector<aidl::android::hardware::graphics::composer3::DisplayCapability>*
-                    outCapabilities) override;
+            Display display, std::vector<composer3::DisplayCapability>* outCapabilities) override;
     V2_4::Error getDisplayConnectionType(Display display,
                                          IComposerClient::DisplayConnectionType* outType) override;
     V2_4::Error getDisplayVsyncPeriod(Display display, VsyncPeriodNanos* outVsyncPeriod) override;
@@ -221,8 +214,7 @@ public:
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) override;
     Error getClientTargetProperty(
             Display display,
-            aidl::android::hardware::graphics::composer3::ClientTargetPropertyWithBrightness*
-                    outClientTargetProperty) override;
+            composer3::ClientTargetPropertyWithBrightness* outClientTargetProperty) override;
 
     // AIDL Composer HAL
     Error setLayerBrightness(Display display, Layer layer, float brightness) override;
@@ -235,6 +227,8 @@ public:
                                       std::optional<DisplayDecorationSupport>* support) override;
     Error setIdleTimerEnabled(Display displayId, std::chrono::milliseconds timeout) override;
 
+    friend class AidlComposerHalTest;
+
     Error getPhysicalDisplayOrientation(Display displayId,
                                         AidlTransform* outDisplayOrientation) override;
     void onHotplugConnect(Display) override;
@@ -244,22 +238,24 @@ public:
     Error setRefreshRateChangedCallbackDebugEnabled(Display, bool) override;
     Error notifyExpectedPresent(Display, nsecs_t expectedPresentTime,
                                 int32_t frameIntervalNs) override;
-    Error getRequestedLuts(
-            Display display, std::vector<Layer>* outLayers,
-            std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*
-                    outLuts) override;
+    Error getRequestedLuts(Display display, std::vector<Layer>* outLayers,
+                           std::vector<composer3::DisplayLuts::LayerLut>* outLuts) override;
     Error setLayerLuts(Display display, Layer layer, Luts& luts) override;
     Error getMaxLayerPictureProfiles(Display, int32_t* outMaxProfiles) override;
     Error setDisplayPictureProfileId(Display, PictureProfileId id) override;
     Error setLayerPictureProfileId(Display, Layer, PictureProfileId id) override;
     Error startHdcpNegotiation(Display, const aidl::android::hardware::drm::HdcpLevels&) override;
-    Error getLuts(Display, const std::vector<sp<GraphicBuffer>>&,
-                  std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
+    Error getLuts(Display, const std::vector<sp<GraphicBuffer>>&, std::vector<Luts>*) override;
     Error getReadbackBufferAttributes(Display display,
-                                      V3_0::ReadbackBufferAttributes* outAttributes) override;
+                                      composer3::ReadbackBufferAttributes* outAttributes) override;
     Error setReadbackBuffer(Display display, const sp<GraphicBuffer>& buffer,
                             int acquireFence) override;
     Error getReadbackBufferFence(Display display, int* outReleaseFence) override;
+    Error getDisplayKnownVsyncSample(Display display,
+                                     composer3::VsyncSample* outVsyncSample) override;
+    Error setDisplayMode(Display display, Config modeId, bool seamless) override;
+    Error setDisplayModes(const std::vector<std::pair<Display, Config>>& requests,
+                          bool seamless) override;
 
 private:
     // Many public functions above simply write a command into the command
@@ -309,15 +305,16 @@ private:
     ftl::SharedMutex mMutex;
 
     int32_t mComposerInterfaceVersion = 1;
-    bool mEnableLayerCommandBatchingFlag = false;
+    bool mLifecycleBatchCommandSupported = false;
     std::atomic<int64_t> mLayerID = 1;
+    std::vector<composer3::Capability> mCapabilities;
 
     // Buffer slots for layers are cleared by setting the slot buffer to this buffer.
     sp<GraphicBuffer> mClearSlotBuffer;
 
     // Aidl interface
-    using AidlIComposer = aidl::android::hardware::graphics::composer3::IComposer;
-    using AidlIComposerClient = aidl::android::hardware::graphics::composer3::IComposerClient;
+    using AidlIComposer = composer3::IComposer;
+    using AidlIComposerClient = composer3::IComposerClient;
     std::shared_ptr<AidlIComposer> mAidlComposer;
     std::shared_ptr<AidlIComposerClient> mAidlComposerClient;
     std::shared_ptr<AidlIComposerCallbackWrapper> mAidlComposerCallback;

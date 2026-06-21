@@ -204,6 +204,18 @@ public:
                                      std::optional<std::vector<uint8_t>> /*smpte2094_10*/) const {
         return INVALID_OPERATION;
     }
+    virtual status_t getStride(buffer_handle_t /*bufferHandle*/, uint32_t* /*outStride*/) const {
+        return INVALID_OPERATION;
+    }
+    virtual status_t getSmpte2094_50(
+            buffer_handle_t /*bufferHandle*/,
+            std::optional<std::vector<uint8_t>>* /*outSmpte2094_50*/) const {
+        return INVALID_OPERATION;
+    }
+    virtual status_t setSmpte2094_50(buffer_handle_t /*bufferHandle*/,
+                                     std::optional<std::vector<uint8_t>> /*smpte2094_50*/) const {
+        return INVALID_OPERATION;
+    }
 };
 
 // A wrapper to IAllocator

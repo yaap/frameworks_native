@@ -16,7 +16,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../FocusResolver.h"
+#include "dispatcher/FocusResolver.h"
 
 #define ASSERT_FOCUS_CHANGE(_changes, _oldFocus, _newFocus) \
     {                                                       \

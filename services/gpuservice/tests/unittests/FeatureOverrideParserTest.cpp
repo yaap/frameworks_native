@@ -22,7 +22,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <com_android_graphics_graphicsenv_flags.h>
 #include <feature_override/FeatureOverrideParser.h>
 
 using ::testing::AtLeast;

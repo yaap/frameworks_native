@@ -30,8 +30,7 @@
 #include <map>
 
 namespace {
-    static const char* g_AtomErrorMetricName =
-        "statsd_errors.value_report_vendor_atom_errors_count";
+static const char* g_AtomErrorMetricName = "statsd_errors.value_report_vendor_atom_errors_count";
 }
 
 namespace aidl {
@@ -91,7 +90,8 @@ bool write_field_annotations(AStatsEvent* event, const std::vector<Annotation>& 
 }
 
 ndk::ScopedAStatus StatsHal::reportVendorAtom(const VendorAtom& vendorAtom) {
-    if (vendorAtom.atomId < 100000 || vendorAtom.atomId >= 200000) {
+    if (!((vendorAtom.atomId >= 100000 && vendorAtom.atomId < 200000) ||   // Vendor atoms
+          (vendorAtom.atomId >= 300000 && vendorAtom.atomId < 400000))) {  // Generic vendor atoms
         ALOGE("Atom ID %ld is not a valid vendor atom ID", (long)vendorAtom.atomId);
         Counter::logIncrement(g_AtomErrorMetricName);
         return ndk::ScopedAStatus::fromServiceSpecificErrorWithMessage(

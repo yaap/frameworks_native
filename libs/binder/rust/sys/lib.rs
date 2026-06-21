@@ -16,8 +16,10 @@
 
 //! Generated Rust bindings to libbinder_ndk
 
-use std::error::Error;
-use std::fmt;
+#![cfg_attr(not(feature = "std"), no_std)]
+
+use core::error::Error;
+use core::fmt;
 
 #[cfg(not(target_os = "trusty"))]
 #[allow(bad_style)]

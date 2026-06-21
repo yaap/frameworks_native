@@ -15,7 +15,7 @@
  */
 
 // Should match the definitions in: frameworks/native/cmds/atrace/atrace.cpp
-#define FRAMEWORK_CATEGORIES(C)                                  \
+#define ATRACE_AND_TRACK_EVENT_CATEGORIES(C)                     \
   C(always, "always", "Always category")                         \
   C(graphics, "gfx", "Graphics category")                        \
   C(input, "input", "Input category")                            \
@@ -67,12 +67,16 @@
 
 namespace tracing_perfetto {
 
+namespace track_event_categories {
+PERFETTO_TE_CATEGORIES_DEFINE(TRACK_EVENT_CATEGORIES);
+}  // namespace track_event_categories
+
 namespace internal {
 
 namespace {
-PERFETTO_TE_CATEGORIES_DECLARE(FRAMEWORK_CATEGORIES);
+PERFETTO_TE_CATEGORIES_DECLARE(ATRACE_AND_TRACK_EVENT_CATEGORIES);
 
-PERFETTO_TE_CATEGORIES_DEFINE(FRAMEWORK_CATEGORIES);
+PERFETTO_TE_CATEGORIES_DEFINE(ATRACE_AND_TRACK_EVENT_CATEGORIES);
 
 static constexpr char kPreferFlagProperty[] = "debug.atrace.prefer_sdk";
 static std::atomic<const prop_info*> prefer_property_info = nullptr;
@@ -235,7 +239,9 @@ void registerWithPerfetto(bool test) {
     args.shmem_size_hint_kb = 1024;
     PerfettoProducerInit(args);
     PerfettoTeInit();
-    PERFETTO_TE_REGISTER_CATEGORIES(FRAMEWORK_CATEGORIES);
+    PERFETTO_TE_REGISTER_CATEGORIES(ATRACE_AND_TRACK_EVENT_CATEGORIES);
+    using namespace ::tracing_perfetto::track_event_categories;
+    PERFETTO_TE_REGISTER_CATEGORIES(TRACK_EVENT_CATEGORIES);
   });
 }
 

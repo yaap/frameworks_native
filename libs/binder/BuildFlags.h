@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 
 namespace android {
 
@@ -27,5 +28,11 @@ constexpr bool kEnableKernelIpc = true;
 #else  // BINDER_WITH_KERNEL_IPC
 constexpr bool kEnableKernelIpc = false;
 #endif // BINDER_WITH_KERNEL_IPC
+
+#ifdef LIBBINDER_BINDER_OBSERVER_V2
+constexpr bool kBinderObserverV2Enabled = true;
+#else
+constexpr bool kBinderObserverV2Enabled = false;
+#endif
 
 } // namespace android

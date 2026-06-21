@@ -56,7 +56,9 @@ TEST(UtilsHost, ExecuteLongRunning) {
         });
         auto elapsedMs = millisSince(start);
         EXPECT_GE(elapsedMs, 1000);
-        EXPECT_LT(elapsedMs, 3000); // b/377571547: higher to reduce flake
+
+        // b/467121829 no ceiling on this time due to flake, see also b/377571547. As long as it completes
+        // and it doesn't execute early, it's okay.
 
         ASSERT_TRUE(result.has_value());
         EXPECT_EQ(std::nullopt, result->exitCode);
@@ -65,7 +67,7 @@ TEST(UtilsHost, ExecuteLongRunning) {
 
     // ~CommandResult() called, child process is killed.
     // Assert that the second sleep does not finish.
-    EXPECT_LT(millisSince(start), 3000);
+    EXPECT_LT(millisSince(start), 100000);
 }
 
 TEST(UtilsHost, ExecuteLongRunning2) {

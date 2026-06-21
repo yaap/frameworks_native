@@ -45,13 +45,14 @@ public:
     bool takeOwnership();
     void teardown();
 
-    VulkanBackendContext createSkiaVulkanBackendContext();
+    VulkanBackendContext createSkiaVulkanBackendContext(bool threadSafeVMA);
     VkSemaphore createExportableSemaphore();
     VkSemaphore importSemaphoreFromSyncFd(int syncFd);
     int exportSemaphoreSyncFd(VkSemaphore semaphore);
     void destroySemaphore(VkSemaphore semaphore);
 
     bool isInitialized() const { return mInitialized; }
+    bool isProtected() const { return mIsProtected; }
     bool isRealtimePriority() const { return mIsRealtimePriority; }
 
     uint32_t driverVersion() const { return mPhysicalDeviceProperties.driverVersion; }
@@ -96,8 +97,8 @@ private:
 
     VulkanFuncs mFuncs;
 
-    std::vector<std::string> mInstanceExtensionNames;
-    std::vector<std::string> mDeviceExtensionNames;
+    std::vector<std::string> mEnabledInstanceExtNames;
+    std::vector<std::string> mEnabledDeviceExtNames;
 };
 
 } // namespace skia

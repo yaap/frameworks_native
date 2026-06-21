@@ -22,6 +22,6 @@
 // the current flags.
 // This file should be included instead of directly including layer.b.h
 #pragma GCC system_header
-#include <perfetto/config/android/surfaceflinger_layers_config.pbzero.h>
-#include <perfetto/trace/android/surfaceflinger_layers.pb.h>
-#include <perfetto/trace/android/surfaceflinger_layers.pbzero.h>
+#include <protos/perfetto/config/android/surfaceflinger_layers_config.pbzero.h>
+#include <protos/perfetto/trace/android/surfaceflinger_layers.pb.h>
+#include <protos/perfetto/trace/android/surfaceflinger_layers.pbzero.h>

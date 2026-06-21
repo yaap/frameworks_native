@@ -32,7 +32,7 @@ cc_benchmark {
         "liblog",
         "libutils",
         "libvibratorservice",
-        "android.hardware.vibrator-V3-ndk",
+        "android.hardware.vibrator-V4-ndk",
     ],
     cflags: [
         "-Wall",

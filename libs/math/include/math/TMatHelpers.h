@@ -612,7 +612,7 @@ public:
                 stream << "| ";
             }
             for (size_t col = 0; col < BASE<T>::NUM_COLS; ++col) {
-                stream << std::setw(10) << std::to_string(m[col][row]);
+                stream << " " << std::setw(9) << std::to_string(m[col][row]);
             }
             if (row == 0) {
                 stream << " \\";

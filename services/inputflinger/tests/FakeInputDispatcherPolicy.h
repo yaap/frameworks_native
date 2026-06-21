@@ -66,6 +66,19 @@ public:
         }
     };
 
+    struct PreNoFocusedWindowAnrResult {
+        std::shared_ptr<InputApplicationHandle> appHandle;
+        int32_t eventId;
+        std::chrono::milliseconds elapsedDuration;
+        std::chrono::milliseconds timeoutDuration;
+    };
+
+    struct DropEvent {
+        sp<IBinder> token;
+        vec2 location;
+        vec2 rawLocation;
+    };
+
     void assertFilterInputEventWasCalled(const NotifyKeyArgs& args);
     void assertFilterInputEventWasCalled(const NotifyMotionArgs& args, vec2 point);
     void assertFilterInputEventWasNotCalled();
@@ -84,6 +97,10 @@ public:
     void assertNotifyWindowUnresponsiveWasCalled(std::chrono::nanoseconds timeout,
                                                  const sp<IBinder>& expectedToken,
                                                  std::optional<gui::Pid> expectedPid);
+    void assertNotifyPreNoFocusedWindowAnrWasCalled(
+            std::chrono::nanoseconds waitDuration, std::chrono::milliseconds expectedTimeout,
+            const std::shared_ptr<InputApplicationHandle>& expectedApplication);
+    void assertNotifyPreNoFocusedWindowAnrWasNotCalled(std::chrono::nanoseconds timeout);
     /** Wrap call with ASSERT_NO_FATAL_FAILURE() to ensure the return value is valid. */
     sp<IBinder> getUnresponsiveWindowToken(std::chrono::nanoseconds timeout);
     void assertNotifyWindowResponsiveWasCalled(const sp<IBinder>& expectedToken,
@@ -94,8 +111,9 @@ public:
     PointerCaptureRequest assertSetPointerCaptureCalled(const sp<gui::WindowInfoHandle>& window,
                                                         PointerCaptureMode mode);
     void assertSetPointerCaptureNotCalled();
-    void assertDropTargetEquals(const InputDispatcherInterface& dispatcher,
-                                const sp<IBinder>& targetToken);
+    void assertNotifyDropWindowWasCalled(const InputDispatcherInterface& dispatcher,
+                                         const sp<IBinder>& targetToken, vec2 location,
+                                         vec2 rawLocation);
     void assertNotifyInputChannelBrokenWasCalled(const sp<IBinder>& token);
     std::chrono::nanoseconds getKeyWaitingForEventsTimeout() override;
     void setStaleEventTimeout(std::chrono::nanoseconds timeout);
@@ -122,6 +140,7 @@ public:
     void assertFocusedDisplayNotified(ui::LogicalDisplayId expectedDisplay);
     void assertKeyConsumedByPolicy(const ::testing::Matcher<KeyEvent>& matcher);
     void assertNoKeysConsumedByPolicy();
+    void assertInterceptKeyBeforeQueueingWasCalled(const ::testing::Matcher<KeyEvent>& matcher);
 
 private:
     std::mutex mLock;
@@ -143,13 +162,21 @@ private:
     std::queue<sp<IBinder>> mBrokenInputChannels GUARDED_BY(mLock);
     std::condition_variable mNotifyInputChannelBroken;
 
-    sp<IBinder> mDropTargetWindowToken GUARDED_BY(mLock);
-    bool mNotifyDropWindowWasCalled GUARDED_BY(mLock) = false;
+    // ANR pre-anr handling
+    std::queue<PreNoFocusedWindowAnrResult> mPreNoFocusedWindowAnrs GUARDED_BY(mLock);
+    std::condition_variable mNotifyPreNoFocusedWindowAnr;
+
+    // Drag and drop
+    std::queue<DropEvent> mDropEvents GUARDED_BY(mLock);
+    std::condition_variable mNotifyDropWindow;
 
     std::condition_variable mNotifyUserActivity;
     std::queue<UserActivityPokeEvent> mUserActivityPokeEvents;
 
     std::chrono::nanoseconds mStaleEventTimeout = 1000ms;
+
+    std::queue<KeyEvent> mInterceptKeyBeforeQueueingEvent GUARDED_BY(mLock);
+    std::condition_variable mNotifyInterceptKeyBeforeQueueing;
 
     std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
             mInterceptKeyBeforeDispatchingResult;
@@ -178,11 +205,17 @@ private:
             REQUIRES(mLock);
 
     void notifyWindowUnresponsive(const sp<IBinder>& connectionToken, std::optional<gui::Pid> pid,
-                                  const std::string&) override;
+                                  const std::string&, int32_t eventId, nsecs_t eventTime,
+                                  std::chrono::milliseconds timeoutDuration) override;
     void notifyWindowResponsive(const sp<IBinder>& connectionToken,
                                 std::optional<gui::Pid> pid) override;
-    void notifyNoFocusedWindowAnr(
-            const std::shared_ptr<InputApplicationHandle>& applicationHandle) override;
+    void notifyNoFocusedWindowAnr(const std::shared_ptr<InputApplicationHandle>& applicationHandle,
+                                  int32_t eventId, nsecs_t eventTime,
+                                  std::chrono::milliseconds timeoutDuration) override;
+    void notifyPreNoFocusedWindowAnr(
+            const std::shared_ptr<InputApplicationHandle>& inputApplicationHandle, int32_t eventId,
+            std::chrono::milliseconds elapsedDuration,
+            std::chrono::milliseconds timeoutDuration) override;
     void notifyInputChannelBroken(const sp<IBinder>& connectionToken) override;
     void notifyFocusChanged(const sp<IBinder>&, const sp<IBinder>&) override;
     void notifySensorEvent(DeviceId deviceId, InputDeviceSensorType sensorType,
@@ -206,7 +239,7 @@ private:
     bool isStaleEvent(nsecs_t currentTime, nsecs_t eventTime) override;
     void onPointerDownOutsideFocus(const sp<IBinder>& newToken) override;
     void setPointerCapture(const PointerCaptureRequest& request) override;
-    void notifyDropWindow(const sp<IBinder>& token, float x, float y) override;
+    void notifyDropWindow(const sp<IBinder>& token, vec2 location, vec2 rawLocation) override;
     void notifyDeviceInteraction(int32_t deviceId, nsecs_t timestamp,
                                  const std::set<gui::Uid>& uids) override;
     void notifyFocusedDisplayChanged(ui::LogicalDisplayId displayId) override;

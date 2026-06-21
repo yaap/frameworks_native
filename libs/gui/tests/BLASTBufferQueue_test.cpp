@@ -412,6 +412,16 @@ TEST_F(BLASTBufferQueueTest, SyncNextTransaction) {
     ASSERT_NE(nullptr, adapter.getTransactionReadyCallback());
 }
 
+TEST_F(BLASTBufferQueueTest, SyncNextTransaction_InvokedOnDtor) {
+    bool callbackInvoked = false;
+    auto callback = [&](Transaction*) { callbackInvoked = true; };
+    {
+    BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+    adapter.syncNextTransaction(callback);
+    }
+    ASSERT_TRUE(callbackInvoked);
+}
+
 TEST_F(BLASTBufferQueueTest, DISABLED_onFrameAvailable_ApplyDesiredPresentTime) {
     BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
     sp<IGraphicBufferProducer> igbProducer;
@@ -1359,7 +1369,7 @@ public:
     }
     bool needsReleaseNotify() override { return true; }
     void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& /*buffers*/) override {}
-    void onBufferDetached(int /*slot*/) {}
+    void onBufferDetached(uint64_t /*bufferId*/) {}
 };
 
 TEST_F(BLASTBufferQueueTest, CustomProducerListener) {

@@ -23,6 +23,7 @@
 #pragma clang diagnostic ignored "-Wextra"
 
 #include <com_android_graphics_surfaceflinger_flags.h>
+#include <common/FlagManager.h>
 #include <cutils/properties.h>
 #include <gtest/gtest.h>
 #include <renderengine/ExternalTexture.h>
@@ -591,6 +592,9 @@ public:
 
     void fillBufferWithoutPremultiplyAlpha();
 
+    template <typename SourceVariant>
+    void fillBufferWithColorTransformAndVerifyAlpha();
+
     void fillGreenColorBufferThenClearRegion();
 
     template <typename SourceVariant>
@@ -954,8 +958,8 @@ template <typename SourceVariant>
 void RenderEngineTest::fillBufferColorTransformAndSourceDataspace() {
     unordered_map<ui::Dataspace, ubyte4> dataspaceToColorMap;
     dataspaceToColorMap[ui::Dataspace::V0_BT709] = {77, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::BT2020] = {188, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {108, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::BT2020] = {117, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {80, 0, 0, 255};
     ui::Dataspace customizedDataspace = static_cast<ui::Dataspace>(
             ui::Dataspace::STANDARD_BT709 | ui::Dataspace::TRANSFER_GAMMA2_2 |
             ui::Dataspace::RANGE_FULL);
@@ -1000,8 +1004,8 @@ template <typename SourceVariant>
 void RenderEngineTest::fillBufferColorTransformAndOutputDataspace() {
     unordered_map<ui::Dataspace, ubyte4> dataspaceToColorMap;
     dataspaceToColorMap[ui::Dataspace::V0_BT709] = {198, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::BT2020] = {153, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {168, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::BT2020] = {171, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {182, 0, 0, 255};
     ui::Dataspace customizedDataspace = static_cast<ui::Dataspace>(
             ui::Dataspace::STANDARD_BT709 | ui::Dataspace::TRANSFER_GAMMA2_6 |
             ui::Dataspace::RANGE_FULL);
@@ -1325,6 +1329,43 @@ void RenderEngineTest::fillBufferWithoutPremultiplyAlpha() {
 }
 
 template <typename SourceVariant>
+void RenderEngineTest::fillBufferWithColorTransformAndVerifyAlpha() {
+    renderengine::DisplaySettings settings;
+    settings.physicalDisplay = fullscreenRect();
+    settings.clip = Rect(1, 1);
+    settings.outputDataspace = ui::Dataspace::V0_SRGB_LINEAR;
+
+    std::vector<renderengine::LayerSettings> layers;
+
+    renderengine::LayerSettings backLayer;
+    backLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
+    backLayer.geometry.boundaries = Rect(1, 1).toFloatRect();
+    SourceVariant::fillColor(backLayer, 0.0f, 0.0f, 0.0f, this);
+    backLayer.alpha = 1.0f;
+    layers.push_back(backLayer);
+
+    renderengine::LayerSettings layer;
+    layer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
+    layer.geometry.boundaries = Rect(1, 1).toFloatRect();
+    SourceVariant::fillColor(layer, 1.0f, 0.0f, 0.0f, this);
+    layer.alpha = 0.5f;
+
+    layers.push_back(layer);
+
+    // Add 0.5 to the red channel.
+    // clang-format off
+    settings.colorTransform = mat4(1,    0, 0, 0,
+                                   0,    1, 0, 0,
+                                   0,    0, 1, 0,
+                                   0.5f, 0, 0, 1);
+    // clang-format on
+
+    invokeDraw(settings, layers);
+
+    expectBufferColor(fullscreenRect(), 255, 0, 0, 255, 1);
+}
+
+template <typename SourceVariant>
 void RenderEngineTest::drawShadow(const renderengine::LayerSettings& castingLayer,
                                   const ShadowSettings& shadow, const ubyte4& casterColor,
                                   const ubyte4& backgroundColor) {
@@ -1398,6 +1439,33 @@ INSTANTIATE_TEST_SUITE_P(PerRenderEngineType, RenderEngineTest,
                          testing::Values(std::make_shared<SkiaGLESRenderEngineFactory>(),
                                          std::make_shared<GaneshVkRenderEngineFactory>(),
                                          std::make_shared<GraphiteVkRenderEngineFactory>()));
+
+TEST_P(RenderEngineTest, drawLayers_extenededSrgbWithGammaOetfDoesNotCrush) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+    initializeRenderEngine();
+
+    renderengine::DisplaySettings settings;
+    settings.physicalDisplay = fullscreenRect();
+    settings.clip = fullscreenRect();
+    settings.outputDataspace = ui::Dataspace::V0_SRGB;
+    settings.dimmingStage = aidl::android::hardware::graphics::composer3::DimmingStage::GAMMA_OETF;
+
+    renderengine::LayerSettings layer;
+    layer.geometry.boundaries = fullscreenRect().toFloatRect();
+    layer.source.solidColor = half3(0.01f, 0.0f, 0.0f);
+    layer.sourceDataspace = ui::Dataspace::V0_SCRGB_LINEAR;
+    layer.alpha = 1.0f;
+
+    std::vector<renderengine::LayerSettings> layers;
+    layers.push_back(layer);
+
+    invokeDraw(settings, layers);
+
+    // An sRGB OETF instead would be ~25
+    expectBufferColor(fullscreenRect(), 31, 0, 0, 255, 1);
+}
 
 TEST_P(RenderEngineTest, drawLayers_noLayersToDraw) {
     if (!GetParam()->apiSupported()) {
@@ -1615,6 +1683,18 @@ TEST_P(RenderEngineTest, drawLayers_fillBufferColorTransformZeroLayerAlpha_color
     fillBufferColorTransformZeroLayerAlpha<ColorSourceVariant>();
 }
 
+TEST_P(RenderEngineTest, drawLayers_colorTransformAlphaPreservation_colorSource) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    if (!FlagManager::getInstance().color_transform_translation()) {
+        GTEST_SKIP();
+    }
+    initializeRenderEngine();
+    fillBufferWithColorTransformAndVerifyAlpha<ColorSourceVariant>();
+}
+
 TEST_P(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_colorSource) {
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
@@ -1765,6 +1845,18 @@ TEST_P(RenderEngineTest, drawLayers_fillBufferColorTransformZeroLayerAlpha_opaqu
     fillBufferColorTransformZeroLayerAlpha<BufferSourceVariant<ForceOpaqueBufferVariant>>();
 }
 
+TEST_P(RenderEngineTest, drawLayers_colorTransformAlphaPreservation_opaqueBufferSource) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    if (!FlagManager::getInstance().color_transform_translation()) {
+        GTEST_SKIP() << "color_transform_translation not enabled";
+    }
+    initializeRenderEngine();
+    fillBufferWithColorTransformAndVerifyAlpha<BufferSourceVariant<ForceOpaqueBufferVariant>>();
+}
+
 TEST_P(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_opaqueBufferSource) {
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
@@ -1913,6 +2005,19 @@ TEST_P(RenderEngineTest, drawLayers_fillBufferColorTransformZeroLayerAlpha_buffe
     }
     initializeRenderEngine();
     fillBufferColorTransformZeroLayerAlpha<BufferSourceVariant<RelaxOpaqueBufferVariant>>();
+}
+
+TEST_P(RenderEngineTest, drawLayers_colorTransformAlphaPreservation_bufferSource) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    if (!FlagManager::getInstance().color_transform_translation()) {
+        GTEST_SKIP() << "color_transform_translation not enabled";
+    }
+
+    initializeRenderEngine();
+    fillBufferWithColorTransformAndVerifyAlpha<BufferSourceVariant<RelaxOpaqueBufferVariant>>();
 }
 
 TEST_P(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_bufferSource) {

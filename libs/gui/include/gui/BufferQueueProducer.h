@@ -17,6 +17,7 @@
 #ifndef ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 #define ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 
+#include <android/native_window.h>
 #include <gui/AdditionalOptions.h>
 #include <gui/BufferQueueDefs.h>
 
@@ -38,6 +39,8 @@ public:
 
     ~BufferQueueProducer() override;
 
+    virtual status_t getConfigForSurface(SurfaceConfig* outConfig) override;
+
     // requestBuffer returns the GraphicBuffer for slot N.
     //
     // In normal operation, this is called the first time slot N is returned
@@ -45,10 +48,8 @@ public:
     // flags indicating that previously-returned buffers are no longer valid.
     virtual status_t requestBuffer(int slot, sp<GraphicBuffer>* buf);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     // see IGraphicsBufferProducer::extendSlotCount
     virtual status_t extendSlotCount(int size) override;
-#endif
 
     // see IGraphicsBufferProducer::setMaxDequeuedBufferCount
     virtual status_t setMaxDequeuedBufferCount(int maxDequeuedBuffers);
@@ -184,8 +185,11 @@ public:
     // See IGraphicBufferProducer::setDequeueTimeout
     virtual status_t setDequeueTimeout(nsecs_t timeout) override;
 
-    // see IGraphicBufferProducer::setLegacyBufferDrop
+    // See IGraphicBufferProducer::setLegacyBufferDrop
     virtual status_t setLegacyBufferDrop(bool drop);
+
+    // See IGraphicBufferProducer::setPresentMode
+    virtual status_t setPresentMode(int32_t mode) override;
 
     // See IGraphicBufferProducer::getLastQueuedBuffer
     virtual status_t getLastQueuedBuffer(sp<GraphicBuffer>* outBuffer,
@@ -209,6 +213,9 @@ public:
     // See IGraphicBufferProducer::setFrameRate
     status_t setFrameRate(float frameRate, int8_t compatibility,
                           int8_t changeFrameRateStrategy) override;
+
+    status_t setProducerThrottlingEnabled(bool enabled) override;
+    status_t isProducerThrottlingEnabled(bool* outEnabled) const override;
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) override;
@@ -300,7 +307,6 @@ private:
     // Condition variable to signal allocateBuffers() that dequeueBuffer() is no longer waiting for
     // allocation to complete.
     std::condition_variable mDequeueWaitingForAllocationCondition;
-
 }; // class BufferQueueProducer
 
 } // namespace android

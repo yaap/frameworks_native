@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <ftl/future.h>
 #include <ui/Fence.h>
+#include <ui/FenceResult.h>
 
 namespace android {
 
@@ -47,5 +49,36 @@ inline void mergeFence(const char* debugName, sp<Fence>&& incomingFence, sp<Fenc
         }
     }
 }
+
+/**
+ * A helper class to manage fences within SurfaceFlinger.
+ *
+ * This class can collect multiple fence futures from different sources. The waitAndGetFence()
+ * method waits for all futures to complete and merges them into a single sp<Fence>.
+ *
+ * The list of futures is for internal use within the originating process.
+ */
+class FenceMerger {
+public:
+    FenceMerger() = default;
+    explicit FenceMerger(sp<Fence> fence) : mFence{std::move(fence)} {}
+
+    FenceMerger(const FenceMerger&) = delete;
+    FenceMerger& operator=(const FenceMerger&) = delete;
+
+    FenceMerger(FenceMerger&& other) = default;
+    FenceMerger& operator=(FenceMerger&& other) = default;
+
+    ~FenceMerger() = default;
+
+    sp<Fence> waitAndGetFence(const char* name);
+    void addFuture(ftl::Future<FenceResult>&& future);
+    void addFence(const char* name, sp<Fence> fence);
+    const sp<Fence>& getFence() const;
+
+private:
+    std::vector<ftl::Future<FenceResult>> mFenceFutureList;
+    sp<Fence> mFence;
+};
 
 } // namespace android

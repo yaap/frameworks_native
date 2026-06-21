@@ -28,9 +28,12 @@ extern "C" {
 struct AIBinder;
 struct ARpcServerTrusty;
 
-struct ARpcServerTrusty* ARpcServerTrusty_newPerSession(
-        struct AIBinder* (*cb)(const struct trusty_peer_id*, size_t peer_len, void*), void* cbArg,
-        void (*deleteCbArg)(void*));
+typedef struct AIBinder* (*ARpcServerTrusty_CreateRootCb)(const struct trusty_peer_id* peer,
+                                                          size_t peer_len, void* create_root_arg);
+
+struct ARpcServerTrusty* ARpcServerTrusty_newPerSession(ARpcServerTrusty_CreateRootCb create_root,
+                                                        void* create_root_arg,
+                                                        void (*delete_create_root_arg)(void*));
 void ARpcServerTrusty_delete(struct ARpcServerTrusty* rpcServer);
 
 int ARpcServerTrusty_handleConnect(struct ARpcServerTrusty* rpcServer, handle_t chan,

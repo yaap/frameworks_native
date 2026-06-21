@@ -20,6 +20,9 @@
 #include "InputTracingBackendInterface.h"
 
 #include <android-base/thread_annotations.h>
+#include <input/Input.h>
+#include <jni.h>
+
 #include <memory>
 #include <mutex>
 #include <variant>
@@ -36,13 +39,17 @@ namespace android::input_trace::impl {
 template <typename Backend>
 class ThreadedBackend : public InputTracingBackendInterface {
 public:
-    ThreadedBackend(Backend&& innerBackend, JNIEnv* env);
+    ThreadedBackend(Backend&& innerBackend, JavaVM* vm);
     ~ThreadedBackend() override;
 
     void traceKeyEvent(const TracedKeyEvent&, const TracedEventMetadata&) override;
     void traceMotionEvent(const TracedMotionEvent&, const TracedEventMetadata&) override;
     void traceWindowDispatch(const WindowDispatchArgs&, const TracedEventMetadata&) override;
-    void traceRawEvent(const RawEvent&) override;
+    void traceRawEvent(const RawEvent& event, const TracedEventMetadata& metadata) override;
+    void traceEvdevDeviceAddition(const TracedEvdevDevice& device,
+                                  const TracedEventMetadata& metadata) override;
+    void traceEvdevDeviceRemoval(RawDeviceId deviceId,
+                                 const TracedEventMetadata& metadata) override;
 
     /** Returns a function that, when called, will block until the tracing thread is idle. */
     std::function<void()> getIdleWaiterForTesting();
@@ -52,9 +59,9 @@ private:
     bool mThreadExit GUARDED_BY(mLock){false};
     std::condition_variable mThreadWakeCondition;
     Backend mBackend;
-    using TraceEntry =
-            std::pair<std::variant<TracedKeyEvent, TracedMotionEvent, WindowDispatchArgs, RawEvent>,
-                      TracedEventMetadata>;
+    using TraceEntry = std::pair<std::variant<TracedKeyEvent, TracedMotionEvent, WindowDispatchArgs,
+                                              RawEvent, TracedEvdevDevice, RawDeviceId>,
+                                 TracedEventMetadata>;
     std::vector<TraceEntry> mQueue GUARDED_BY(mLock);
 
     struct IdleWaiter {
@@ -75,6 +82,6 @@ private:
 };
 
 /** If tracing should be enabled, creates and returns a ThreadedBackend. */
-std::shared_ptr<InputTracingBackendInterface> createInputTracingBackendIfEnabled(JNIEnv* env);
+std::shared_ptr<InputTracingBackendInterface> createInputTracingBackendIfEnabled(JavaVM* vm);
 
 } // namespace android::input_trace::impl

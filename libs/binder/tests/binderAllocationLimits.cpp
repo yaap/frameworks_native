@@ -14,8 +14,14 @@
  * limitations under the License.
  */
 
+#include <../BuildFlags.h>
+#include <../observer/BinderStatsPusher.h>
+#include <../observer/BinderStatsUtils.h>
+#include <../observer/HistogramScale.h>
+
 #include <android-base/logging.h>
 #include <android/os/IServiceManager.h>
+#include <android_os_binder_flags.h>
 #include <binder/Binder.h>
 #include <binder/Functional.h>
 #include <binder/IServiceManager.h>
@@ -28,6 +34,7 @@
 #include <utils/CallStack.h>
 
 #include <malloc.h>
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <numeric>
@@ -36,6 +43,9 @@
 using namespace android::binder::impl;
 
 static android::String8 gEmpty(""); // make sure first allocation from optimization runs
+#if defined(LIBBINDER_BINDER_OBSERVER_V2)
+constexpr bool kBinderStatsLatencyHistogram = android::os::binder::flags::binder_stats_v3();
+#endif
 
 struct State {
     State(std::vector<size_t>&& expectedMallocs) : expectedMallocs(std::move(expectedMallocs)) {}
@@ -376,7 +386,7 @@ TEST(BinderAccessorAllocation, AddAccessorCheckService) {
 
     sp<IBinder> binder = sm->checkService(kInstanceName16);
 
-    status_t status = android::removeAccessorProvider(receipt);
+    (void)android::removeAccessorProvider(receipt);
 }
 
 TEST(RpcBinderAllocation, SetupRpcServer) {
@@ -407,6 +417,126 @@ TEST(RpcBinderAllocation, SetupRpcServer) {
     }
     EXPECT_EQ(mallocs, 1u);
     EXPECT_EQ(totalBytes, 40u);
+}
+
+// Helper function to create BinderCallData for tests
+android::BinderCallData createStatsData(uid_t uid, uint32_t code, const char* desc,
+                                        String16& aidlMethodName, int64_t startNanos,
+                                        int64_t endNanos) {
+    return {
+            .startTimeNanos = startNanos,
+            .endTimeNanos = endNanos,
+            .interfaceDescriptor = String16(desc),
+            .aidlMethodName = aidlMethodName,
+            .transactionCode = code,
+            .senderUid = static_cast<uint32_t>(uid),
+    };
+}
+
+TEST(BinderAllocation, BinderStatsPusher_aggregateStatsLocked) {
+    std::vector<android::BinderCallData> data;
+
+    int64_t currentTimeNanos = 9'100'000'000;
+    // Create enough data in the *same second* to trigger spam, far enough in the past
+    String16 myAidlMethod1(u"myAidlMethod1");
+    for (int i = 0; i < 150; ++i) { // More than kMinSpamCount (125)
+        data.push_back(createStatsData(1001, 1, "IFoo", myAidlMethod1,
+                                       currentTimeNanos - 8000'000'000,
+                                       currentTimeNanos - 8000'000'000 + 20));
+        data.push_back(createStatsData(1002, 1, "IFoo", myAidlMethod1,
+                                       currentTimeNanos - 8000'000'000,
+                                       currentTimeNanos - 8000'000'000 + 23));
+    }
+    android::BinderStatsPusher pusher;
+    auto service = pusher.getBinderStatsServiceLocked(currentTimeNanos / 1000'000'000);
+    EXPECT_NE(service, nullptr);
+    size_t mallocs = 0, totalBytes = 0;
+    auto addFn = pusher.getAddCallDataToBufferLockedFunction();
+    auto runAggregateWithOnMalloc = [&]() {
+        const auto on_malloc = OnMalloc([&](size_t bytes) {
+            mallocs++;
+            totalBytes += bytes;
+        });
+#if defined(LIBBINDER_BINDER_OBSERVER_V2)
+        pusher.sortAndAggregateStatsLocked(currentTimeNanos / 1000'000'000, data);
+#else // !defined(LIBBINDER_BINDER_OBSERVER_V2)
+        for (auto& datum : data) {
+            addFn(std::move(datum));
+        }
+        pusher.aggregateStatsLocked(currentTimeNanos / 1000'000'000);
+#endif
+    };
+    runAggregateWithOnMalloc();
+    data.clear();
+#if defined(LIBBINDER_BINDER_OBSERVER_V2)
+    if (kBinderStatsLatencyHistogram) {
+        EXPECT_EQ(mallocs, 29u);
+        EXPECT_EQ(totalBytes, 3654u);
+    } else {
+        EXPECT_EQ(mallocs, 9u);
+        EXPECT_EQ(totalBytes, 1162u);
+    }
+#else // !defined(LIBBINDER_BINDER_OBSERVER_V2)
+    EXPECT_EQ(mallocs, 22u);
+    EXPECT_EQ(totalBytes, 2854u);
+#endif
+    currentTimeNanos = 18'100'000'000;
+
+    // The following section is stress testing the code with
+    // an unrealistic count of data.
+    // The previous section is more indicative of 99.99 percentile usage.
+    for (int i = 0; i < 150; ++i) {     // More than kMinSpamCount (125)
+        for (int j = 0; j < 100; ++j) { // multiple txnCodes
+            String16 myAidlMethod(u"myAidlMethod");
+            myAidlMethod.append(String16(std::to_string(j).c_str()));
+            data.push_back(createStatsData(1003, j, "IFoo2", myAidlMethod,
+                                           currentTimeNanos - 8000'000'000 + 1,
+                                           currentTimeNanos - 8000'000'000 + i * 43));
+            data.push_back(createStatsData(1004, j, "IFoo2", myAidlMethod,
+                                           currentTimeNanos - 8000'000'000 + 1,
+                                           currentTimeNanos - 8000'000'000 + i * 531));
+            data.push_back(createStatsData(1005, j, "IFoo2", myAidlMethod,
+                                           currentTimeNanos - 8000'000'000 + 1,
+                                           currentTimeNanos - 8000'000'000 + i * 1089));
+        }
+    }
+    mallocs = 0;
+    totalBytes = 0;
+    runAggregateWithOnMalloc();
+#if defined(LIBBINDER_BINDER_OBSERVER_V2)
+    if (kBinderStatsLatencyHistogram) {
+        EXPECT_EQ(mallocs, 2769u);
+        EXPECT_EQ(totalBytes, 411856u);
+    } else {
+        EXPECT_EQ(mallocs, 63u);
+        EXPECT_EQ(totalBytes, 126952u);
+    }
+#else // !defined(LIBBINDER_BINDER_OBSERVER_V2)
+    EXPECT_EQ(mallocs, 1024u);
+    EXPECT_EQ(totalBytes, 281642u);
+#endif
+}
+
+TEST(HistogramAllocation, Basic) {
+    std::vector<uint8_t> result;
+    // Pre-reserve to avoid allocations during measurement if possible,
+    // or just acknowledge that it might allocate once.
+    result.reserve(6);
+    size_t mallocs = 0, totalBytes = 0;
+    {
+        const auto on_malloc = OnMalloc([&](size_t bytes) {
+            mallocs++;
+            totalBytes += bytes;
+        });
+        result.push_back(android::HistogramScale::getBinIndex(15000LL));
+        result.push_back(android::HistogramScale::getBinIndex(18000LL));
+        result.push_back(android::HistogramScale::getBinIndex(45000LL));
+        result.push_back(android::HistogramScale::getBinIndex(75000LL));
+        result.push_back(android::HistogramScale::getBinIndex(78000LL));
+        result.push_back(android::HistogramScale::getBinIndex(85000LL));
+    }
+    // With reserve(6), it should be 0 mallocs.
+    EXPECT_EQ(mallocs, 0u);
 }
 
 int main(int argc, char** argv) {

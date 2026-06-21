@@ -27,6 +27,18 @@ VK_PROPERTIES_SETTER_LINE = 'vkGetPhysicalDeviceProperties2(physical_device, &pr
 def re_import_vk():
   importlib.reload(VK)
 
+def get_sorted_vk_versions():
+  """Returns a sorted list of Vulkan versions (e.g., ['1_0', '1_1', ...])."""
+  # Extract versions from the mapping keys
+  versions = list(VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING.keys())
+
+  # Sort helper to handle numeric versioning correctly (1_10 > 1_2)
+  def version_key(v_str):
+      parts = v_str.split('_')
+      return [int(p) for p in parts]
+
+  return sorted(versions, key=version_key)
+
 def gen_h():
   """Generates vkjson.h file.
   """
@@ -158,6 +170,9 @@ inline bool VkJsonAllPropertiesFromJson(const std::string& json,
 def gen_cc():
   """Generates vkjson.cc file.
   """
+  # NOTE: This function has logic with version-specific handling (e.g., for
+  # enums and core structs) that is not fully generalized. Manual updates
+  # may be required for future Vulkan versions.
   genfile = os.path.join(os.path.dirname(__file__),
                          "..", "vkjson", "vkjson.cc")
 
@@ -352,41 +367,43 @@ inline bool Iterate(Visitor* visitor, VkJsonDevice* device) {
   bool ret = true;
   switch (device->properties.apiVersion ^
           VK_API_VERSION_PATCH(device->properties.apiVersion)) {
-    case VK_API_VERSION_1_4:
-      ret &=
-      """)
-     # TODO:- b/415707479 (Update generator to handle new Vulkan API versions automatically.)
-    util.emit_struct_visits_by_vk_version(f, "VK_VERSION_1_4")
-    f.write("""visitor->Visit("core14", &device->core14);
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_3:
-      ret &= """)
-    util.emit_struct_visits_by_vk_version(f, "VK_VERSION_1_3")
-    f.write("""visitor->Visit("core13", &device->core13);
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_2:
-      ret &=
-            """)
-    util.emit_struct_visits_by_vk_version(f, "VK_VERSION_1_2")
-    f.write("""
-      visitor->Visit("core11", &device->core11);
-      ret &= visitor->Visit("core12", &device->core12);
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_1:
-      ret &=\n""")
+""")
+    # Iterate versions from newest to oldest (excluding 1.0 which is the base case)
+    sorted_versions = get_sorted_vk_versions()
 
-    util.emit_struct_visits_by_vk_version(f, "VK_VERSION_1_1")
+    for v_str in reversed(sorted_versions):
+      if v_str == "1_0":
+        continue
 
-    f.write("""\
+      f.write(f"    case VK_API_VERSION_{v_str}:\n")
+      f.write(f"      ret &=")
+
+      # Emit standard struct visits (handled by util for all versions)
+      util.emit_struct_visits_by_vk_version(f, v_str)
+
+      # Handle Core struct logic
+      # 1. VkPhysicalDeviceVulkan11Properties (core11) is only visited in 1.2+ contexts
+      if v_str == "1_2":
+         f.write(f'      visitor->Visit("core11", &device->core11) &&\n')
+
+      # 2. For versions > 1.1, visit their specific Core struct (core12, core13, etc.)
+      if v_str != "1_1":
+         f.write(f'      visitor->Visit("core{v_str.replace("_", "")}", &device->core{v_str.replace("_", "")});\n')
+      else:
+         # 3. Specific logic for 1.1: Fence/Semaphore properties (replaces generic Core visit)
+         f.write("""
           visitor->Visit("externalFenceProperties",
                          &device->external_fence_properties) &&
           visitor->Visit("externalSemaphoreProperties",
                          &device->external_semaphore_properties);
-      FALLTHROUGH_INTENDED;
+""")
+      f.write(f"      FALLTHROUGH_INTENDED;\n")
+
+    f.write("""\
     case VK_API_VERSION_1_0:
       ret &=\n""")
 
-    util.emit_struct_visits_by_vk_version(f, "VK_VERSION_1_0")
+    util.emit_struct_visits_by_vk_version(f, "1_0")
 
     f.write("""\
              visitor->Visit("properties", &device->properties) &&
@@ -410,16 +427,24 @@ template <typename Visitor>
 inline bool Iterate(Visitor* visitor, VkJsonInstance* instance) {
   bool ret = true;
   switch (instance->api_version ^ VK_API_VERSION_PATCH(instance->api_version)) {
-    case VK_API_VERSION_1_4:
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_3:
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_2:
-      ret &= visitor->Visit("apiVersion", &instance->api_version);
-      FALLTHROUGH_INTENDED;
-    case VK_API_VERSION_1_1:
-      ret &= visitor->Visit("deviceGroups", &instance->device_groups);
-      FALLTHROUGH_INTENDED;
+""")
+    # Generate the switch cases for instance version
+    for v_str in reversed(sorted_versions):
+      if v_str == "1_0":
+        continue
+      f.write(f"    case VK_API_VERSION_{v_str}:\n")
+
+      # Instance 1.2+ adds apiVersion field
+      if v_str == "1_2":
+          f.write(f'      ret &= visitor->Visit("apiVersion", &instance->api_version);\n')
+
+      # Instance 1.1 adds deviceGroups field
+      if v_str == "1_1":
+          f.write(f'      ret &= visitor->Visit("deviceGroups", &instance->device_groups);\n')
+
+      f.write(f"      FALLTHROUGH_INTENDED;\n")
+
+    f.write("""\
     case VK_API_VERSION_1_0:
       ret &= visitor->Visit("layers", &instance->layers) &&
              visitor->Visit("extensions", &instance->extensions) &&
@@ -805,6 +830,11 @@ bool VkJsonImageFormatPropertiesFromJson(const std::string& json,
 
 
 def gen_instance_cc():
+  """Generates vkjson_instance.cc file.
+  """
+  # NOTE: This function is not fully generalized and may require manual updates
+  # for future Vulkan versions with special property handling.
+
   def write_list_resizing_codeblock(file, vk_version_mapping):
     code_block = util.generate_ext_independent_structs_list_resizing_logic(
       vk_version_mapping,
@@ -930,25 +960,56 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     util.generate_format_range_map()
     f.write(util.generate_vk_format_init_code("VK_VERSION_1_0"))
     f.write(util.generate_vk_format_init_code())
-    f.write("""\
-    if (device.properties.apiVersion >= VK_API_VERSION_1_1) {\n""")
-    f.write(util.generate_vk_format_init_code("VK_VERSION_1_1"))
 
-    # Vulkan version data for VK_VERSION_1_1
-    vk_version_data = VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING["VK_VERSION_1_1"]
-    f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
+    # Iterate dynamically through versions (1.1, 1.2, 1.3, 1.4...)
+    sorted_versions = get_sorted_vk_versions()
 
-    f.write("""\
-    vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n""")
-    write_list_resizing_codeblock(f, vk_version_data)
+    for v_str in sorted_versions:
+      if v_str == "1_0":
+        continue
 
-    features_initialization_code = util.generate_vk_version_structs_initialization(vk_version_data, "Features")
-    f.write(features_initialization_code)
+      # Handle format initialization
+      f.write(f"    if (device.properties.apiVersion >= VK_API_VERSION_{v_str}) {{\n")
+      f.write(util.generate_vk_format_init_code(f"VK_BASE_VERSION_{v_str}"))
 
-    f.write("""\
+      # Generate Core struct init code (e.g. Core12, Core13, Core14)
+      # Note: Core11 struct was historically initialized in the 1.2 block in this generator.
+      # To maintain compatibility, we specifically check for 1.2 to trigger Core11 init.
+      version_suffix = v_str.replace("_", "")
 
-    vkGetPhysicalDeviceFeatures2(physical_device, &features);
+      if v_str == "1_2":
+        cc_props_11, cc_feats_11 = util.generate_vk_core_structs_init_code("Core11")
+        f.write(cc_props_11)
 
+      # For all versions >= 1.2 (or future ones), initialize their respective Core struct if it exists
+      if v_str != "1_1":
+        cc_props, cc_feats = util.generate_vk_core_structs_init_code(f"Core{version_suffix}")
+        f.write(cc_props)
+
+      # Vulkan version data (Promoted Extensions)
+      vk_version_data = VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING[v_str]
+      f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
+
+      f.write(f"    vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
+      write_list_resizing_codeblock(f, vk_version_data)
+
+      core_list_resize_logic = util.generate_core_list_resizing_logic(v_str, VK_PROPERTIES_SETTER_LINE)
+      if core_list_resize_logic:
+          f.write(f'\n{core_list_resize_logic}\n')
+
+      # Feature Initialization
+      if v_str == "1_2":
+        f.write(cc_feats_11)
+
+      if v_str != "1_1":
+        f.write(cc_feats)
+
+      f.write(f"{util.generate_vk_version_structs_initialization(vk_version_data, 'Features')}\n")
+      f.write(f"    vkGetPhysicalDeviceFeatures2(physical_device, &features);\n\n")
+
+      # Specific logic for 1.1 (External Fence/Semaphore Properties)
+      if v_str == "1_1":
+        f.write("""\
     VkPhysicalDeviceExternalFenceInfo external_fence_info = {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FENCE_INFO, nullptr,
         VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT};
@@ -991,78 +1052,11 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
             std::make_pair(handle_type, external_semaphore_properties));
       }
     }
-  }
+""")
 
-  if (device.properties.apiVersion >= VK_API_VERSION_1_2) {\n""")
-    f.write(util.generate_vk_format_init_code("VK_VERSION_1_2"))
-    cc_code_properties_11, cc_code_features_11 = util.generate_vk_core_structs_init_code("Core11")
-    cc_code_properties_12, cc_code_features_12 = util.generate_vk_core_structs_init_code("Core12")
-    # Vulkan version data for VK_VERSION_1_2
-    vk_version_data = VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING["VK_VERSION_1_2"]
-
-    f.write(cc_code_properties_11)
-    f.write(cc_code_properties_12)
-    f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
-
-    f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
-    write_list_resizing_codeblock(f, vk_version_data)
-
-    f.write(cc_code_features_11)
-    f.write(cc_code_features_12)
-    f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Features"))
-
-    f.write(f"vkGetPhysicalDeviceFeatures2(physical_device, &features);\n\n")
-    f.write("""\
-  }
-
-  if (device.properties.apiVersion >= VK_API_VERSION_1_3) {\n""")
-    f.write(util.generate_vk_format_init_code("VK_VERSION_1_3"))
-    cc_code_properties_13, cc_code_features_13 = util.generate_vk_core_structs_init_code("Core13")
-    cc_code_properties_14, cc_code_features_14 = util.generate_vk_core_structs_init_code("Core14")
-
-    # Vulkan version data for VK_VERSION_1_3
-    vk_version_data = VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING["VK_VERSION_1_3"]
-
-    f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
-    f.write(cc_code_properties_13)
-    f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
-    write_list_resizing_codeblock(f, vk_version_data)
-
-    f.write(cc_code_features_13)
-    f.write(f"{util.generate_vk_version_structs_initialization(vk_version_data, "Features")}\n")
-    f.write(f"vkGetPhysicalDeviceFeatures2(physical_device, &features);\n\n")
-    f.write("""\
-  }
-
-  if (device.properties.apiVersion >= VK_API_VERSION_1_4) {\n""")
-    f.write(util.generate_vk_format_init_code("VK_VERSION_1_4"))
-
-    # Vulkan version data for VK_VERSION_1_4
-    vk_version_data = VK.VULKAN_VERSIONS_AND_STRUCTS_MAPPING["VK_VERSION_1_4"]
-    f.write(util.generate_vk_version_structs_initialization(vk_version_data, "Properties") + "\n")
-    f.write(cc_code_properties_14)
-    f.write(f"vkGetPhysicalDeviceProperties2(physical_device, &properties);\n\n")
-    write_list_resizing_codeblock(f, vk_version_data)
+      f.write("  }\n\n")
 
     f.write("""\
-    if (device.core14.properties.copySrcLayoutCount > 0 || device.core14.properties.copyDstLayoutCount > 0 ) {
-      if (device.core14.properties.copySrcLayoutCount > 0) {
-        device.core14.copy_src_layouts.resize(device.core14.properties.copySrcLayoutCount);
-        device.core14.properties.pCopySrcLayouts = device.core14.copy_src_layouts.data();
-      }
-      if (device.core14.properties.copyDstLayoutCount > 0) {
-        device.core14.copy_dst_layouts.resize(device.core14.properties.copyDstLayoutCount);
-        device.core14.properties.pCopyDstLayouts = device.core14.copy_dst_layouts.data();
-      }
-      vkGetPhysicalDeviceProperties2(physical_device, &properties);
-    }
-    \n""")
-    f.write(cc_code_features_14)
-    f.write(f"{util.generate_vk_version_structs_initialization(vk_version_data, "Features")}\n")
-    f.write(f"vkGetPhysicalDeviceFeatures2(physical_device, &features);\n\n")
-    f.write("""\
-  }
-
   return device;
 }
 

@@ -369,7 +369,10 @@ namespace android {
     DEFINE_KEYCODE(F21), \
     DEFINE_KEYCODE(F22), \
     DEFINE_KEYCODE(F23), \
-    DEFINE_KEYCODE(F24)
+    DEFINE_KEYCODE(F24), \
+    DEFINE_KEYCODE(ACCESSIBILITY), \
+    DEFINE_KEYCODE(CONTEXTUAL_SEARCH), \
+    DEFINE_KEYCODE(CONTEXTUAL_INSERT)
 
 // NOTE: If you add a new axis here you must also add it to several other files.
 //       Refer to frameworks/base/core/java/android/view/MotionEvent.java for the full list.
@@ -473,12 +476,12 @@ std::optional<int> InputEventLookup::lookupValueByLabel(
     return it != map.end() ? std::make_optional(it->second) : std::nullopt;
 }
 
-const char* InputEventLookup::lookupLabelByValue(const std::vector<InputEventLabel>& vec,
-                                                 int value) {
+std::optional<std::string_view> InputEventLookup::lookupLabelByValue(
+        const std::vector<InputEventLabel>& vec, int value) {
     if (static_cast<size_t>(value) < vec.size()) {
         return vec[value].literal;
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 std::optional<int> InputEventLookup::getKeyCodeByLabel(const char* label) {
@@ -486,12 +489,12 @@ std::optional<int> InputEventLookup::getKeyCodeByLabel(const char* label) {
     return self.lookupValueByLabel(self.KEYCODES, label);
 }
 
-const char* InputEventLookup::getLabelByKeyCode(int32_t keyCode) {
+std::optional<std::string_view> InputEventLookup::getLabelByKeyCode(int32_t keyCode) {
     const auto& self = get();
-    if (keyCode >= 0 && static_cast<size_t>(keyCode) < self.KEYCODES.size()) {
-        return get().lookupLabelByValue(self.KEY_NAMES, keyCode);
+    if (keyCode >= 0 && static_cast<size_t>(keyCode) < self.KEY_NAMES.size()) {
+        return self.lookupLabelByValue(self.KEY_NAMES, keyCode);
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 std::optional<int> InputEventLookup::getKeyFlagByLabel(const char* label) {
@@ -504,7 +507,7 @@ std::optional<int> InputEventLookup::getAxisByLabel(const char* label) {
     return lookupValueByLabel(self.AXES, label);
 }
 
-const char* InputEventLookup::getAxisLabel(int32_t axisId) {
+std::optional<std::string_view> InputEventLookup::getAxisLabel(int32_t axisId) {
     const auto& self = get();
     return lookupLabelByValue(self.AXES_NAMES, axisId);
 }
@@ -595,10 +598,14 @@ const label* getValueLabelsForTypeAndCode(int32_t type, int32_t code) {
 
 } // namespace
 
+std::string InputEventLookup::getLinuxEvdevCodeLabel(int32_t type, int32_t code) {
+    return getLabel(getCodeLabelsForType(type), code);
+}
+
 EvdevEventLabel InputEventLookup::getLinuxEvdevLabel(int32_t type, int32_t code, int32_t value) {
     return {
             .type = getLabel(ev_labels, type),
-            .code = getLabel(getCodeLabelsForType(type), code),
+            .code = getLinuxEvdevCodeLabel(type, code),
             .value = getLabel(getValueLabelsForTypeAndCode(type, code), value),
     };
 }

@@ -33,6 +33,7 @@ using android::binder::VAL_LONG;
 using android::binder::VAL_DOUBLE;
 using android::binder::VAL_STRING;
 using android::binder::VAL_BOOLEANARRAY;
+using android::binder::VAL_BYTEARRAY;
 using android::binder::VAL_INTARRAY;
 using android::binder::VAL_LONGARRAY;
 using android::binder::VAL_DOUBLEARRAY;
@@ -150,6 +151,7 @@ size_t PersistableBundle::size() const {
             mDoubleMap.size() +
             mStringMap.size() +
             mBoolVectorMap.size() +
+            mByteVectorMap.size() +
             mIntVectorMap.size() +
             mLongVectorMap.size() +
             mDoubleVectorMap.size() +
@@ -164,6 +166,7 @@ size_t PersistableBundle::erase(const String16& key) {
     RETURN_IF_ENTRY_ERASED(mDoubleMap, key);
     RETURN_IF_ENTRY_ERASED(mStringMap, key);
     RETURN_IF_ENTRY_ERASED(mBoolVectorMap, key);
+    RETURN_IF_ENTRY_ERASED(mByteVectorMap, key);
     RETURN_IF_ENTRY_ERASED(mIntVectorMap, key);
     RETURN_IF_ENTRY_ERASED(mLongVectorMap, key);
     RETURN_IF_ENTRY_ERASED(mDoubleVectorMap, key);
@@ -199,6 +202,11 @@ void PersistableBundle::putString(const String16& key, const String16& value) {
 void PersistableBundle::putBooleanVector(const String16& key, const vector<bool>& value) {
     erase(key);
     mBoolVectorMap[key] = value;
+}
+
+void PersistableBundle::putByteVector(const String16& key, const vector<uint8_t>& value) {
+    erase(key);
+    mByteVectorMap[key] = value;
 }
 
 void PersistableBundle::putIntVector(const String16& key, const vector<int32_t>& value) {
@@ -250,6 +258,10 @@ bool PersistableBundle::getBooleanVector(const String16& key, vector<bool>* out)
     return getValue(key, out, mBoolVectorMap);
 }
 
+bool PersistableBundle::getByteVector(const String16& key, vector<uint8_t>* out) const {
+    return getValue(key, out, mByteVectorMap);
+}
+
 bool PersistableBundle::getIntVector(const String16& key, vector<int32_t>* out) const {
     return getValue(key, out, mIntVectorMap);
 }
@@ -292,6 +304,10 @@ set<String16> PersistableBundle::getStringKeys() const {
 
 set<String16> PersistableBundle::getBooleanVectorKeys() const {
     return getKeys(mBoolVectorMap);
+}
+
+set<String16> PersistableBundle::getByteVectorKeys() const {
+    return getKeys(mByteVectorMap);
 }
 
 set<String16> PersistableBundle::getIntVectorKeys() const {
@@ -358,6 +374,11 @@ status_t PersistableBundle::writeToParcelInner(Parcel* parcel) const {
         RETURN_IF_FAILED(parcel->writeString16(key_val_pair.first));
         RETURN_IF_FAILED(parcel->writeInt32(VAL_BOOLEANARRAY));
         RETURN_IF_FAILED(parcel->writeBoolVector(key_val_pair.second));
+    }
+    for (const auto& key_val_pair : mByteVectorMap) {
+        RETURN_IF_FAILED(parcel->writeString16(key_val_pair.first));
+        RETURN_IF_FAILED(parcel->writeInt32(VAL_BYTEARRAY));
+        RETURN_IF_FAILED(parcel->writeByteVector(key_val_pair.second));
     }
     for (const auto& key_val_pair : mIntVectorMap) {
         RETURN_IF_FAILED(parcel->writeString16(key_val_pair.first));
@@ -459,6 +480,10 @@ status_t PersistableBundle::readFromParcelInner(const Parcel* parcel, size_t len
             }
             case VAL_BOOLEANARRAY: {
                 RETURN_IF_FAILED(parcel->readBoolVector(&mBoolVectorMap[key]));
+                break;
+            }
+            case VAL_BYTEARRAY: {
+                RETURN_IF_FAILED(parcel->readByteVector(&mByteVectorMap[key]));
                 break;
             }
             case VAL_PERSISTABLEBUNDLE: {

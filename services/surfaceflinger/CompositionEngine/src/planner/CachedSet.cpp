@@ -19,6 +19,7 @@
 
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
+#include <common/FlagManager.h>
 #include <common/trace.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/planner/CachedSet.h>
@@ -27,6 +28,8 @@
 #include <renderengine/RenderEngine.h>
 #include <ui/DebugUtils.h>
 #include <ui/HdrRenderTypeUtils.h>
+
+#include "SurfaceFlingerProperties.h"
 
 namespace android::compositionengine::impl::planner {
 
@@ -57,7 +60,9 @@ CachedSet::Layer::Layer(const LayerState* state, std::chrono::steady_clock::time
       : mState(state), mHash(state->getHash()), mLastUpdate(lastUpdate) {}
 
 CachedSet::CachedSet(const LayerState* layer, std::chrono::steady_clock::time_point lastUpdate)
-      : mFingerprint(layer->getHash()), mLastUpdate(lastUpdate) {
+      : mFingerprint(layer->getHash()),
+        mLastUpdate(lastUpdate),
+        mForceHolePunch(sysprop::force_hole_punch(false)) {
     addLayer(layer, lastUpdate);
 }
 
@@ -65,7 +70,8 @@ CachedSet::CachedSet(Layer layer)
       : mFingerprint(layer.getHash()),
         mLastUpdate(layer.getLastUpdate()),
         mBounds(layer.getDisplayFrame()),
-        mVisibleRegion(layer.getVisibleRegion()) {
+        mVisibleRegion(layer.getVisibleRegion()),
+        mForceHolePunch(sysprop::force_hole_punch(false)) {
     mLayers.emplace_back(std::move(layer));
 }
 
@@ -167,11 +173,18 @@ void CachedSet::render(renderengine::RenderEngine& renderEngine, TexturePool& te
     const ui::Transform::RotationFlags orientation =
             ui::Transform::toRotationFlags(outputState.framebufferSpace.getOrientation());
 
+    mat4 colorTransform;
+    if (FlagManager::getInstance().bugfix_layer_caching_color_inversion_flickering()) {
+        colorTransform = deviceHandlesColorTransform ? outputState.colorTransformMatrix : mat4();
+    } else {
+        colorTransform = outputState.colorTransformMatrix;
+    }
+
     renderengine::DisplaySettings displaySettings{
             .physicalDisplay = outputState.framebufferSpace.getContent(),
             .clip = viewport,
             .outputDataspace = outputDataspace,
-            .colorTransform = outputState.colorTransformMatrix,
+            .colorTransform = colorTransform,
             .deviceHandlesColorTransform = deviceHandlesColorTransform,
             .orientation = orientation,
             .targetLuminanceNits = outputState.displayBrightnessNits,
@@ -322,7 +335,7 @@ bool CachedSet::requiresHolePunch() const {
         return false;
     }
 
-    return layerFE.hasRoundedCorners();
+    return mForceHolePunch || layerFE.hasRoundedCorners();
 }
 
 bool CachedSet::hasBlurBehind() const {

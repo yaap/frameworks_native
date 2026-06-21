@@ -90,6 +90,7 @@ public:
     status_t setDelay(int mode, void* ident, int64_t ns);
 
     int32_t getAccelHandle() const { return mAcc.getHandle(); }
+    int32_t getAccelType() const { return mAcc.getType(); }
     float getPowerUsage(int mode=FUSION_9AXIS) const;
     int32_t getMinDelay() const;
 

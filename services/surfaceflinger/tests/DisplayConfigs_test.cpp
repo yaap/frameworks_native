@@ -18,6 +18,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra"
 
+#include <binder/Binder.h>
 #include <gtest/gtest.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/SurfaceComposerClient.h>
@@ -52,7 +53,8 @@ protected:
     }
 
     void TearDown() override {
-        status_t res = SurfaceComposerClient::setDesiredDisplayModeSpecs(mDisplayToken, mSpecs);
+        sp<IBinder> applyToken = sp<BBinder>::make();
+        status_t res = SurfaceComposerClient::setDesiredDisplayModeSpecs(applyToken, {mSpecs});
         ASSERT_EQ(res, NO_ERROR);
     }
 
@@ -66,6 +68,7 @@ protected:
         ASSERT_GT(modes.size(), 0);
         for (const auto& mode : modes) {
             gui::DisplayModeSpecs setSpecs;
+            setSpecs.displayToken = mDisplayToken;
             setSpecs.defaultMode = mode.id;
             setSpecs.allowGroupSwitching = allowGroupSwitching;
             setSpecs.primaryRanges.physical.min = mode.peakRefreshRate;
@@ -73,7 +76,8 @@ protected:
             setSpecs.primaryRanges.render = setSpecs.primaryRanges.physical;
             setSpecs.appRequestRanges = setSpecs.primaryRanges;
 
-            res = SurfaceComposerClient::setDesiredDisplayModeSpecs(mDisplayToken, setSpecs);
+            sp<IBinder> applyToken = sp<BBinder>::make();
+            res = SurfaceComposerClient::setDesiredDisplayModeSpecs(applyToken, {setSpecs});
             ASSERT_EQ(res, NO_ERROR);
             gui::DisplayModeSpecs getSpecs;
             res = SurfaceComposerClient::getDesiredDisplayModeSpecs(mDisplayToken, &getSpecs);

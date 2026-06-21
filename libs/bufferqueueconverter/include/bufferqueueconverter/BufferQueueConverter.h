@@ -42,6 +42,7 @@ namespace android {
      *                       Surface.
      * @return SurfaceHolder Unique pointer to created SurfaceHolder object.
      */
+    [[deprecated("Use getNativeWindowFromHGBP instead")]]
     SurfaceHolderUniquePtr getSurfaceFromHGBP(const sp<HGraphicBufferProducer>& token);
 
     /**
@@ -51,7 +52,17 @@ namespace android {
      * @param  surfaceHolder  SurfaceHolder to generate a native window.
      * @return ANativeWindow* a pointer to a generated native window.
      */
+    [[deprecated("Use getNativeWindowFromHGBP instead")]]
     ANativeWindow* getNativeWindow(SurfaceHolder* surfaceHolder);
+
+    /**
+     * Returns a Surface generated from a given HGBP.
+     *
+     * @param  token         Hardware IGraphicBufferProducer to create a
+     *                       Surface.
+     * @return sp<ANativeWindow> Smart pointer to created Surface object.
+     */
+    sp<ANativeWindow> getNativeWindowFromHGBP(const sp<HGraphicBufferProducer>& token);
 
 } // namespace android
 

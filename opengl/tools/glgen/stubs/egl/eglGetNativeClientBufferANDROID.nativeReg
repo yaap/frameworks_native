@@ -1,0 +1,1 @@
+{"eglGetNativeClientBufferANDROID", "(Landroid/hardware/HardwareBuffer;)J", (void *) android_eglGetNativeClientBufferANDROID },

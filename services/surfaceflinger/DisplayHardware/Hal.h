@@ -42,7 +42,7 @@ namespace V2_1 = android::hardware::graphics::composer::V2_1;
 namespace V2_2 = android::hardware::graphics::composer::V2_2;
 namespace V2_3 = android::hardware::graphics::composer::V2_3;
 namespace V2_4 = android::hardware::graphics::composer::V2_4;
-namespace V3_0 = ::aidl::android::hardware::graphics::composer3;
+namespace composer3 = ::aidl::android::hardware::graphics::composer3;
 
 using types::V1_0::ColorTransform;
 using types::V1_0::Transform;
@@ -59,28 +59,29 @@ using V2_4::VsyncPeriodNanos;
 
 using Attribute = IComposerClient::Attribute;
 using BlendMode = IComposerClient::BlendMode;
-using Connection = IComposerCallback::Connection;
-using ContentType = IComposerClient::ContentType;
 using Capability = IComposer::Capability;
 using ClientTargetProperty = IComposerClient::ClientTargetProperty;
+using Connection = IComposerCallback::Connection;
+using ContentType = IComposerClient::ContentType;
+using DisplayConfiguration = composer3::DisplayConfiguration;
 using DisplayHotplugEvent = aidl::android::hardware::graphics::common::DisplayHotplugEvent;
 using DisplayRequest = IComposerClient::DisplayRequest;
 using DisplayType = IComposerClient::DisplayType;
+using Hdr = aidl::android::hardware::graphics::common::Hdr;
 using HWConfigId = V2_1::Config;
 using HWDisplayId = V2_1::Display;
 using HWError = V2_1::Error;
 using HWLayerId = V2_1::Layer;
 using LayerGenericMetadataKey = IComposerClient::LayerGenericMetadataKey;
 using LayerRequest = IComposerClient::LayerRequest;
+using OutputType = composer3::OutputType;
 using PerFrameMetadata = IComposerClient::PerFrameMetadata;
-using PerFrameMetadataKey = IComposerClient::PerFrameMetadataKey;
 using PerFrameMetadataBlob = IComposerClient::PerFrameMetadataBlob;
+using PerFrameMetadataKey = IComposerClient::PerFrameMetadataKey;
 using PowerMode = IComposerClient::PowerMode;
+using VrrConfig = composer3::VrrConfig;
 using Vsync = IComposerClient::Vsync;
 using VsyncPeriodChangeConstraints = IComposerClient::VsyncPeriodChangeConstraints;
-using Hdr = aidl::android::hardware::graphics::common::Hdr;
-using DisplayConfiguration = V3_0::DisplayConfiguration;
-using VrrConfig = V3_0::VrrConfig;
 
 enum class Error : int32_t {
     NONE = static_cast<int32_t>(V2_1::Error::NONE),
@@ -93,8 +94,8 @@ enum class Error : int32_t {
     UNSUPPORTED = static_cast<int32_t>(V2_1::Error::UNSUPPORTED),
     SEAMLESS_NOT_ALLOWED = static_cast<int32_t>(V2_4::Error::SEAMLESS_NOT_ALLOWED),
     SEAMLESS_NOT_POSSIBLE = static_cast<int32_t>(V2_4::Error::SEAMLESS_NOT_POSSIBLE),
-    CONFIG_FAILED = V3_0::IComposerClient::EX_CONFIG_FAILED,
-    PICTURE_PROFILE_MAX_EXCEEDED = V3_0::IComposerClient::EX_PICTURE_PROFILE_MAX_EXCEEDED,
+    CONFIG_FAILED = composer3::IComposerClient::EX_CONFIG_FAILED,
+    PICTURE_PROFILE_MAX_EXCEEDED = composer3::IComposerClient::EX_PICTURE_PROFILE_MAX_EXCEEDED,
     ftl_last = PICTURE_PROFILE_MAX_EXCEEDED
 };
 

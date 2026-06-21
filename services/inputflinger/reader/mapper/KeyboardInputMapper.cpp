@@ -268,8 +268,12 @@ std::list<NotifyArgs> KeyboardInputMapper::processKey(nsecs_t when, nsecs_t read
     uint32_t policyFlags;
     int32_t flags = AKEY_EVENT_FLAG_FROM_SYSTEM;
 
-    if (getDeviceContext().mapKey(scanCode, usageCode, mMetaState, &keyCode, &keyMetaState,
-                                  &policyFlags)) {
+    std::optional<MappedKey> mappedKey = getDeviceContext().mapKey(scanCode, usageCode, mMetaState);
+    if (mappedKey) {
+        keyCode = mappedKey->keyCode;
+        keyMetaState = mappedKey->metaState;
+        policyFlags = mappedKey->flags;
+    } else {
         keyCode = AKEYCODE_UNKNOWN;
         keyMetaState = mMetaState;
         policyFlags = 0;

@@ -47,7 +47,8 @@ OrientationSensor::OrientationSensor() {
 bool OrientationSensor::process(sensors_event_t* outEvent,
         const sensors_event_t& event)
 {
-    if (event.sensor == mSensorFusion.getAccelHandle()) {
+    if (event.type == mSensorFusion.getAccelType() &&
+            event.sensor == mSensorFusion.getAccelHandle()) {
         if (mSensorFusion.hasEstimate()) {
             vec3_t g;
             const float rad2deg = 180 / M_PI;

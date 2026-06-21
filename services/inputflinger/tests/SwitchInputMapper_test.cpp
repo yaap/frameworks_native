@@ -26,8 +26,12 @@
 
 #include "InputMapperTest.h"
 #include "TestConstants.h"
+#include "TestEventMatchers.h"
 
 namespace android {
+
+using testing::AllOf;
+using testing::VariantWith;
 
 class SwitchInputMapperTest : public InputMapperUnitTest {
 protected:
@@ -51,22 +55,18 @@ TEST_F(SwitchInputMapperTest, GetSwitchState) {
 }
 
 TEST_F(SwitchInputMapperTest, Process) {
-    std::list<NotifyArgs> out;
-    out = process(ARBITRARY_TIME, EV_SW, SW_LID, 1);
-    ASSERT_TRUE(out.empty());
-    out = process(ARBITRARY_TIME, EV_SW, SW_JACK_PHYSICAL_INSERT, 1);
-    ASSERT_TRUE(out.empty());
-    out = process(ARBITRARY_TIME, EV_SW, SW_HEADPHONE_INSERT, 0);
-    ASSERT_TRUE(out.empty());
-    out = process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    process(ARBITRARY_TIME, EV_SW, SW_LID, 1);
+    process(ARBITRARY_TIME, EV_SW, SW_JACK_PHYSICAL_INSERT, 1);
+    process(ARBITRARY_TIME, EV_SW, SW_HEADPHONE_INSERT, 0);
+    mFakeListener.assertNoEvents();
 
-    ASSERT_EQ(1u, out.size());
-    const NotifySwitchArgs& args = std::get<NotifySwitchArgs>(*out.begin());
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT), args.switchValues);
-    ASSERT_EQ((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT) | (1 << SW_HEADPHONE_INSERT),
-              args.switchMask);
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
+    process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    mFakeListener.expectSwitchEvent(
+            AllOf(WithEventTime(ARBITRARY_TIME),
+                  WithSwitchValues((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT)),
+                  WithSwitchMask((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT) |
+                                 (1 << SW_HEADPHONE_INSERT)),
+                  WithPolicyFlags(0U)));
 }
 
 } // namespace android

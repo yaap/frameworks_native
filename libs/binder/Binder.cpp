@@ -16,6 +16,7 @@
 #define LOG_TAG "libbinder.Binder"
 
 #include <binder/Binder.h>
+#include <binder/Stability.h>
 
 #include <atomic>
 #include <set>
@@ -25,9 +26,15 @@
 #include <binder/IPCThreadState.h>
 #include <binder/IResultReceiver.h>
 #include <binder/IShellCallback.h>
+
+#if !defined(TRUSTY_USERSPACE)
+#include <binder/internal/JavaBBinderBase.h>
+#endif // !defined(TRUSTY_USERSPACE)
+
 #include <binder/Parcel.h>
 #include <binder/RecordedTransaction.h>
 #include <binder/RpcServer.h>
+#include <binder/Trace.h>
 #include <binder/unique_fd.h>
 
 #include <inttypes.h>
@@ -46,8 +53,26 @@
 namespace android {
 
 using android::binder::unique_fd;
+using android::binder::impl::make_scope_guard;
+using android::binder::impl::scope_guard;
+using ::android::binder::os::get_trace_enabled_tags;
+using ::android::binder::os::trace_begin;
+using ::android::binder::os::trace_end;
 
 constexpr uid_t kUidRoot = 0;
+
+static const char* UNKNOWN_CODE = "#";
+static const char* CPP_BACKEND = "cpp";
+#if !defined(TRUSTY_USERSPACE)
+static const char* JAVA_BACKEND = "java";
+#endif //! defined(TRUSTY_USERSPACE)
+static const size_t TRACE_BUFFER_SIZE = 512;
+
+// Internal 2-bit codes that we will store in the flags
+static constexpr uintptr_t INTERNAL_STABILITY_UNDECLARED = 0;
+static constexpr uintptr_t INTERNAL_STABILITY_VENDOR = 1;
+static constexpr uintptr_t INTERNAL_STABILITY_SYSTEM = 2;
+static constexpr uintptr_t INTERNAL_STABILITY_VINTF = 3;
 
 // Service implementations inherit from BBinder and IBinder, and this is frozen
 // in prebuilts.
@@ -136,6 +161,7 @@ status_t IBinder::getExtension(sp<IBinder>* out) {
     LOG_ALWAYS_FATAL_IF(proxy == nullptr);
 
     Parcel data;
+    data.markForBinder(sp<IBinder>::fromExisting(this));
     Parcel reply;
     status_t status = transact(EXTENSION_TRANSACTION, data, &reply);
     if (status != OK) return status;
@@ -313,9 +339,52 @@ public:
     unique_fd mRecordingFd;
 };
 
+void BBinder::PackedData::setTransactionCodeMap(const TransactionCodeData* data) {
+    LOG_ALWAYS_FATAL_IF(data == nullptr, "TransactionCodeData pointer is null!");
+    LOG_ALWAYS_FATAL_IF((reinterpret_cast<uintptr_t>(data) & ~POINTER_MASK) != 0,
+                        "Pointer is not 16 byte aligned, other bits will be modified!");
+
+    uintptr_t oldPackedData = mPackedData.load();
+    LOG_ALWAYS_FATAL_IF((reinterpret_cast<uintptr_t>(oldPackedData) & POINTER_MASK) != 0,
+                        "TransactionCodeData already set!");
+
+    uintptr_t newPackedData;
+    do {
+        newPackedData = oldPackedData & ~POINTER_MASK;
+        newPackedData |= (reinterpret_cast<uintptr_t>(data) & POINTER_MASK);
+    } while (!mPackedData.compare_exchange_weak(oldPackedData, newPackedData));
+}
+
+const TransactionCodeData* BBinder::PackedData::getTransactionCodeMap() const {
+    return reinterpret_cast<const TransactionCodeData*>(mPackedData.load() & POINTER_MASK);
+}
+
+void BBinder::PackedData::setStability(uintptr_t stability) {
+    LOG_ALWAYS_FATAL_IF(((stability << STABILITY_SHIFT) & ~STABILITY_MASK) != 0,
+                        "Stability is out of range from available 2 bits!");
+    uintptr_t oldPackedData = mPackedData.load();
+    uintptr_t newPackedData;
+    do {
+        newPackedData = oldPackedData & ~STABILITY_MASK;
+        newPackedData |= (stability << STABILITY_SHIFT);
+    } while (!mPackedData.compare_exchange_weak(oldPackedData, newPackedData));
+}
+
+uintptr_t BBinder::PackedData::getStability() const {
+    return (mPackedData.load() & STABILITY_MASK) >> STABILITY_SHIFT;
+}
+
+void BBinder::PackedData::setParceled() {
+    mPackedData.fetch_or(PARCELED_BIT);
+}
+
+bool BBinder::PackedData::isParceled() const {
+    return (mPackedData.load() & PARCELED_BIT) != 0;
+}
+
 // ---------------------------------------------------------------------------
 
-BBinder::BBinder() : mExtras(nullptr), mStability(0), mParceled(false) {}
+BBinder::BBinder() : mExtras(nullptr) {}
 
 bool BBinder::isBinderAlive() const
 {
@@ -407,10 +476,29 @@ const String16& BBinder::getInterfaceDescriptor() const
     return sBBinder;
 }
 
+__attribute__((noinline)) bool BBinder::startTrace(uint32_t code) {
+    char traceSectionName[TRACE_BUFFER_SIZE];
+    status_t result = getTraceName(code, traceSectionName, TRACE_BUFFER_SIZE);
+    // failures are already tracked via ALOGE in getTraceName
+    if (result != OK) return false;
+
+    trace_begin(ATRACE_TAG_AIDL, traceSectionName);
+    return true;
+}
+
 // NOLINTNEXTLINE(google-default-arguments)
 status_t BBinder::transact(
     uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
 {
+    bool tracingEnabled = get_trace_enabled_tags() & ATRACE_TAG_AIDL;
+    if (tracingEnabled) {
+        tracingEnabled = startTrace(code);
+    }
+
+    scope_guard guard = make_scope_guard([&]() {
+        if (tracingEnabled) trace_end(ATRACE_TAG_AIDL);
+    });
+
     const auto startTime = std::chrono::steady_clock::now();
 
     data.setDataPosition(0);
@@ -420,9 +508,10 @@ status_t BBinder::transact(
     }
 
     if (data.dataSize() > binder::kLogTransactionsOverBytes) {
-        ALOGW("Large data transaction of %zu bytes, interface descriptor %s, code %d, flags "
+        ALOGW("Large data transaction of %zu bytes, interface descriptor %s, function: %s, flags: "
               "%d",
-              data.dataSize(), String8(getInterfaceDescriptor()).c_str(), code, flags);
+              data.dataSize(), String8(getInterfaceDescriptor()).c_str(),
+              getFunctionNameAndCode(code).c_str(), flags);
     }
 
     status_t err = NO_ERROR;
@@ -457,9 +546,10 @@ status_t BBinder::transact(
     if (reply != nullptr) {
         reply->setDataPosition(0);
         if (reply->dataSize() > binder::kLogTransactionsOverBytes) {
-            ALOGW("Large reply transaction of %zu bytes, interface descriptor %s, code %d, flags "
-                  "%d",
-                  reply->dataSize(), String8(getInterfaceDescriptor()).c_str(), code, flags);
+            ALOGW("Large reply transaction of %zu bytes, interface descriptor %s, function: %s, "
+                  "flags: %d",
+                  reply->dataSize(), String8(getInterfaceDescriptor()).c_str(),
+                  getFunctionNameAndCode(code).c_str(), flags);
         }
     }
 
@@ -487,10 +577,10 @@ status_t BBinder::transact(
 
     const uint64_t transactionMs = to_ms(std::chrono::steady_clock::now() - startTime);
     if (transactionMs > 1000lu) {
-        ALOGW("Binder transaction to %s code %" PRIu32 " took %" PRIu64
+        ALOGW("Binder transaction to %s, function: %s, took %" PRIu64
               "ms. Data bytes: %zu Reply bytes: %zu Flags: %d",
-              String8(getInterfaceDescriptor()).c_str(), code, transactionMs, data.dataSize(),
-              reply ? reply->dataSize() : 0u, flags);
+              String8(getInterfaceDescriptor()).c_str(), getFunctionNameAndCode(code).c_str(),
+              transactionMs, data.dataSize(), reply ? reply->dataSize() : 0u, flags);
     }
 
     return err;
@@ -576,7 +666,7 @@ bool BBinder::isRequestingSid()
 
 void BBinder::setRequestingSid(bool requestingSid)
 {
-    LOG_ALWAYS_FATAL_IF(mParceled,
+    LOG_ALWAYS_FATAL_IF(wasParceled(),
                         "setRequestingSid() should not be called after a binder object "
                         "is parceled/sent to another process");
 
@@ -601,9 +691,171 @@ sp<IBinder> BBinder::getExtension() {
     return e->mExtension;
 }
 
+void BBinder::setTransactionCodeMap(const TransactionCodeData* data) {
+    mPackedData.setTransactionCodeMap(data);
+}
+
+std::optional<std::string> BBinder::tryGetFunctionName(size_t code) {
+    const TransactionCodeData* transactionData = mPackedData.getTransactionCodeMap();
+    if (transactionData == nullptr) {
+        return std::nullopt;
+    }
+
+    const uint32_t count = transactionData->count;
+    const char* const* functionNames = transactionData->names;
+    if (count == 0 || functionNames == nullptr) {
+        return std::nullopt;
+    }
+
+    if (code < FIRST_CALL_TRANSACTION || (code - FIRST_CALL_TRANSACTION) >= count) {
+        return std::nullopt;
+    }
+
+    const size_t index = code - FIRST_CALL_TRANSACTION;
+    const char* functionName = functionNames[index];
+    if (functionName == nullptr) {
+        return std::nullopt;
+    }
+
+    return functionName;
+}
+
+std::string BBinder::getFunctionName(size_t code) {
+    auto name = tryGetFunctionName(code);
+    if (name == std::nullopt) {
+        return UNKNOWN_CODE + std::to_string(code);
+    }
+    return std::move(*name);
+}
+
+std::string BBinder::getFunctionNameAndCode(size_t code) {
+    auto name = tryGetFunctionName(code);
+    if (name == std::nullopt) {
+        return "UNKNOWN_FUNCTION_NAME, code: " + std::to_string(code);
+    }
+    return *name + ", code: " + std::to_string(code);
+}
+
+status_t BBinder::getTraceName(uint32_t code, char* buffer, size_t bufferSize) {
+    const TransactionCodeData* transactionData = mPackedData.getTransactionCodeMap();
+    const char* backendType =
+            transactionData != nullptr ? transactionData->backendType : CPP_BACKEND;
+
+#if !defined(TRUSTY_USERSPACE)
+    bool isJavaBackend =
+            this->checkSubclass(android::internal::JavaBBinderBase::getExtSubclassID());
+    if (isJavaBackend) {
+        backendType = JAVA_BACKEND;
+    }
+#endif // !defined(TRUSTY_USERSPACE)
+
+    int prefixLen = snprintf(buffer, bufferSize, "AIDL::%s::", backendType);
+    if (prefixLen < 0 || static_cast<size_t>(prefixLen) >= bufferSize) {
+        ALOGE("snprintf failed for trace name prefix, error %d", prefixLen);
+        return UNKNOWN_ERROR;
+    }
+
+    size_t offset = static_cast<size_t>(prefixLen);
+
+    const String16& descriptor = getInterfaceDescriptor();
+    const char16_t* descUtf16 = descriptor.c_str();
+    size_t descUtf16Len = descriptor.size();
+
+    // Check if the required size fits in our buffer
+    if (descUtf16Len > 0) {
+        ssize_t utf8Len = utf16_to_utf8_length(descUtf16, descUtf16Len);
+        if (utf8Len < 0) {
+            ALOGE("utf16_to_utf8_length failed");
+            return BAD_VALUE;
+        }
+        size_t descUtf8RequiredSize = static_cast<size_t>(utf8Len) + 1;
+
+        if (offset + descUtf8RequiredSize > bufferSize) {
+            ALOGE("Trace name descriptor too long (required %zu, have %zu)", descUtf8RequiredSize,
+                  bufferSize - offset);
+            return NO_MEMORY;
+        }
+
+        utf16_to_utf8(descUtf16, descUtf16Len, buffer + offset, descUtf8RequiredSize);
+        offset += descUtf8RequiredSize - 1; // -1 to overwrite the null terminator
+    }
+
+    status_t status = OK;
+    auto appendSuffix = [&](const char* name) {
+        char codeStr[16];
+        if (name == nullptr) {
+            snprintf(codeStr, sizeof(codeStr), "%s%u", UNKNOWN_CODE, code);
+            name = codeStr;
+        }
+        int suffixLen = snprintf(buffer + offset, bufferSize - offset, "::%s::server", name);
+        if (suffixLen < 0 || static_cast<size_t>(suffixLen) >= bufferSize - offset) {
+            ALOGE("snprintf failed for trace name suffix, error %d", suffixLen);
+            status = UNKNOWN_ERROR;
+        }
+    };
+
+#if !defined(TRUSTY_USERSPACE)
+    if (isJavaBackend) {
+        static_cast<internal::JavaBBinderBase*>(this)
+                ->getFunctionName(code, [&appendSuffix](const char* name) { appendSuffix(name); });
+        return status;
+    }
+#endif // !defined(TRUSTY_USERSPACE)
+
+    const char* functionNameStr = nullptr;
+    if (transactionData != nullptr) {
+        const uint32_t count = transactionData->count;
+        const char* const* functionNames = transactionData->names;
+        if (count > 0 && functionNames != nullptr && code >= FIRST_CALL_TRANSACTION &&
+            (code - FIRST_CALL_TRANSACTION) < count) {
+            functionNameStr = functionNames[code - FIRST_CALL_TRANSACTION];
+        }
+    }
+
+    appendSuffix(functionNameStr);
+    return status;
+}
+
+void BBinder::setStability(int16_t level) {
+    // Map the public input value to our internal 2-bit code.
+    uintptr_t internalCode = INTERNAL_STABILITY_UNDECLARED;
+    switch (level) {
+        case android::internal::Stability::VENDOR:
+            internalCode = INTERNAL_STABILITY_VENDOR;
+            break;
+        case android::internal::Stability::SYSTEM:
+            internalCode = INTERNAL_STABILITY_SYSTEM;
+            break;
+        case android::internal::Stability::VINTF:
+            internalCode = INTERNAL_STABILITY_VINTF;
+            break;
+    }
+    mPackedData.setStability(internalCode);
+}
+
+/**
+ * Retrieves the stability level by mapping the internal 2-bit code back to the public value.
+ */
+int16_t BBinder::getStability() const {
+    // Get the internal 2-bit code.
+    uintptr_t internalCode = mPackedData.getStability();
+
+    // Map the internal code back to the public return value.
+    switch (internalCode) {
+        case INTERNAL_STABILITY_VENDOR:
+            return android::internal::Stability::VENDOR;
+        case INTERNAL_STABILITY_SYSTEM:
+            return android::internal::Stability::SYSTEM;
+        case INTERNAL_STABILITY_VINTF:
+            return android::internal::Stability::VINTF;
+        default:
+            return android::internal::Stability::UNDECLARED;
+    }
+}
+
 #ifdef __linux__
 void BBinder::setMinSchedulerPolicy(int policy, int priority) {
-    LOG_ALWAYS_FATAL_IF(mParceled,
+    LOG_ALWAYS_FATAL_IF(wasParceled(),
                         "setMinSchedulerPolicy() should not be called after a binder object "
                         "is parceled/sent to another process");
 
@@ -656,7 +908,7 @@ bool BBinder::isInheritRt() {
 }
 
 void BBinder::setInheritRt(bool inheritRt) {
-    LOG_ALWAYS_FATAL_IF(mParceled,
+    LOG_ALWAYS_FATAL_IF(wasParceled(),
                         "setInheritRt() should not be called after a binder object "
                         "is parceled/sent to another process");
 
@@ -675,7 +927,7 @@ void BBinder::setInheritRt(bool inheritRt) {
 }
 
 void BBinder::setMinRpcThreads(uint16_t min) {
-    LOG_ALWAYS_FATAL_IF(mParceled,
+    LOG_ALWAYS_FATAL_IF(wasParceled(),
                         "setMinRpcThreads() should not be called after a binder object "
                         "is parceled/sent to another process");
     Extras* e = mExtras.load(std::memory_order_acquire);
@@ -710,7 +962,7 @@ pid_t BBinder::getDebugPid() {
 }
 
 void BBinder::setExtension(const sp<IBinder>& extension) {
-    LOG_ALWAYS_FATAL_IF(mParceled,
+    LOG_ALWAYS_FATAL_IF(wasParceled(),
                         "setExtension() should not be called after a binder object "
                         "is parceled/sent to another process");
 
@@ -719,11 +971,11 @@ void BBinder::setExtension(const sp<IBinder>& extension) {
 }
 
 bool BBinder::wasParceled() {
-    return mParceled;
+    return mPackedData.isParceled();
 }
 
 void BBinder::setParceled() {
-    mParceled = true;
+    mPackedData.setParceled();
 }
 
 status_t BBinder::setRpcClientDebug(const Parcel& data) {

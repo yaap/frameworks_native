@@ -35,23 +35,25 @@ public:
 
     using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
 
-    void assertNotifyInputDevicesChangedWasCalled(
-            NotifyInputDevicesChangedArgs* outEventArgs = nullptr);
+    void assertNotifyInputDevicesChangedWasCalled();
 
     void clearNotifyDeviceResetCalls();
 
     void assertNotifyDeviceResetWasCalled(const ::testing::Matcher<NotifyDeviceResetArgs>& matcher);
 
+    // Deprecated; use the version with a Matcher instead.
     void assertNotifyDeviceResetWasCalled(NotifyDeviceResetArgs* outEventArgs = nullptr);
 
     void assertNotifyDeviceResetWasNotCalled();
 
+    // Deprecated; use the version with a Matcher instead.
     void assertNotifyKeyWasCalled(NotifyKeyArgs* outEventArgs = nullptr);
 
     void assertNotifyKeyWasCalled(const ::testing::Matcher<NotifyKeyArgs>& matcher);
 
     void assertNotifyKeyWasNotCalled();
 
+    // Deprecated; use the version with a Matcher instead.
     void assertNotifyMotionWasCalled(NotifyMotionArgs* outEventArgs = nullptr,
                                      std::optional<TimePoint> waitUntil = {});
 
@@ -60,12 +62,14 @@ public:
 
     void assertNotifyMotionWasNotCalled(std::optional<TimePoint> waitUntil = {});
 
-    void assertNotifySwitchWasCalled(NotifySwitchArgs* outEventArgs = nullptr);
+    void assertNotifySwitchWasCalled(
+            const ::testing::Matcher<NotifySwitchArgs>& matcher = ::testing::_);
 
-    void assertNotifyCaptureWasCalled(NotifyPointerCaptureChangedArgs* outEventArgs = nullptr);
+    void assertNotifyCaptureWasCalled(
+            const ::testing::Matcher<NotifyPointerCaptureChangedArgs>& matcher = ::testing::_);
     void assertNotifyCaptureWasNotCalled();
-    void assertNotifySensorWasCalled(NotifySensorArgs* outEventArgs = nullptr);
-    void assertNotifyVibratorStateWasCalled(NotifyVibratorStateArgs* outEventArgs = nullptr);
+    void assertNotifySensorWasCalled();
+    void assertNotifyVibratorStateWasCalled();
 
 private:
     template <class NotifyArgsType>

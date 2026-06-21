@@ -89,8 +89,8 @@ public:
     void onFirstRef() override;
 
 private:
-    LegacyVirtualDisplaySurface(HWComposer&, VirtualDisplayIdVariant,
-                                const sp<IGraphicBufferProducer>& sink, const std::string& name, bool secure);
+    LegacyVirtualDisplaySurface(HWComposer&, VirtualDisplayIdVariant, const sp<Surface>& sink,
+                                const std::string& name, bool secure);
 
     friend class sp<LegacyVirtualDisplaySurface>;
 

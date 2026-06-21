@@ -17,6 +17,7 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 
 #include "LayerHierarchy.h"
 #include "LayerLog.h"
@@ -164,6 +165,10 @@ void LayerHierarchy::dump(std::ostream& out, const std::string& prefix,
         }
 
         out << *mLayer << " pid=" << mLayer->ownerPid.val() << " uid=" << mLayer->ownerUid.val();
+        static const bool kDebuggable = android::base::GetBoolProperty("ro.debuggable", false);
+        if (kDebuggable && mLayer->debugCookie != 0) {
+            out << " cookie=" << std::hex << mLayer->debugCookie << std::dec;
+        }
     }
 
     for (size_t i = 0; i < mChildren.size(); i++) {

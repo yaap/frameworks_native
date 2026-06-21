@@ -92,10 +92,7 @@ MultifileBlobCache::MultifileBlobCache(size_t maxKeySize, size_t maxValueSize, s
 
     // Set the cache version
     mCacheVersion = kMultifileBlobCacheVersion;
-    // Bump the version if we're using flagged features
-    if (flags::multifile_blobcache_advanced_usage()) {
-        mCacheVersion++;
-    }
+
     // Override if debug value set
     int debugCacheVersion = base::GetIntProperty("debug.egl.blobcache.cache_version", -1);
     if (debugCacheVersion >= 0) {
@@ -333,7 +330,7 @@ void MultifileBlobCache::set(const void* key, EGLsizeiANDROID keySize, const voi
     std::string fullPath = mMultifileDirName + "/" + std::to_string(entryHash);
 
     // See if we already have this file
-    if (flags::multifile_blobcache_advanced_usage() && contains(entryHash)) {
+    if (contains(entryHash)) {
         // Remove previous entry from hot cache
         removeFromHotCache(entryHash);
 
@@ -376,9 +373,7 @@ void MultifileBlobCache::set(const void* key, EGLsizeiANDROID keySize, const voi
 
     // Track the size and access time for quick recall and update the overall cache size
     struct timespec time = {0, 0};
-    if (flags::multifile_blobcache_advanced_usage()) {
-        clock_gettime(CLOCK_REALTIME, &time);
-    }
+    clock_gettime(CLOCK_REALTIME, &time);
     trackEntry(entryHash, valueSize, fileSize, time);
 
     // Keep the entry in hot cache for quick retrieval
@@ -462,13 +457,11 @@ EGLsizeiANDROID MultifileBlobCache::get(const void* key, EGLsizeiANDROID keySize
         ALOGV("GET: HotCache HIT for entry %u", entryHash);
         cacheEntry = mHotCache[entryHash].entryBuffer;
 
-        if (flags::multifile_blobcache_advanced_usage()) {
-            // Update last access time on disk
-            struct timespec times[2];
-            times[0].tv_nsec = UTIME_NOW;
-            times[1].tv_nsec = UTIME_OMIT;
-            utimensat(0, fullPath.c_str(), times, 0);
-        }
+        // Update last access time on disk
+        struct timespec times[2];
+        times[0].tv_nsec = UTIME_NOW;
+        times[1].tv_nsec = UTIME_OMIT;
+        utimensat(0, fullPath.c_str(), times, 0);
     } else {
         ALOGV("GET: HotCache MISS for entry: %u", entryHash);
 
@@ -497,13 +490,11 @@ EGLsizeiANDROID MultifileBlobCache::get(const void* key, EGLsizeiANDROID keySize
         cacheEntry =
                 reinterpret_cast<uint8_t*>(mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0));
 
-        if (flags::multifile_blobcache_advanced_usage()) {
-            // Update last access time and omit last modify time
-            struct timespec times[2];
-            times[0].tv_nsec = UTIME_NOW;
-            times[1].tv_nsec = UTIME_OMIT;
-            futimens(fd, times);
-        }
+        // Update last access time and omit last modify time
+        struct timespec times[2];
+        times[0].tv_nsec = UTIME_NOW;
+        times[1].tv_nsec = UTIME_OMIT;
+        futimens(fd, times);
 
         // We can close the file now and the mmap will remain
         close(fd);
@@ -541,12 +532,10 @@ EGLsizeiANDROID MultifileBlobCache::get(const void* key, EGLsizeiANDROID keySize
         return 0;
     }
 
-    if (flags::multifile_blobcache_advanced_usage()) {
-        // Update the entry time for this hash, so it reflects LRU
-        struct timespec time;
-        clock_gettime(CLOCK_REALTIME, &time);
-        updateEntryTime(entryHash, time);
-    }
+    // Update the entry time for this hash, so it reflects LRU
+    struct timespec time;
+    clock_gettime(CLOCK_REALTIME, &time);
+    updateEntryTime(entryHash, time);
 
     // Remaining entry following the key is the value
     uint8_t* cachedValue = cacheEntry + (keySize + sizeof(MultifileHeader));
@@ -684,7 +673,6 @@ bool MultifileBlobCache::checkStatus(const std::string& baseDir) {
 
 void MultifileBlobCache::trackEntry(uint32_t entryHash, EGLsizeiANDROID valueSize, size_t fileSize,
                                     const timespec& accessTime) {
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
     // When we add this entry to the map, it is sorted by accessTime
     MultifileEntryStatsMapIter entryStatsIter =
             mEntryStats.emplace(std::piecewise_construct, std::forward_as_tuple(accessTime),
@@ -692,11 +680,6 @@ void MultifileBlobCache::trackEntry(uint32_t entryHash, EGLsizeiANDROID valueSiz
 
     // Track all entries with quick access to its stats
     mEntries.emplace(entryHash, entryStatsIter);
-#else
-    (void)accessTime;
-    mEntries.insert(entryHash);
-    mEntryStats[entryHash] = {entryHash, valueSize, fileSize};
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 
     increaseTotalCacheSize(fileSize);
 }
@@ -707,18 +690,9 @@ bool MultifileBlobCache::removeEntry(uint32_t entryHash) {
         return false;
     }
 
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
     MultifileEntryStatsMapIter entryStatsIter = entryIter->second;
     MultifileEntryStats entryStats = entryStatsIter->second;
     decreaseTotalCacheSize(entryStats.fileSize);
-#else
-    auto entryStatsIter = mEntryStats.find(entryHash);
-    if (entryStatsIter == mEntryStats.end()) {
-        ALOGE("Failed to remove entryHash (%u) from mEntryStats", entryHash);
-        return false;
-    }
-    decreaseTotalCacheSize(entryStatsIter->second.fileSize);
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 
     mEntryStats.erase(entryStatsIter);
     mEntries.erase(entryIter);
@@ -731,7 +705,6 @@ bool MultifileBlobCache::contains(uint32_t hashEntry) const {
 }
 
 MultifileEntryStats MultifileBlobCache::getEntryStats(uint32_t entryHash) {
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
     auto entryIter = mEntries.find(entryHash);
     if (entryIter == mEntries.end()) {
         return {};
@@ -740,13 +713,9 @@ MultifileEntryStats MultifileBlobCache::getEntryStats(uint32_t entryHash) {
     MultifileEntryStatsMapIter entryStatsIter = entryIter->second;
     MultifileEntryStats entryStats = entryStatsIter->second;
     return entryStats;
-#else
-    return mEntryStats[entryHash];
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 }
 
 void MultifileBlobCache::updateEntryTime(uint32_t entryHash, const timespec& newTime) {
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
     // This function updates the ordering of the map by removing the old iterators
     // and re-adding them. If should be perforant as it does not perform a full re-sort.
     // First, pull out the old entryStats
@@ -761,10 +730,6 @@ void MultifileBlobCache::updateEntryTime(uint32_t entryHash, const timespec& new
     // Insert the new with updated time
     entryStatsIter = mEntryStats.emplace(std::make_pair(newTime, std::move(entryStats)));
     mEntries.emplace(entryHash, entryStatsIter);
-#else
-    (void)entryHash;
-    (void)newTime;
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 }
 
 void MultifileBlobCache::increaseTotalCacheSize(size_t fileSize) {
@@ -846,13 +811,8 @@ bool MultifileBlobCache::removeFromHotCache(uint32_t entryHash) {
 bool MultifileBlobCache::applyLRU(size_t cacheSizeLimit, size_t cacheEntryLimit) {
     // Walk through our map of sorted last access times and remove files until under the limit
     for (auto cacheEntryIter = mEntryStats.begin(); cacheEntryIter != mEntryStats.end();) {
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
         const MultifileEntryStats& entryStats = cacheEntryIter->second;
         uint32_t entryHash = entryStats.entryHash;
-#else
-        uint32_t entryHash = cacheEntryIter->first;
-        const MultifileEntryStats& entryStats = cacheEntryIter->second;
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 
         ALOGV("LRU: Removing entryHash %u", entryHash);
 
@@ -956,29 +916,27 @@ void MultifileBlobCache::processTask(DeferredTask& task) {
             // Create the file or reset it if already present, read+write for user only
             int fd = open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (fd == -1) {
-                if (flags::multifile_blobcache_advanced_usage()) {
-                    struct stat st;
-                    if (stat(mMultifileDirName.c_str(), &st) == -1) {
-                        ALOGW("Cache directory missing (app's cache cleared?). Recreating...");
+                struct stat st;
+                if (stat(mMultifileDirName.c_str(), &st) == -1) {
+                    ALOGW("Cache directory missing (app's cache cleared?). Recreating...");
 
-                        // Restore the multifile directory
-                        if (mkdir(mMultifileDirName.c_str(), 0755) != 0 && (errno != EEXIST)) {
-                            ALOGE("Cache error in SET - Unable to create directory (%s), errno "
-                                  "(%i)",
-                                  mMultifileDirName.c_str(), errno);
-                            return;
-                        }
-
-                        // Create new status file
-                        if (!createStatus(mMultifileDirName.c_str())) {
-                            ALOGE("Cache error in SET - Failed to create status file!");
-                            return;
-                        }
-
-                        // Try to open the file again
-                        fd = open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
-                                  S_IRUSR | S_IWUSR);
+                    // Restore the multifile directory
+                    if (mkdir(mMultifileDirName.c_str(), 0755) != 0 && (errno != EEXIST)) {
+                        ALOGE("Cache error in SET - Unable to create directory (%s), errno "
+                                "(%i)",
+                                mMultifileDirName.c_str(), errno);
+                        return;
                     }
+
+                    // Create new status file
+                    if (!createStatus(mMultifileDirName.c_str())) {
+                        ALOGE("Cache error in SET - Failed to create status file!");
+                        return;
+                    }
+
+                    // Try to open the file again
+                    fd = open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
+                            S_IRUSR | S_IWUSR);
                 }
 
                 if (fd == -1) {
@@ -1002,13 +960,11 @@ void MultifileBlobCache::processTask(DeferredTask& task) {
                 return;
             }
 
-            if (flags::multifile_blobcache_advanced_usage()) {
-                // Update last access time and last modify time
-                struct timespec times[2];
-                times[0].tv_nsec = UTIME_NOW;
-                times[1].tv_nsec = UTIME_NOW;
-                futimens(fd, times);
-            }
+            // Update last access time and last modify time
+            struct timespec times[2];
+            times[0].tv_nsec = UTIME_NOW;
+            times[1].tv_nsec = UTIME_NOW;
+            futimens(fd, times);
 
             ALOGV("DEFERRED: Completed write for: %s", fullPath.c_str());
             close(fd);

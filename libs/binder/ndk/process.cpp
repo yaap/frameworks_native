@@ -24,7 +24,6 @@ using ::android::ProcessState;
 
 void ABinderProcess_startThreadPool(void) {
     ProcessState::self()->startThreadPool();
-    ProcessState::self()->giveThreadPoolName();
 }
 bool ABinderProcess_setThreadPoolMaxThreadCount(uint32_t numThreads) {
     return ProcessState::self()->setThreadPoolMaxThreadCount(numThreads) == 0;

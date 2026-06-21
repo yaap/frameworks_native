@@ -90,6 +90,7 @@ filegroup {
         "InputDeviceMetricsCollector.cpp",
         "InputFilter.cpp",
         "InputFilterCallbacks.cpp",
+        "InteractionReporter.cpp",
         "InputProcessor.cpp",
         "PointerChoreographer.cpp",
         "PreferStylusOverTouchBlocker.cpp",
@@ -110,7 +111,9 @@ cc_defaults {
     srcs: [":libinputflinger_sources"],
     shared_libs: [
         "android.hardware.input.processor-V1-ndk",
+        "attentionmanager_native_aidl-cpp",
         "com.android.server.inputflinger-ndk",
+        "libattention_native",
         "libbase",
         "libbinder",
         "libbinder_ndk",
@@ -123,6 +126,7 @@ cc_defaults {
         "liblog",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
+        "libprotolog",
         "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
@@ -177,10 +181,10 @@ cc_library_shared {
     shared_libs: [
         // This should consist only of dependencies from inputflinger. Other dependencies should be
         // in cc_defaults so that they are included in the tests.
-        "libPlatformProperties",
         "libinputreporter",
     ],
     static_libs: [
+        "libPlatformProperties",
         "libinputdispatcher",
     ],
     export_static_lib_headers: [

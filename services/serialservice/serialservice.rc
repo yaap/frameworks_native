@@ -1,5 +1,7 @@
 service native_serial /system_ext/bin/serialservice
+    interface aidl native_serial
     class late_start
     oneshot
+    disabled
     user system
     group system

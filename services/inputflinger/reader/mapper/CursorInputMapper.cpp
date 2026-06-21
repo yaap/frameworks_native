@@ -25,7 +25,6 @@
 #include <com_android_input_flags.h>
 #include <ftl/enum.h>
 #include <input/AccelerationCurve.h>
-#include <input/InputFlags.h>
 
 #include "CursorButtonAccumulator.h"
 #include "CursorScrollAccumulator.h"
@@ -526,13 +525,7 @@ void CursorInputMapper::configureOnChangePointerSpeed(const InputReaderConfigura
                                      mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) != 0;
 
     if (mParameters.mode == Parameters::Mode::POINTER) {
-        if (!disableAllScaling && input_flags::use_separate_xy_dpi_scaling_for_mice() &&
-            isDensityValueSupportedForScaling(mViewportXDpi) &&
-            isDensityValueSupportedForScaling(mViewportYDpi)) {
-            mXScale = mViewportXDpi / SCALING_BASELINE_DENSITY;
-            mYScale = mViewportYDpi / SCALING_BASELINE_DENSITY;
-        } else if (!disableAllScaling && InputFlags::scaleCursorSpeedWithDisplayDensity() &&
-                   isDensityValueSupportedForScaling(mViewportDensityDpi)) {
+        if (!disableAllScaling && isDensityValueSupportedForScaling(mViewportDensityDpi)) {
             mXScale = mYScale = static_cast<float>(mViewportDensityDpi) / SCALING_BASELINE_DENSITY;
         } else {
             mXScale = mYScale = 1.0f;

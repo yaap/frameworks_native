@@ -28,6 +28,7 @@
 #include <android/gui/ISurfaceComposerClient.h>
 #include <ftl/finalizer.h>
 #include <ftl/ignore.h>
+#include <ftl/non_null.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/SurfaceControl.h>
@@ -42,6 +43,9 @@
 #include <utils/Timers.h>
 
 #include "test_framework/core/BufferId.h"
+#include "test_framework/core/ScenarioEventRecorder.h"
+#include "test_framework/core/TestService.h"
+#include "test_framework/surfaceflinger/SFController.h"
 #include "test_framework/surfaceflinger/SimpleBufferPool.h"
 #include "test_framework/surfaceflinger/Surface.h"
 #include "test_framework/surfaceflinger/events/BufferReleased.h"
@@ -53,32 +57,34 @@ namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinge
 
 struct Surface::Passkey final {};
 
-auto Surface::make(const sp<SurfaceComposerClient>& flinger, const Surface::CreationArgs& args)
+auto Surface::make(const ftl::NonNull<std::shared_ptr<SFController>>& controller,
+                   const Surface::CreationArgs& args)
         -> base::expected<std::shared_ptr<Surface>, std::string> {
     using namespace std::string_literals;
 
-    auto instance = std::make_shared<Surface>(Passkey{});
+    auto instance = std::make_shared<Surface>(controller, Passkey{});
     if (instance == nullptr) {
         return base::unexpected("Failed to construct a Surface"s);
     }
-    if (auto result = instance->init(flinger, args); !result) {
+    if (auto result = instance->init(controller, args); !result) {
         return base::unexpected("Failed to init a Surface: " + result.error());
     }
     return std::move(instance);
 }
 
-Surface::Surface(Passkey passkey) {
+Surface::Surface(ftl::NonNull<std::weak_ptr<SFController>> controller, Passkey passkey)
+    : mController(std::move(controller)) {
     ftl::ignore(passkey);
 }
 
-auto Surface::init(const sp<SurfaceComposerClient>& flinger, const Surface::CreationArgs& args)
-        -> base::expected<void, std::string> {
+auto Surface::init(const ftl::NonNull<std::shared_ptr<SFController>>& controller,
+                   const Surface::CreationArgs& args) -> base::expected<void, std::string> {
     using namespace std::string_literals;
 
     constexpr auto kFlags = gui::ISurfaceComposerClient::eOpaque;
-    sp<SurfaceControl> surfaceControl =
-            flinger->createSurface(String8(args.name.c_str()), args.size.width, args.size.height,
-                                   args.pixelFormat, kFlags, args.parent);
+    sp<SurfaceControl> surfaceControl = controller->flinger()->createSurface(
+            String8(args.name.c_str()), args.size.width, args.size.height, args.pixelFormat, kFlags,
+            args.parent);
 
     if (surfaceControl == nullptr) {
         return base::unexpected("Failed to create a SF Surface");
@@ -105,6 +111,15 @@ auto Surface::init(const sp<SurfaceComposerClient>& flinger, const Surface::Crea
     mCleanup = ftl::Finalizer([this]() { ensureCallbacksCompletedBeforeShutdown(); });
 
     return {};
+}
+
+[[nodiscard]] auto Surface::testService() const -> std::shared_ptr<core::TestService> {
+    if (auto controller = mController.get().lock()) {
+        if (auto service = controller->testService()) {
+            return service;
+        }
+    }
+    return nullptr;
 }
 
 auto Surface::editCallbacks() -> Callbacks& {
@@ -210,11 +225,19 @@ void Surface::onBufferRelease(const events::BufferReleased& event,
 
     LOG(VERBOSE) << __func__ << " " << toString(event);
 
+    if (auto service = testService()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
+
     mCallbacks.onBufferReleased(event);
 }
 
 void Surface::onTransactionInitiated(const events::TransactionInitiated& event) const {
     LOG(VERBOSE) << __func__ << " " << toString(event);
+
+    if (auto service = testService()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
 
     mCallbacks.onTransactionInitiated(event);
 }
@@ -222,11 +245,19 @@ void Surface::onTransactionInitiated(const events::TransactionInitiated& event) 
 void Surface::onTransactionCommitted(const events::TransactionCommitted& event) const {
     LOG(VERBOSE) << __func__ << " " << toString(event);
 
+    if (auto service = testService()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
+
     mCallbacks.onTransactionCommitted(event);
 }
 
 void Surface::onTransactionCompleted(const events::TransactionCompleted& event) const {
     LOG(VERBOSE) << __func__ << " " << toString(event);
+
+    if (auto service = testService()) {
+        service->scenarioEventRecorder().recordEvent(event);
+    }
 
     mCallbacks.onTransactionCompleted(event);
 }

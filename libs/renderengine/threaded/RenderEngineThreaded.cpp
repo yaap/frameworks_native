@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "common/Panopticon.h"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "RenderEngineThreaded.h"
@@ -26,6 +27,7 @@
 
 #include <android-base/stringprintf.h>
 #include <common/FlagManager.h>
+#include <common/ThreadStateCrashLogger.h>
 #include <common/trace.h>
 #include <private/gui/SyncFeatures.h>
 #include <processgroup/processgroup.h>
@@ -89,8 +91,6 @@ void RenderEngineThreaded::threadMain(CreateInstanceFactory factory) NO_THREAD_S
         ALOGW("Couldn't set SCHED_FIFO");
     }
 
-    skia::Cache::initializeDiskCache();
-
     mRenderEngine = factory();
 
     pthread_setname_np(pthread_self(), mThreadName);
@@ -111,6 +111,8 @@ void RenderEngineThreaded::threadMain(CreateInstanceFactory factory) NO_THREAD_S
         }
         return std::nullopt;
     };
+
+    ThreadStateCrashLogger stateLogger([this] { mRenderEngine->logStateForCrash(); });
 
     // process any tasks until shutdown
     while (mRunning) {
@@ -282,8 +284,10 @@ ftl::Future<FenceResult> RenderEngineThreaded::drawLayers(
         std::lock_guard lock(mThreadMutex);
         mNeedsPostRenderCleanup = true;
         mFunctionCalls.push(
-                [resultPromise, display, layers, buffer, fd](renderengine::RenderEngine& instance) {
+                [resultPromise, display, layers, buffer, fd,
+                 registration = panopticon::share()](renderengine::RenderEngine& instance) {
                     SFTRACE_NAME("REThreaded::drawLayers");
+                    registration->start();
                     instance.updateProtectedContext(layers, {buffer.get()});
                     instance.drawLayersInternal(std::move(resultPromise), display, layers, buffer,
                                                 base::unique_fd(fd));

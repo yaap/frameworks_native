@@ -19,8 +19,8 @@
 
 #include <chrono>
 
+#include <common/test/FlagUtils.h>
 #include "CommitAndCompositeTest.h"
-
 #include "DisplayHardware/Hal.h"
 
 using namespace std::chrono_literals;
@@ -52,24 +52,14 @@ TEST_F(SurfaceFlingerPowerHintTest, sendDurationsIncludingHwcWaitTime) {
 }
 
 TEST_F(SurfaceFlingerPowerHintTest, inactiveOnDisplayDoze) {
-    ON_CALL(*mPowerAdvisor, usePowerHintSession()).WillByDefault(Return(true));
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::align_adpf_with_sf_opt_policy,
+                      true);
+    EXPECT_CALL(*mPowerAdvisor, setOptimizeForPerformance(true)).Times(1);
+    mFlinger.applyOptimizationPolicy(__func__);
 
     mDisplay->setPowerMode(hal::PowerMode::DOZE);
-
-    EXPECT_CALL(*mPowerAdvisor, updateTargetWorkDuration(_)).Times(0);
-    EXPECT_CALL(*mDisplaySurface,
-                prepareFrame(compositionengine::DisplaySurface::CompositionType::Hwc))
-            .Times(1);
-    EXPECT_CALL(*mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _, _, _)).WillOnce([] {
-        constexpr Duration kMockHwcRunTime = 20ms;
-        std::this_thread::sleep_for(kMockHwcRunTime);
-        return hardware::graphics::composer::hal::Error::NONE;
-    });
-    EXPECT_CALL(*mPowerAdvisor, reportActualWorkDuration()).Times(0);
-
-    const TimePoint frameTime = scheduler::SchedulerClock::now();
-    constexpr Period kMockVsyncPeriod = 15ms;
-    mFlinger.commitAndComposite(frameTime, VsyncId{123}, frameTime + kMockVsyncPeriod);
+    EXPECT_CALL(*mPowerAdvisor, setOptimizeForPerformance(false)).Times(1);
+    mFlinger.applyOptimizationPolicy(__func__);
 }
 
 } // namespace

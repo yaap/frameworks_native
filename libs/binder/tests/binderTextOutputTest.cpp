@@ -28,7 +28,7 @@
 
 #include "../file.h"
 
-static void CheckMessage(CapturedStderr& cap,
+static void CheckMessage(android::base::CapturedStderr& cap,
                          const char* expected,
                          bool singleline) {
     cap.Stop();
@@ -40,7 +40,7 @@ static void CheckMessage(CapturedStderr& cap,
 
 #define CHECK_LOG_(input, expect, singleline)    \
 {                                                \
-    CapturedStderr cap;                          \
+    android::base::CapturedStderr cap;           \
     android::aerr << input << android::endl;     \
     CheckMessage(cap, expect, singleline);       \
 }                                                \
@@ -57,21 +57,21 @@ static void CheckMessage(CapturedStderr& cap,
 #define CHECK_VAL(val) CHECK_VAL_(val, true)
 
 TEST(TextOutput, HandlesStdEndl) {
-    CapturedStderr cap;
+    android::base::CapturedStderr cap;
     android::aerr << "foobar" << std::endl;
     cap.Stop();
     ASSERT_EQ(cap.str(), "foobar\n");
 }
 
 TEST(TextOutput, HandlesCEndl) {
-    CapturedStderr cap;
+    android::base::CapturedStderr cap;
     android::aerr << "foobar" << "\n";
     cap.Stop();
     ASSERT_EQ(cap.str(), "foobar\n");
 }
 
 TEST(TextOutput, HandlesAndroidEndl) {
-    CapturedStderr cap;
+    android::base::CapturedStderr cap;
     android::aerr << "foobar" << android::endl;
     cap.Stop();
     ASSERT_EQ(cap.str(), "foobar\n");

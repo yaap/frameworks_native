@@ -33,6 +33,7 @@ cc_test {
     srcs: [
         "DisplaySettingsTest.cpp",
         "LayerSettingsTest.cpp",
+        "PipelineCallbackHandlerTest.cpp",
         "RenderEngineTest.cpp",
         "RenderEngineThreadedTest.cpp",
     ],

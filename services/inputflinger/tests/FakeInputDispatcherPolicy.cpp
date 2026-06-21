@@ -35,7 +35,11 @@ static constexpr std::chrono::nanoseconds EVENT_SHOULD_NOT_OCCUR_TIMEOUT = 10ms;
 void FakeInputDispatcherPolicy::assertFilterInputEventWasCalled(const NotifyKeyArgs& args) {
     assertFilterInputEventWasCalledInternal([&args](const InputEvent& event) {
         ASSERT_EQ(event.getType(), InputEventType::KEY);
-        EXPECT_EQ(event.getDisplayId(), args.displayId);
+        if (args.displayId != ui::LogicalDisplayId::INVALID) {
+            EXPECT_EQ(event.getDisplayId(), args.displayId);
+        } else {
+            EXPECT_EQ(event.getDisplayId(), ui::LogicalDisplayId::DEFAULT);
+        }
 
         const auto& keyEvent = static_cast<const KeyEvent&>(event);
         EXPECT_EQ(keyEvent.getEventTime(), args.eventTime);
@@ -85,6 +89,53 @@ void FakeInputDispatcherPolicy::assertOnPointerDownWasNotCalled() {
     std::scoped_lock lock(mLock);
     ASSERT_TRUE(mOnPointerDownToken == nullptr)
             << "Expected onPointerDownOutsideFocus to not have been called";
+}
+
+/**
+ * Asserts that notifyPreNoFocusedWindowAnr() was called within the given timeout
+ * and validates the reported application and timing information.
+ *
+ * The method blocks until either:
+ *  - a PreNoFocusedWindowAnrResult is received, or
+ *  - the provided timeout elapses.
+ *
+ * @param waitDuration Maximum duration to wait for a pre–no-focused-window ANR callback.
+ * @param expectedTimeout Expected ANR timeout duration reported by
+ *        the callback. The elapsed duration is expected to be in the range
+ *        [0, expectedTimeout] and may be 0ms if the timeout is smaller
+ *        than the window ANR timeout.
+ * @param expectedApplication The application handle expected to be associated
+ *        with the reported ANR.
+ */
+void FakeInputDispatcherPolicy::assertNotifyPreNoFocusedWindowAnrWasCalled(
+        std::chrono::nanoseconds waitDuration, std::chrono::milliseconds expectedTimeout,
+        const std::shared_ptr<InputApplicationHandle>& expectedApplication) {
+    std::unique_lock lock(mLock);
+    android::base::ScopedLockAssertion assumeLocked(mLock);
+
+    std::optional<PreNoFocusedWindowAnrResult> anrWarningResult =
+            getItemFromStorageLockedInterruptible(waitDuration, mPreNoFocusedWindowAnrs, lock,
+                                                  mNotifyPreNoFocusedWindowAnr);
+    ASSERT_TRUE(anrWarningResult.has_value()) << "Did not receive ANR warning";
+
+    ASSERT_EQ(expectedApplication, anrWarningResult.value().appHandle);
+    // The elapsed duration should be between 0 and the timeout duration.
+    // Note that it can be 0ms (< 1000us) if the timeout is smaller than
+    // the window's anr timeout.
+    ASSERT_GE(anrWarningResult.value().elapsedDuration, 0ms);
+    ASSERT_LE(anrWarningResult.value().elapsedDuration, expectedTimeout);
+    ASSERT_EQ(expectedTimeout, anrWarningResult.value().timeoutDuration);
+}
+
+void FakeInputDispatcherPolicy::assertNotifyPreNoFocusedWindowAnrWasNotCalled(
+        std::chrono::nanoseconds timeout) {
+    std::unique_lock lock(mLock);
+    android::base::ScopedLockAssertion assumeLocked(mLock);
+    const bool gotOne =
+            mNotifyPreNoFocusedWindowAnr.wait_for(lock, timeout, [this]() REQUIRES(mLock) {
+                return !mPreNoFocusedWindowAnrs.empty();
+            });
+    ASSERT_FALSE(gotOne) << "Unexpected pre-ANR notification was received";
 }
 
 void FakeInputDispatcherPolicy::assertNotifyNoFocusedWindowAnrWasCalled(
@@ -159,15 +210,17 @@ PointerCaptureRequest FakeInputDispatcherPolicy::assertSetPointerCaptureCalled(
 
     if (!mPointerCaptureChangedCondition.wait_for(lock, EVENT_SHOULD_OCCUR_TIMEOUT,
                                                   [this, mode, window]() REQUIRES(mLock) {
+                                                      // Guard against spurious wakeups.
+                                                      if (!mPointerCaptureRequest) {
+                                                          return false;
+                                                      }
                                                       if (mode != PointerCaptureMode::UNCAPTURED) {
                                                           return mPointerCaptureRequest->mode ==
                                                                   mode &&
                                                                   mPointerCaptureRequest->window ==
                                                                   window->getToken();
-                                                      } else {
-                                                          return mPointerCaptureRequest->mode ==
-                                                                  mode;
                                                       }
+                                                      return mPointerCaptureRequest->mode == mode;
                                                   })) {
         ADD_FAILURE() << "Timed out waiting for setPointerCapture({" << window->getName() << ", "
                       << ftl::enum_string(mode) << "}) to be called.";
@@ -190,13 +243,19 @@ void FakeInputDispatcherPolicy::assertSetPointerCaptureNotCalled() {
     mPointerCaptureRequest.reset();
 }
 
-void FakeInputDispatcherPolicy::assertDropTargetEquals(const InputDispatcherInterface& dispatcher,
-                                                       const sp<IBinder>& targetToken) {
-    dispatcher.waitForIdle();
-    std::scoped_lock lock(mLock);
-    ASSERT_TRUE(mNotifyDropWindowWasCalled);
-    ASSERT_EQ(targetToken, mDropTargetWindowToken);
-    mNotifyDropWindowWasCalled = false;
+void FakeInputDispatcherPolicy::assertNotifyDropWindowWasCalled(
+        const InputDispatcherInterface& dispatcher, const sp<IBinder>& targetToken, vec2 location,
+        vec2 rawLocation) {
+    std::unique_lock lock(mLock);
+    base::ScopedLockAssertion assumeLocked(mLock);
+
+    std::optional<DropEvent> event =
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_OCCUR_TIMEOUT, mDropEvents, lock,
+                                                  mNotifyDropWindow);
+    ASSERT_NE(event, std::nullopt);
+    ASSERT_EQ(targetToken, event->token);
+    EXPECT_EQ(location, event->location);
+    EXPECT_EQ(rawLocation, event->rawLocation);
 }
 
 void FakeInputDispatcherPolicy::assertNotifyInputChannelBrokenWasCalled(const sp<IBinder>& token) {
@@ -350,9 +409,9 @@ std::optional<T> FakeInputDispatcherPolicy::getItemFromStorageLockedInterruptibl
     return std::make_optional(item);
 }
 
-void FakeInputDispatcherPolicy::notifyWindowUnresponsive(const sp<IBinder>& connectionToken,
-                                                         std::optional<gui::Pid> pid,
-                                                         const std::string&) {
+void FakeInputDispatcherPolicy::notifyWindowUnresponsive(
+        const sp<IBinder>& connectionToken, std::optional<gui::Pid> pid, const std::string&,
+        int32_t eventId, nsecs_t eventTime, std::chrono::milliseconds timeoutDuration) {
     std::scoped_lock lock(mLock);
     mAnrWindows.push({connectionToken, pid});
     mNotifyAnr.notify_all();
@@ -366,10 +425,21 @@ void FakeInputDispatcherPolicy::notifyWindowResponsive(const sp<IBinder>& connec
 }
 
 void FakeInputDispatcherPolicy::notifyNoFocusedWindowAnr(
-        const std::shared_ptr<InputApplicationHandle>& applicationHandle) {
+        const std::shared_ptr<InputApplicationHandle>& applicationHandle, int32_t eventId,
+        nsecs_t eventTime, std::chrono::milliseconds timeoutDuration) {
     std::scoped_lock lock(mLock);
     mAnrApplications.push(applicationHandle);
     mNotifyAnr.notify_all();
+}
+
+void FakeInputDispatcherPolicy::notifyPreNoFocusedWindowAnr(
+        const std::shared_ptr<InputApplicationHandle>& applicationHandle, int32_t expectedEventId,
+        std::chrono::milliseconds expectedElapsedDuration,
+        std::chrono::milliseconds expectedTimeout) {
+    std::scoped_lock lock(mLock);
+    mPreNoFocusedWindowAnrs.push(
+            {applicationHandle, expectedEventId, expectedElapsedDuration, expectedTimeout});
+    mNotifyPreNoFocusedWindowAnr.notify_all();
 }
 
 void FakeInputDispatcherPolicy::notifyInputChannelBroken(const sp<IBinder>& connectionToken) {
@@ -416,12 +486,29 @@ bool FakeInputDispatcherPolicy::filterInputEvent(const InputEvent& inputEvent,
 }
 
 void FakeInputDispatcherPolicy::interceptKeyBeforeQueueing(const KeyEvent& inputEvent, uint32_t&) {
+    {
+        std::scoped_lock lock(mLock);
+        mInterceptKeyBeforeQueueingEvent.push(inputEvent);
+        mNotifyInterceptKeyBeforeQueueing.notify_all();
+    }
     if (inputEvent.getAction() == AKEY_EVENT_ACTION_UP) {
         // Clear intercept state when we handled the event.
         if (std::holds_alternative<nsecs_t>(mInterceptKeyBeforeDispatchingResult)) {
             mInterceptKeyBeforeDispatchingResult = nsecs_t(0);
         }
     }
+}
+
+void FakeInputDispatcherPolicy::assertInterceptKeyBeforeQueueingWasCalled(
+        const ::testing::Matcher<KeyEvent>& matcher) {
+    std::unique_lock lock(mLock);
+    base::ScopedLockAssertion assumeLocked(mLock);
+    std::optional<KeyEvent> event =
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_OCCUR_TIMEOUT,
+                                                  mInterceptKeyBeforeQueueingEvent, lock,
+                                                  mNotifyInterceptKeyBeforeQueueing);
+    ASSERT_TRUE(event.has_value()) << "Expected interceptKeyBeforeQueueing to have been called.";
+    ASSERT_THAT(*event, matcher);
 }
 
 void FakeInputDispatcherPolicy::interceptMotionBeforeQueueing(ui::LogicalDisplayId, uint32_t,
@@ -500,10 +587,11 @@ void FakeInputDispatcherPolicy::setPointerCapture(const PointerCaptureRequest& r
     mPointerCaptureChangedCondition.notify_all();
 }
 
-void FakeInputDispatcherPolicy::notifyDropWindow(const sp<IBinder>& token, float x, float y) {
+void FakeInputDispatcherPolicy::notifyDropWindow(const sp<IBinder>& token, vec2 location,
+                                                 vec2 rawLocation) {
     std::scoped_lock lock(mLock);
-    mNotifyDropWindowWasCalled = true;
-    mDropTargetWindowToken = token;
+    mDropEvents.push({token, location, rawLocation});
+    mNotifyDropWindow.notify_all();
 }
 
 void FakeInputDispatcherPolicy::notifyDeviceInteraction(int32_t deviceId, nsecs_t timestamp,

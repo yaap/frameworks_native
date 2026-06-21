@@ -31,6 +31,8 @@ using aidl::android::hardware::vibrator::CompositeEffect;
 using aidl::android::hardware::vibrator::CompositePrimitive;
 using aidl::android::hardware::vibrator::Effect;
 using aidl::android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::HapticGeneratorConfig;
+using aidl::android::hardware::vibrator::HapticGeneratorSession;
 using aidl::android::hardware::vibrator::IVibrationSession;
 using aidl::android::hardware::vibrator::IVibrator;
 using aidl::android::hardware::vibrator::IVibratorCallback;
@@ -63,6 +65,11 @@ public:
                  std::shared_ptr<IVibrationSession>* ret),
                 (override));
     MOCK_METHOD(ndk::ScopedAStatus, clearSessions, (), (override));
+    MOCK_METHOD(ndk::ScopedAStatus, startHapticGeneratorSession,
+                (const std::vector<int32_t>& vibratorIds, const HapticGeneratorConfig& config,
+                 const std::shared_ptr<IVibratorCallback>& callback,
+                 HapticGeneratorSession* _aidl_return),
+                (override));
     MOCK_METHOD(ndk::ScopedAStatus, getInterfaceVersion, (int32_t*), (override));
     MOCK_METHOD(ndk::ScopedAStatus, getInterfaceHash, (std::string*), (override));
     MOCK_METHOD(ndk::SpAIBinder, asBinder, (), (override));
@@ -107,6 +114,10 @@ protected:
 static const std::vector<int32_t> kVibratorIds = {1, 2};
 static const VibrationSessionConfig kSessionConfig;
 static constexpr int kVibratorId = 1;
+
+TEST_F(VibratorManagerHalWrapperAidlTest, TestGetHal) {
+    ASSERT_EQ(mMockHal, mWrapper->getHal());
+}
 
 TEST_F(VibratorManagerHalWrapperAidlTest, TestGetCapabilitiesDoesNotCacheFailedResult) {
     EXPECT_CALL(*mMockHal.get(), getCapabilities(_))

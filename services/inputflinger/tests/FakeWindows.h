@@ -299,9 +299,13 @@ public:
         consumeMotionEvent(
                 testing::AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
                                testing::Conditional(expectedDisplayId.has_value(),
-                                                    WithDisplayId(*expectedDisplayId), testing::_),
+                                                    WithDisplayId(expectedDisplayId.value_or(
+                                                            ui::LogicalDisplayId::DEFAULT)),
+                                                    testing::_),
                                testing::Conditional(expectedFlags.has_value(),
-                                                    WithFlags(*expectedFlags), testing::_)));
+                                                    WithFlags(expectedFlags.value_or(
+                                                            ftl::Flags<MotionFlag>{})),
+                                                    testing::_)));
     }
 
     inline void consumeMotionPointerDown(

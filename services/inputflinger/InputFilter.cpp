@@ -17,6 +17,7 @@
 #define LOG_TAG "InputFilter"
 
 #include "InputFilter.h"
+#include <jni.h>
 
 namespace android {
 
@@ -45,9 +46,9 @@ AidlKeyEvent notifyKeyArgsToKeyEvent(const NotifyKeyArgs& args) {
 }
 
 InputFilter::InputFilter(InputListenerInterface& listener, IInputFlingerRust& rust,
-                         InputFilterPolicyInterface& policy, JNIEnv* env)
+                         InputFilterPolicyInterface& policy, JavaVM* vm)
       : mNextListener(listener),
-        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy, env)),
+        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy, vm)),
         mPolicy(policy) {
     LOG_ALWAYS_FATAL_IF(!rust.createInputFilter(mCallbacks, &mInputFilterRust).isOk());
     LOG_ALWAYS_FATAL_IF(!mInputFilterRust);

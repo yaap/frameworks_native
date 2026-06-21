@@ -33,7 +33,7 @@ TEST(InputVerifierTest, CreationWithInvalidUtfStringDoesNotCrash) {
 }
 
 TEST(InputVerifierTest, ProcessSourceClassPointer) {
-    InputVerifier verifier("Verify testOnTouchEventScroll");
+    InputVerifier verifier("Test verifier");
 
     std::vector<PointerProperties> properties;
     properties.push_back({});
@@ -47,12 +47,14 @@ TEST(InputVerifierTest, ProcessSourceClassPointer) {
     coords.back().setAxisValue(AMOTION_EVENT_AXIS_X, 75);
     coords.back().setAxisValue(AMOTION_EVENT_AXIS_Y, 300);
 
-    const Result<void> result =
-            verifier.processMovement(/*deviceId=*/0, AINPUT_SOURCE_CLASS_POINTER,
+    const Result<bool> result =
+            verifier.processMovement(/*deviceId=*/0, /*eventTime=*/0, AINPUT_SOURCE_CLASS_POINTER,
                                      AMOTION_EVENT_ACTION_DOWN, /*actionButton=*/0,
                                      /*pointerCount=*/properties.size(), properties.data(),
-                                     coords.data(), /*flags=*/0, /*buttonState=*/0);
+                                     coords.data(), /*flags=*/0, /*buttonState=*/0, /*downTime=*/0);
     ASSERT_RESULT_OK(result);
+    // The verifier is currently tracking a gesture, so it is not empty.
+    ASSERT_FALSE(*result);
 }
 
 } // namespace android

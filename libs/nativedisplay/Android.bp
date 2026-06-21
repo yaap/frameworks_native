@@ -67,6 +67,9 @@ cc_library_shared {
         "surfacetexture/SurfaceTexture.cpp",
         "surfacetexture/ImageConsumer.cpp",
         "surfacetexture/EGLConsumer.cpp",
+        "surfacetexture/LegacySurfaceTexture.cpp",
+        "surfacetexture/LegacyImageConsumer.cpp",
+        "surfacetexture/LegacyEGLConsumer.cpp",
     ],
 
     shared_libs: [

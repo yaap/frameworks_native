@@ -38,7 +38,11 @@ using namespace com::android::graphics::egl;
 
 namespace android {
 
-constexpr uint32_t kMultifileBlobCacheVersion = 2;
+// Blobcache version history:
+//    1: Initial multifile blob cache (b/246966894)
+//    2: CRC calculation change (b/373718861)
+//    3: Advanced usage support (b/380483358)
+constexpr uint32_t kMultifileBlobCacheVersion = 3;
 constexpr char kMultifileBlobCacheStatusFile[] = "cache.status";
 
 struct MultifileHeader {
@@ -104,7 +108,6 @@ private:
     size_t mBufferSize;
 };
 
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 struct MultifileTimeLess {
     bool operator()(const struct timespec& t1, const struct timespec& t2) const {
         if (t1.tv_sec == t2.tv_sec) {
@@ -122,7 +125,6 @@ struct MultifileTimeLess {
 using MultifileEntryStatsMap =
         std::multimap<struct timespec, MultifileEntryStats, MultifileTimeLess>;
 using MultifileEntryStatsMapIter = MultifileEntryStatsMap::iterator;
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 
 class MultifileBlobCache {
 public:
@@ -177,13 +179,8 @@ private:
     std::string mBuildId;
     uint32_t mCacheVersion;
 
-#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
     std::unordered_map<uint32_t, MultifileEntryStatsMapIter> mEntries;
     MultifileEntryStatsMap mEntryStats;
-#else
-    std::unordered_set<uint32_t> mEntries;
-    std::unordered_map<uint32_t, MultifileEntryStats> mEntryStats;
-#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
 
     std::unordered_map<uint32_t, MultifileHotCache> mHotCache;
 

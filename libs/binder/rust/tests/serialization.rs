@@ -17,6 +17,8 @@
 //! Included as a module in the binder crate internal tests for internal API
 //! access.
 
+extern crate alloc;
+
 use binder::declare_binder_interface;
 use binder::{
     BinderFeatures, ExceptionCode, Interface, ParcelFileDescriptor, SpIBinder, Status, StatusCode,
@@ -260,9 +262,29 @@ fn on_transact(
             reply.write(&(None as Option<Vec<String>>))?;
         }
         bindings::Transaction_TEST_FILE_DESCRIPTOR => {
+            let start = parcel.get_data_position();
+
             let file1 = parcel.read::<ParcelFileDescriptor>()?;
             let file2 = parcel.read::<ParcelFileDescriptor>()?;
-            let files = parcel.read::<Vec<Option<ParcelFileDescriptor>>>()?;
+            // We expect a vector of two non-null ParcelFileDescriptors.
+            // Since we're not using Vec<Option<T>> if there are null values
+            // read should return an error.
+            let files = parcel.read::<Vec<ParcelFileDescriptor>>()?;
+
+            // Rewind to the start and ensure we can also read each descriptor
+            // as an option. This ensures that we exercise both deserialization
+            // code paths. Reading these again is safe because the underlying
+            // parcel fd is duped for each read.
+            //
+            // SAFETY: start is less than the current size of the parcel data buffer, because we
+            // haven't made it any shorter since we got the position.
+            unsafe {
+                assert!(parcel.set_data_position(start).is_ok());
+            }
+
+            let _ = parcel.read::<Option<ParcelFileDescriptor>>()?;
+            let _ = parcel.read::<Option<ParcelFileDescriptor>>()?;
+            let _ = parcel.read::<Vec<Option<ParcelFileDescriptor>>>()?;
 
             reply.write(&file1)?;
             reply.write(&file2)?;

@@ -25,6 +25,7 @@
 #include <input/Keyboard.h>
 #include <input/VirtualKeyMap.h>
 #include <inttypes.h>
+#include <jni.h>
 #include <limits.h>
 #include <log/log.h>
 #include <math.h>
@@ -32,7 +33,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <utils/Errors.h>
-#include <utils/Thread.h>
 #include <string>
 
 #include "InputDevice.h"
@@ -125,10 +125,10 @@ std::optional<DeviceId> getDeviceIdOfNewGesture(const NotifyArgs& args) {
 
 InputReader::InputReader(std::shared_ptr<EventHubInterface> eventHub,
                          const sp<InputReaderPolicyInterface>& policy,
-                         InputListenerInterface& listener, JNIEnv* env,
+                         InputListenerInterface& listener, JavaVM* vm,
                          std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend)
       : mContext(this),
-        mJniEnv(env),
+        mVm(vm),
         mEventHub(eventHub),
         mPolicy(policy),
         mNextListener(listener),
@@ -156,7 +156,7 @@ status_t InputReader::start() {
     }
     mThread = std::make_unique<InputThread>(
             "InputReader", [this]() { loopOnce(); }, [this]() { mEventHub->wake(); },
-            /*isInCriticalPath=*/true, mJniEnv);
+            /*isInCriticalPath=*/true, mVm);
     return OK;
 }
 
@@ -964,9 +964,6 @@ void InputReader::notifyMouseCursorFadedOnTyping() {
 
 bool InputReader::setKernelWakeEnabled(DeviceId deviceId, bool enabled) {
     std::scoped_lock _l(mLock);
-    if (!com::android::input::flags::set_input_device_kernel_wake()){
-        return false;
-    }
     InputDevice* device = findInputDeviceLocked(deviceId);
     if (device) {
         return device->setKernelWakeEnabled(enabled);
@@ -1009,14 +1006,6 @@ void InputReader::dumpLocked(std::string& dump) {
     dump += StringPrintf(INDENT2 "VirtualKeyQuietTime: %0.1fms\n",
                          mConfig.virtualKeyQuietTime * 0.000001f);
 
-    dump += StringPrintf(INDENT2 "PointerVelocityControlParameters: "
-                                 "scale=%0.3f, lowThreshold=%0.3f, highThreshold=%0.3f, "
-                                 "acceleration=%0.3f\n",
-                         mConfig.pointerVelocityControlParameters.scale,
-                         mConfig.pointerVelocityControlParameters.lowThreshold,
-                         mConfig.pointerVelocityControlParameters.highThreshold,
-                         mConfig.pointerVelocityControlParameters.acceleration);
-
     dump += StringPrintf(INDENT2 "WheelVelocityControlParameters: "
                                  "scale=%0.3f, lowThreshold=%0.3f, highThreshold=%0.3f, "
                                  "acceleration=%0.3f\n",
@@ -1027,26 +1016,6 @@ void InputReader::dumpLocked(std::string& dump) {
 
     dump += StringPrintf(INDENT2 "PointerGesture:\n");
     dump += StringPrintf(INDENT3 "Enabled: %s\n", toString(mConfig.pointerGesturesEnabled));
-    dump += StringPrintf(INDENT3 "QuietInterval: %0.1fms\n",
-                         mConfig.pointerGestureQuietInterval * 0.000001f);
-    dump += StringPrintf(INDENT3 "DragMinSwitchSpeed: %0.1fpx/s\n",
-                         mConfig.pointerGestureDragMinSwitchSpeed);
-    dump += StringPrintf(INDENT3 "TapInterval: %0.1fms\n",
-                         mConfig.pointerGestureTapInterval * 0.000001f);
-    dump += StringPrintf(INDENT3 "TapDragInterval: %0.1fms\n",
-                         mConfig.pointerGestureTapDragInterval * 0.000001f);
-    dump += StringPrintf(INDENT3 "TapSlop: %0.1fpx\n", mConfig.pointerGestureTapSlop);
-    dump += StringPrintf(INDENT3 "MultitouchSettleInterval: %0.1fms\n",
-                         mConfig.pointerGestureMultitouchSettleInterval * 0.000001f);
-    dump += StringPrintf(INDENT3 "MultitouchMinDistance: %0.1fpx\n",
-                         mConfig.pointerGestureMultitouchMinDistance);
-    dump += StringPrintf(INDENT3 "SwipeTransitionAngleCosine: %0.1f\n",
-                         mConfig.pointerGestureSwipeTransitionAngleCosine);
-    dump += StringPrintf(INDENT3 "SwipeMaxWidthRatio: %0.1f\n",
-                         mConfig.pointerGestureSwipeMaxWidthRatio);
-    dump += StringPrintf(INDENT3 "MovementSpeedRatio: %0.1f\n",
-                         mConfig.pointerGestureMovementSpeedRatio);
-    dump += StringPrintf(INDENT3 "ZoomSpeedRatio: %0.1f\n", mConfig.pointerGestureZoomSpeedRatio);
 
     dump += INDENT3 "Viewports:\n";
     mConfig.dump(dump);

@@ -20,6 +20,8 @@
 #include <binder/IBinder.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
+#include <android/hardware/sensor/ISensorClientListener.h>
+
 #include <sensor/SensorEventQueue.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -73,6 +75,8 @@ public:
     void destroyDirectChannel(int channelNativeHandle);
     int configureDirectChannel(int channelNativeHandle, int sensorHandle, int rateLevel);
     int setOperationParameter(int handle, int type, const Vector<float> &floats, const Vector<int32_t> &ints);
+    status_t registerClientListener(
+            const sp<android::hardware::sensor::ISensorClientListener>& listener);
 
 private:
     // DeathRecipient interface

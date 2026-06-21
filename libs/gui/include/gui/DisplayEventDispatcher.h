@@ -34,8 +34,6 @@ public:
 
 protected:
     explicit DisplayEventDispatcher(const sp<Looper>& looper,
-                                    gui::ISurfaceComposer::VsyncSource vsyncSource =
-                                            gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
                                     EventRegistrationFlags eventRegistration = {},
                                     const sp<IBinder>& layerHandle = nullptr);
 
@@ -63,8 +61,8 @@ private:
     virtual void dispatchModeChangedWithFrameRateOverrides(
             nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId, nsecs_t renderPeriod,
             nsecs_t appVsyncOffset, nsecs_t presentationDeadline,
-            std::vector<FrameRateOverride> overrides,
-            std::vector<SupportedRefreshRate> supportedRefreshRates) = 0;
+            const std::vector<FrameRateOverride>& overrides,
+            const std::vector<SupportedRefreshRate>& supportedRefreshRates) = 0;
     // AChoreographer-specific hook for processing null-events so that looper
     // can be properly poked.
     virtual void dispatchNullEvent(nsecs_t timestamp, PhysicalDisplayId displayId) = 0;

@@ -28,6 +28,8 @@
 #include <ui/GraphicBuffer.h>
 #include <utils/Errors.h>
 
+#include "../../Utils/Dumper.h"
+
 #include <atomic>
 #include <cstdint>
 #include <future>
@@ -74,6 +76,8 @@ public:
 
     const std::string& getName() const { return mName; }
 
+    void dump(utils::Dumper& dumper) const;
+
     /**
      * Get a buffer that was previously dequeued by the app. If no buffers are available, this
      * will return std::nullopt.
@@ -109,7 +113,7 @@ public:
     virtual void onBufferReleased() override;
     virtual void onRemoteDied() override;
     virtual void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>&) override {}
-    virtual void onBufferDetached(int) override {}
+    virtual void onBufferDetached(uint64_t) override {}
 
 private:
     void connectSinkSurfaceTask(std::shared_ptr<std::promise<SinkSurfaceData>> promise);
@@ -138,7 +142,7 @@ private:
         bool inUse = false;
     };
 
-    std::mutex mDataMutex;
+    mutable std::mutex mDataMutex;
     std::vector<DequeuedSinkBuffer> mDequeuedBuffers GUARDED_BY(mDataMutex);
 };
 

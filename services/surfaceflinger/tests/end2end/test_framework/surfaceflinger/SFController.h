@@ -26,6 +26,7 @@
 #include <android-base/expected.h>
 #include <android-base/thread_annotations.h>
 #include <ftl/finalizer.h>
+#include <ftl/non_null.h>
 #include <ui/DisplayId.h>
 #include <utils/Mutex.h>
 #include <utils/StrongPointer.h>
@@ -47,6 +48,12 @@ class SurfaceComposerClient;
 
 }  // namespace android
 
+namespace android::surfaceflinger::tests::end2end::test_framework::core {
+
+class TestService;
+
+}  // namespace android::surfaceflinger::tests::end2end::test_framework::core
+
 namespace android::surfaceflinger::tests::end2end::test_framework::surfaceflinger {
 
 class DisplayEventReceiver;
@@ -60,12 +67,21 @@ class SFController final : public std::enable_shared_from_this<SFController> {
     static void useHwcService(std::string_view fqn);
 
     // Makes an instance of the SFController.
-    [[nodiscard]] static auto make() -> base::expected<std::shared_ptr<SFController>, std::string>;
+    [[nodiscard]] static auto make(ftl::NonNull<std::weak_ptr<core::TestService>> service)
+            -> base::expected<std::shared_ptr<SFController>, std::string>;
 
-    explicit SFController(Passkey pass);
+    SFController(ftl::NonNull<std::weak_ptr<core::TestService>> service, Passkey pass);
 
     // Starts SurfaceFlinger and establishes the AIDL interface connections.
     [[nodiscard]] auto startAndConnect() -> base::expected<void, std::string>;
+
+    [[nodiscard]] auto testService() -> std::shared_ptr<core::TestService> {
+        return mTestService.get().lock();
+    }
+
+    [[nodiscard]] auto flinger() -> const sp<android::SurfaceComposerClient>& {
+        return mSurfaceComposerClient;
+    }
 
     auto makeDisplayEventReceiver()
             -> base::expected<std::shared_ptr<DisplayEventReceiver>, std::string>;
@@ -83,6 +99,8 @@ class SFController final : public std::enable_shared_from_this<SFController> {
     void stop();
     void initializeDisplayIdMapping();
     void addDisplayIdToMapping(PhysicalDisplayId displayId);
+
+    const ftl::NonNull<std::weak_ptr<core::TestService>> mTestService;
 
     std::shared_ptr<PollFdThread> mPollFdThread;
     sp<gui::ISurfaceComposer> mSurfaceComposerAidl;

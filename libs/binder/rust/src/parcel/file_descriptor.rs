@@ -14,48 +14,139 @@
  * limitations under the License.
  */
 
-use super::{
+#[cfg(not(feature = "std"))]
+pub use nostd_parcel_fd::ParcelFileDescriptor;
+#[cfg(feature = "std")]
+pub use std_parcel_fd::ParcelFileDescriptor;
+
+use crate::binder::AsNative;
+use crate::binder_impl::{
     BorrowedParcel, Deserialize, DeserializeArray, DeserializeOption, Serialize, SerializeArray,
     SerializeOption,
 };
-use crate::binder::AsNative;
 use crate::error::{status_result, Result, StatusCode};
 use crate::sys;
+#[cfg(feature = "std")]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+#[cfg(feature = "std")]
+mod std_parcel_fd {
+    use std::{
+        io,
+        os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd, RawFd},
+    };
 
-/// Rust version of the Java class android.os.ParcelFileDescriptor
-#[derive(Debug)]
-pub struct ParcelFileDescriptor(OwnedFd);
+    /// Rust version of the Java class android.os.ParcelFileDescriptor
+    #[derive(Debug)]
+    pub struct ParcelFileDescriptor(OwnedFd);
 
-impl ParcelFileDescriptor {
-    /// Create a new `ParcelFileDescriptor`
-    pub fn new<F: Into<OwnedFd>>(fd: F) -> Self {
-        Self(fd.into())
+    impl ParcelFileDescriptor {
+        /// Create a new `ParcelFileDescriptor`
+        pub fn new<F: Into<OwnedFd>>(fd: F) -> Self {
+            Self(fd.into())
+        }
+
+        /// Creates a new `ParcelFileDescriptor` referring to the same resource by duplicating the
+        /// underlying file descriptor.
+        pub fn try_clone(&self) -> Result<Self, io::Error> {
+            Ok(Self(self.0.try_clone()?))
+        }
+    }
+
+    impl AsRef<OwnedFd> for ParcelFileDescriptor {
+        fn as_ref(&self) -> &OwnedFd {
+            &self.0
+        }
+    }
+
+    impl From<ParcelFileDescriptor> for OwnedFd {
+        fn from(fd: ParcelFileDescriptor) -> OwnedFd {
+            fd.0
+        }
+    }
+
+    impl AsRawFd for ParcelFileDescriptor {
+        fn as_raw_fd(&self) -> RawFd {
+            self.0.as_raw_fd()
+        }
+    }
+
+    impl IntoRawFd for ParcelFileDescriptor {
+        fn into_raw_fd(self) -> RawFd {
+            self.0.into_raw_fd()
+        }
+    }
+
+    impl AsFd for ParcelFileDescriptor {
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.0.as_fd()
+        }
     }
 }
 
-impl AsRef<OwnedFd> for ParcelFileDescriptor {
-    fn as_ref(&self) -> &OwnedFd {
-        &self.0
-    }
-}
+#[cfg(not(feature = "std"))]
+mod nostd_parcel_fd {
+    use core::ffi::c_int;
+    use core::mem::ManuallyDrop;
+    use core::num::NonZeroI32;
 
-impl From<ParcelFileDescriptor> for OwnedFd {
-    fn from(fd: ParcelFileDescriptor) -> OwnedFd {
-        fd.0
+    /// Rust version of the Java class android.os.ParcelFileDescriptor
+    /// This version of ParcelFileDescriptor is for no_std environments that have support for
+    /// user space handles. TEE OSes fall into this category.
+    ///
+    /// Note that ParcelFileDescriptor owns the underlying resource and will attempt to close it
+    /// when dropped. This implementation calls libc::close, which while not typical in no_std
+    /// environments, gives us a standard mechanism for closing resources. An implementation of
+    /// `close` is already required for native binder, which libbinder_rs depends on, so we assume
+    /// availability of `close` here.
+    #[derive(Debug)]
+    pub struct ParcelFileDescriptor {
+        // We don't have a NoAllOnes niche type available to us so we store the fd as non-zero.
+        // This requires some extra care to increment by 1 when writing and decrement by 1 when
+        // reading. See to_storable_fd and get_fd below.
+        stored_fd: NonZeroI32,
     }
-}
 
-impl AsRawFd for ParcelFileDescriptor {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0.as_raw_fd()
+    impl ParcelFileDescriptor {
+        /// Create a new `ParcelFileDescriptor`
+        ///
+        /// # Safety
+        ///
+        /// The file descriptor must be valid (i.e. not -1), open, and suitable for transferring
+        /// ownership. It must not require any cleanup other than `libc::close`.
+        pub unsafe fn from_raw_fd(raw_fd: c_int) -> Self {
+            Self { stored_fd: Self::to_storable_fd(raw_fd) }
+        }
+
+        /// Get the underlying file descriptor as a c_int.
+        /// This does not transfer ownership of the file descriptor to the caller.
+        pub fn as_raw_fd(&self) -> c_int {
+            self.get_fd()
+        }
+
+        /// Get the underlying file descriptor as a c_int.
+        /// This transfers ownership of the file descriptor to the caller.
+        pub fn into_raw_fd(self) -> c_int {
+            ManuallyDrop::new(self).as_raw_fd()
+        }
+
+        fn to_storable_fd(fd: c_int) -> NonZeroI32 {
+            let fd = fd + 1;
+            fd.try_into().unwrap()
+        }
+
+        fn get_fd(&self) -> c_int {
+            self.stored_fd.get() - 1
+        }
     }
-}
 
-impl IntoRawFd for ParcelFileDescriptor {
-    fn into_raw_fd(self) -> RawFd {
-        self.0.into_raw_fd()
+    impl Drop for ParcelFileDescriptor {
+        fn drop(&mut self) {
+            // Safety: self.0 is a valid integer.
+            unsafe {
+                libc::close(self.as_raw_fd());
+            }
+        }
     }
 }
 
@@ -71,7 +162,7 @@ impl Eq for ParcelFileDescriptor {}
 
 impl Serialize for ParcelFileDescriptor {
     fn serialize(&self, parcel: &mut BorrowedParcel<'_>) -> Result<()> {
-        let fd = self.0.as_raw_fd();
+        let fd = self.as_raw_fd();
         // Safety: `Parcel` always contains a valid pointer to an
         // `AParcel`. Likewise, `ParcelFileDescriptor` always contains a
         // valid file, so we can borrow a valid file
@@ -116,11 +207,21 @@ impl DeserializeOption for ParcelFileDescriptor {
         if fd < 0 {
             Ok(None)
         } else {
-            // Safety: At this point, we know that the file descriptor was
-            // not -1, so must be a valid, owned file descriptor which we
-            // can safely turn into a `File`.
-            let file = unsafe { OwnedFd::from_raw_fd(fd) };
-            Ok(Some(ParcelFileDescriptor::new(file)))
+            #[cfg(feature = "std")]
+            {
+                // Safety: At this point, we know that the file descriptor was
+                // not -1, so must be a valid, owned file descriptor which we
+                // can safely turn into a `File`.
+                let file = unsafe { OwnedFd::from_raw_fd(fd) };
+                Ok(Some(ParcelFileDescriptor::new(file)))
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                // Safety: The fd is not -1 and AParcel_readParcelFileDescriptor
+                // expects the caller to take ownership of fd.
+                let pfd = unsafe { ParcelFileDescriptor::from_raw_fd(fd) };
+                Ok(Some(pfd))
+            }
         }
     }
 }

@@ -23,8 +23,8 @@
 #include <tuple>
 #include <vector>
 
-#include <../BinderStatsSpscQueue.h>
-#include <../BinderStatsUtils.h> // Include the definition of BinderCallData
+#include <../observer/BinderStatsSpscQueue.h>
+#include <../observer/BinderStatsUtils.h> // Include the definition of BinderCallData
 
 using namespace android;
 
@@ -191,7 +191,9 @@ TEST_F(BinderStatsCollectorTest, RegisterSingleQueueAndConsume) {
 
     collector.registerQueue(queue);
 
-    std::vector<BinderCallData> consumedData = collector.consumeData();
+    std::vector<BinderCallData> consumedData;
+    auto fn = [&](BinderCallData&& data) { consumedData.emplace_back(std::move(data)); };
+    collector.consumeData(fn);
 
     ASSERT_EQ(consumedData.size(), 2);
     // consumeData doesn't guarantee order if multiple queues exist,
@@ -225,8 +227,9 @@ TEST_F(BinderStatsCollectorTest, RegisterMultipleQueuesAndConsume) {
     collector.registerQueue(queue1);
     collector.registerQueue(queue2);
 
-    std::vector<BinderCallData> consumedData = collector.consumeData();
-
+    std::vector<BinderCallData> consumedData;
+    auto fn = [&](BinderCallData&& data) { consumedData.emplace_back(std::move(data)); };
+    collector.consumeData(fn);
     ASSERT_EQ(consumedData.size(), 3);
 
     // Verify the queues are now empty
@@ -241,9 +244,10 @@ TEST_F(BinderStatsCollectorTest, RegisterMultipleQueuesAndConsume) {
     EXPECT_EQ(consumedData, expected);
 }
 
-// Test consuming data when no queues are registered
 TEST_F(BinderStatsCollectorTest, ConsumeWithNoQueues) {
-    std::vector<BinderCallData> consumedData = collector.consumeData();
+    std::vector<BinderCallData> consumedData;
+    auto fn = [&](BinderCallData&& data) { consumedData.emplace_back(std::move(data)); };
+    collector.consumeData(fn);
     EXPECT_TRUE(consumedData.empty());
 }
 
@@ -257,7 +261,9 @@ TEST_F(BinderStatsCollectorTest, ConsumeFromEmptyQueues) {
     collector.registerQueue(queue1);
     collector.registerQueue(queue2);
 
-    std::vector<BinderCallData> consumedData = collector.consumeData();
+    std::vector<BinderCallData> consumedData;
+    auto fn = [&](BinderCallData&& data) { consumedData.emplace_back(std::move(data)); };
+    collector.consumeData(fn);
     EXPECT_TRUE(consumedData.empty());
     EXPECT_EQ(queue1->length(), 0);
     EXPECT_EQ(queue2->length(), 0);
@@ -289,7 +295,9 @@ TEST_F(BinderStatsCollectorTest, DeregisterQueue) {
     collector.deregisterQueue(queue1);
 
     // Consume data - this should consume data1 and data2, and mark queue1 for deletion
-    std::vector<BinderCallData> consumedData1 = collector.consumeData();
+    std::vector<BinderCallData> consumedData1;
+    auto fn1 = [&](BinderCallData&& data) { consumedData1.emplace_back(std::move(data)); };
+    collector.consumeData(fn1);
     ASSERT_EQ(consumedData1.size(), 2);
     EXPECT_EQ(queue1->length(), 0); // queue1 should be empty now
     EXPECT_EQ(queue2->length(), 0);
@@ -303,7 +311,9 @@ TEST_F(BinderStatsCollectorTest, DeregisterQueue) {
     // Consume data again - this should only consume data4 from queue2
     // because queue1 should have been removed during the cleanup phase
     // of the previous consumeData call.
-    std::vector<BinderCallData> consumedData2 = collector.consumeData();
+    std::vector<BinderCallData> consumedData2;
+    auto fn2 = [&](BinderCallData&& data) { consumedData2.emplace_back(std::move(data)); };
+    collector.consumeData(fn2);
     ASSERT_EQ(consumedData2.size(), 1);
 
     // Verify only data4 was consumed
@@ -337,7 +347,9 @@ TEST_F(BinderStatsCollectorTest, DeregisterNonExistentQueue) {
     ASSERT_TRUE(queue1->push(data1));
 
     // Consume data - should still get data from queue1
-    std::vector<BinderCallData> consumedData = collector.consumeData();
+    std::vector<BinderCallData> consumedData;
+    auto fn = [&](BinderCallData&& data) { consumedData.emplace_back(std::move(data)); };
+    collector.consumeData(fn);
     ASSERT_EQ(consumedData.size(), 1);
     EXPECT_EQ(consumedData[0], data1);
     EXPECT_EQ(queue1->length(), 0);
@@ -396,7 +408,9 @@ TEST_F(BinderStatsCollectorTest, ConcurrentMultiQueuePushAndConsume) {
         startTestLatch.count_down();
         startTestLatch.wait();
         while (consumedItems.size() < totalItems) {
-            std::vector<BinderCallData> batch = collector.consumeData();
+            std::vector<BinderCallData> batch;
+            auto fn = [&](BinderCallData&& data) { batch.emplace_back(std::move(data)); };
+            collector.consumeData(fn);
             consumedItems.insert(consumedItems.end(), batch.begin(), batch.end());
             if (batch.empty() && consumedItems.size() < totalItems) {
                 std::this_thread::yield(); // Avoid busy-waiting if consumer is faster

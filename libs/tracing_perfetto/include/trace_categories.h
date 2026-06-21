@@ -17,6 +17,8 @@
 #ifndef TRACE_CATEGORIES_H
 #define TRACE_CATEGORIES_H
 
+#include "perfetto/public/te_category_macros.h"
+
 /**
  * Keep these in sync with frameworks/base/core/java/android/os/Trace.java.
  */
@@ -49,17 +51,17 @@
 #define TRACE_CATEGORY_RRO (1 << 26)
 #define TRACE_CATEGORY_THERMAL (1 << 27)
 
-// Allow all categories except TRACE_CATEGORY_APP
-#define TRACE_CATEGORIES                                                      \
-  TRACE_CATEGORY_ALWAYS | TRACE_CATEGORY_GRAPHICS | TRACE_CATEGORY_INPUT |    \
-      TRACE_CATEGORY_VIEW | TRACE_CATEGORY_WEBVIEW |                          \
-      TRACE_CATEGORY_WINDOW_MANAGER | TRACE_CATEGORY_ACTIVITY_MANAGER |       \
-      TRACE_CATEGORY_SYNC_MANAGER | TRACE_CATEGORY_AUDIO |                    \
-      TRACE_CATEGORY_VIDEO | TRACE_CATEGORY_CAMERA | TRACE_CATEGORY_HAL |     \
-      TRACE_CATEGORY_RESOURCES | TRACE_CATEGORY_DALVIK | TRACE_CATEGORY_RS |  \
-      TRACE_CATEGORY_BIONIC | TRACE_CATEGORY_POWER |                          \
-      TRACE_CATEGORY_PACKAGE_MANAGER | TRACE_CATEGORY_SYSTEM_SERVER |         \
-      TRACE_CATEGORY_DATABASE | TRACE_CATEGORY_NETWORK | TRACE_CATEGORY_ADB | \
-      TRACE_CATEGORY_VIBRATOR | TRACE_CATEGORY_AIDL | TRACE_CATEGORY_NNAPI |  \
-      TRACE_CATEGORY_RRO | TRACE_CATEGORY_THERMAL
+// Should match the definitions in: frameworks/native/cmds/atrace/atrace.cpp
+#define TRACK_EVENT_CATEGORIES(C)                             \
+  C(bitmap, "bitmap", "Enables bitmap tracing in the system") \
+  C(rendering, "rendering", "Enables rendering workload tracing in the system")
+
+namespace tracing_perfetto {
+namespace track_event_categories {
+
+PERFETTO_TE_CATEGORIES_DECLARE(TRACK_EVENT_CATEGORIES);
+
+}  // namespace track_event_categories
+}  // namespace tracing_perfetto
+
 #endif  // TRACE_CATEGORIES_H

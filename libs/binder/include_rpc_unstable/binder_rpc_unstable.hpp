@@ -31,6 +31,23 @@ enum class ARpcSession_FileDescriptorTransportMode {
     Trusty,
 };
 
+/**
+ * A factory function for creating a per-session root object.
+ *
+ * \param session A weak pointer to the RpcSession. Can be used to query session details.
+ * \param client_info A pointer to the raw client info data (e.g. address struct or peer ID).
+ * \param client_info_len The length of the raw client info data in bytes.
+ * \param userfactory A pointer to user-defined factory, passed from setPerSessionRootObject call.
+ * \return A new AIBinder object. The C++ caller
+ *         is responsible for managing its lifetime (e.g., by converting it to an
+ *         `android::sp<android::IBinder>`).
+ */
+typedef AIBinder* (*ARpcServer_PerSessionFactoryCallback)(ARpcSession* session,
+                                                          const void* client_info,
+                                                          size_t client_info_len,
+                                                          void* userdata);
+typedef void (*ARpcServer_PerSessionFactoryCallback_deleter)(void* userfactory);
+
 // Starts an RPC server on a given port and a given root IBinder object.
 // The server will only accept connections from the given CID.
 // Set `cid` to VMADDR_CID_ANY to accept connections from any client.
@@ -51,6 +68,16 @@ enum class ARpcSession_FileDescriptorTransportMode {
 // could not be started.
 // The socket will be closed by the server once the server goes out of scope.
 [[nodiscard]] ARpcServer* ARpcServer_newBoundSocket(AIBinder* service, int socketFd);
+
+// Starts a Unix domain RPC server with an open raw socket file descriptor
+// and a factory for creating per-session root objects.
+// The socket should be created and bound to an address.
+// Returns an opaque handle to the running server instance, or null if the server
+// could not be started.
+// The socket will be closed by the server once the server goes out of scope.
+[[nodiscard]] ARpcServer* ARpcServer_newBoundSocketWithFactory(
+        int socketFd, ARpcServer_PerSessionFactoryCallback factory, void* userfactory,
+        ARpcServer_PerSessionFactoryCallback_deleter deleter);
 
 // Starts an RPC server that bootstraps sessions using an existing Unix domain
 // socket pair, with a given root IBinder object.
@@ -155,4 +182,10 @@ void ARpcSession_setMaxOutgoingConnections(ARpcSession* session, size_t connecti
 
 // Decrements the refcount of the underlying RpcSession object.
 void ARpcSession_free(ARpcSession* session);
+
+// Fetch the UID (if present) of the client process from the session object and
+// write it to `uid`
+// Returns true, if valid UID is present
+//         false, otherwise.
+bool ARpcSession_getClientUid(ARpcSession* session, uid_t* uid);
 }

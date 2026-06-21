@@ -66,6 +66,10 @@ TEST_F(VibratorManagerHalWrapperLegacyTest, TestTryReconnect) {
     mWrapper->tryReconnect();
 }
 
+TEST_F(VibratorManagerHalWrapperLegacyTest, TestGetHal) {
+    ASSERT_EQ(nullptr, mWrapper->getHal());
+}
+
 TEST_F(VibratorManagerHalWrapperLegacyTest, TestGetCapabilities) {
     auto result = mWrapper->getCapabilities();
     ASSERT_TRUE(result.isOk());

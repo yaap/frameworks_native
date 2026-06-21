@@ -15,6 +15,7 @@ cc_fuzz {
     ],
     host_supported: true,
     static_libs: [
+        "libsensor_aidl-cpp",
         "libsensorserviceaidl",
         "libpermission",
         "android.companion.virtual.virtualdevice_aidl-cpp",

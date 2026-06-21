@@ -384,6 +384,49 @@ inline int32_t ANativeWindow_clearFrameRate(ANativeWindow* _Nonnull window) __IN
             ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
 }
 
+/**
+ * Control CPU throttling for Vulkan/EGL producers.
+ *
+ * By default Vulkan and EGL producers are CPU throttled when they queue a buffer and the
+ * consumer is still processing the previous buffer. In practice, it means that eglSwapBuffers()
+ * or vkPresentKHR() calls will stall the CPU until the GPU is done processing the previous
+ * frame. This API allows to disable this throttling while queueing a buffer.
+ *
+ * While the default is to have throttling enabled, the more correct and efficient behavior
+ * is to have it disabled. Unfortunately, some Vulkan applications may inadvertently rely
+ * on this stall which effectively behaves as consumer/producer synchronization, albeit,
+ * inefficiently. It is therefore recommended to always disable throttling and perform
+ * proper synchronization in Vulkan.
+ *
+ * If the CPU produces frames faster than the GPU, natural throttling will happen when a
+ * buffer is dequeued, based on the size of the queue. This typically happen during the
+ * first drawing in OpenGL ES and in vkAcquireNextImageKHR() in Vulkan.
+ *
+ * This API has no effect in asynchronous mode, where throttling is always enabled.
+ *
+ * Available since API level 37.
+ *
+ * \param window pointer to an ANativeWindow object.
+ * \param enabled true to enable throttling, false to disable it.
+ *
+ * \return 0 for success, -EINVAL if the window value is invalid.
+ */
+int32_t ANativeWindow_setProducerThrottlingEnabled(ANativeWindow* _Nonnull window, bool enabled)
+        __INTRODUCED_IN(37);
+
+/**
+ * Check if CPU throttling is enabled.
+ *
+ * Available since API level 37.
+ *
+ * \param window pointer to an ANativeWindow object.
+ * \param outEnabled pointer to a bool to store the result.
+ *
+ * \return 0 if successful, -EINVAL if the window value is invalid
+ */
+int32_t ANativeWindow_isProducerThrottlingEnabled(ANativeWindow* _Nonnull window,
+                                                  bool* _Nonnull outEnabled) __INTRODUCED_IN(37);
+
 #ifdef __cplusplus
 }
 #endif

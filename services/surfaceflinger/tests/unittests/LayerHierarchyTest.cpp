@@ -307,6 +307,83 @@ TEST_F(LayerHierarchyTest, reparentRelativeLayer) {
 }
 
 // mirror tests
+TEST_F(LayerHierarchyTest, MirrorDisplayId) {
+    std::vector<std::unique_ptr<RequestedLayerState>> layers;
+    layers.push_back(rootLayer(/*id=*/1));
+    layers.push_back(childLayer(/*id=*/2, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/3, /*parentId=*/1));
+    layers.push_back(childLayer(/*id=*/4, /*parentId=*/2));
+    layers.push_back(childLayer(/*id=*/5, /*parentId=*/2));
+
+    constexpr uint64_t kInnerPhysicalDisplayId{4619827677550801152};
+    constexpr uint64_t kOuterPhysicalDisplayId{4619827677550801153};
+
+    layers.push_back(mirrorDisplayLayer(/*id=*/6, kInnerPhysicalDisplayId));
+
+    LayerLifecycleManager manager;
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const frontend::DisplayInfo innerPhysicalDisplay = {
+            .displayId = DisplayId::fromValue(kInnerPhysicalDisplayId)};
+    const frontend::DisplayInfo outerPhysicalDisplay = {
+            .displayId = DisplayId::fromValue(kOuterPhysicalDisplayId)};
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> frontEndDisplaysInfo =
+            ftl::init::map(ui::DEFAULT_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::UNASSIGNED_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(frontEndDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+
+    LayerHierarchyBuilder hierarchyBuilder;
+    hierarchyBuilder.update(manager);
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const std::vector<uint32_t /*layerId*/> expectedTraversalPath = {1, 2, 4, 5, 3, 6,
+                                                                     1, 2, 4, 5, 3};
+
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getHierarchy()), expectedTraversalPath);
+    EXPECT_EQ(getTraversalPathInZOrder(hierarchyBuilder.getHierarchy()), expectedTraversalPath);
+    const std::vector<uint32_t /*layerId*/> expectedOffscreenPath = {};
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getOffscreenHierarchy()), expectedOffscreenPath);
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    ui::DisplayMap<ui::LayerStack, frontend::DisplayInfo> changedFrontEndDisplaysInfo =
+            ftl::init::map(ui::UNASSIGNED_LAYER_STACK,
+                           innerPhysicalDisplay)(ui::DEFAULT_LAYER_STACK, outerPhysicalDisplay);
+    manager.updateDisplayMirrors(changedFrontEndDisplaysInfo,
+                                 /*frontEndDisplaysInfos=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    hierarchyBuilder.update(manager);
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    const std::vector<uint32_t /*layerId*/> newExpectedTraversalPath = {1, 2, 4, 5, 3, 6};
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getHierarchy()), newExpectedTraversalPath);
+    EXPECT_EQ(getTraversalPathInZOrder(hierarchyBuilder.getHierarchy()), newExpectedTraversalPath);
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getOffscreenHierarchy()), expectedOffscreenPath);
+
+    manager.addLayers(std::move(layers));
+    layers = std::vector<std::unique_ptr<RequestedLayerState>>{};
+
+    manager.updateDisplayMirrors(frontEndDisplaysInfo,
+                                 /*frontEndDisplaysInfoChanged=*/true);
+    EXPECT_TRUE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    hierarchyBuilder.update(manager);
+    manager.commitChanges();
+    EXPECT_FALSE(manager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
+
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getHierarchy()), expectedTraversalPath);
+    EXPECT_EQ(getTraversalPathInZOrder(hierarchyBuilder.getHierarchy()), expectedTraversalPath);
+    EXPECT_EQ(getTraversalPath(hierarchyBuilder.getOffscreenHierarchy()), expectedOffscreenPath);
+}
+
 TEST_F(LayerHierarchyTest, canTraverseMirrorLayer) {
     LayerHierarchyBuilder hierarchyBuilder;
     hierarchyBuilder.update(mLifecycleManager);

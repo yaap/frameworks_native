@@ -37,8 +37,11 @@ class LIBBINDER_EXPORTED Parcelable {
 public:
     virtual ~Parcelable() = default;
 
+    // Needed since user-declaring base class functions (incl delete), means subclasses must
+    // explicitly declare them.
     Parcelable() = default;
     Parcelable(const Parcelable&) = default;
+    Parcelable& operator=(const Parcelable&) = default;
 
     // Write |this| parcelable to the given |parcel|.  Keep in mind that
     // implementations of writeToParcel must be manually kept in sync

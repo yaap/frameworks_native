@@ -1029,7 +1029,7 @@ public:
                     return hardware::Void();
                 }));
         EXPECT_CALL(*serviceManager, get(_, _))
-                .WillRepeatedly(Invoke([&](const hidl_string&, const hidl_string&) -> sp<IBase> {
+                .WillRepeatedly(Invoke([=](const hidl_string&, const hidl_string&) -> sp<IBase> {
                     return service;
                 }));
     }

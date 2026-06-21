@@ -128,7 +128,7 @@ public:
 
     // Whenever possible, markForBinder should be preferred. This method is
     // called automatically on reply Parcels for RPC transactions.
-    LIBBINDER_EXPORTED void markForRpc(const sp<RpcSession>& session);
+    LIBBINDER_EXPORTED void markForRpc(sp<RpcSession> session);
 
     // Whether this Parcel is written for RPC transactions (after calls to
     // markForBinder or markForRpc).
@@ -672,8 +672,8 @@ private:
                              size_t objectsCount, release_func relFunc);
     // Takes ownership even when an error is returned.
     [[nodiscard]] status_t rpcSetDataReference(
-            const sp<RpcSession>& session, const uint8_t* data, size_t dataSize,
-            const uint32_t* objectTable, size_t objectTableSize,
+            RpcSession& session, const uint8_t* data, size_t dataSize, const uint32_t* objectTable,
+            size_t objectTableSize,
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>&& ancillaryFds,
             release_func relFunc);
 
@@ -1390,7 +1390,7 @@ private:
     };
     // Fields only needed when parcelling for RPC Binder.
     struct RpcFields {
-        RpcFields(const sp<RpcSession>& session);
+        RpcFields(sp<RpcSession>&& session);
 
         // Should always be non-null.
         sp<RpcSession> mSession;

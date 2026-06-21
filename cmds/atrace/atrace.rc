@@ -67,6 +67,8 @@ on late-init
     chmod 0666 /sys/kernel/tracing/events/power/suspend_resume/enable
     chmod 0666 /sys/kernel/debug/tracing/events/cpufreq_interactive/enable
     chmod 0666 /sys/kernel/tracing/events/cpufreq_interactive/enable
+    chmod 0666 /sys/kernel/debug/tracing/events/devfreq/devfreq_frequency/enable
+    chmod 0666 /sys/kernel/tracing/events/devfreq/devfreq_frequency/enable
     chmod 0666 /sys/kernel/debug/tracing/events/vmscan/mm_vmscan_direct_reclaim_begin/enable
     chmod 0666 /sys/kernel/tracing/events/vmscan/mm_vmscan_direct_reclaim_begin/enable
     chmod 0666 /sys/kernel/debug/tracing/events/vmscan/mm_vmscan_direct_reclaim_end/enable
@@ -121,14 +123,10 @@ on late-init
     chmod 0666 /sys/kernel/tracing/events/fence/enable
     chmod 0666 /sys/kernel/debug/tracing/events/dma_fence/enable
     chmod 0666 /sys/kernel/tracing/events/dma_fence/enable
+    chmod 0666 /sys/kernel/debug/tracing/events/kmem/dmabuf_rss_stat/enable
+    chmod 0666 /sys/kernel/tracing/events/kmem/dmabuf_rss_stat/enable
     chmod 0666 /sys/kernel/debug/tracing/events/kmem/rss_stat/enable
     chmod 0666 /sys/kernel/tracing/events/kmem/rss_stat/enable
-    chmod 0666 /sys/kernel/debug/tracing/events/kmem/ion_heap_grow/enable
-    chmod 0666 /sys/kernel/tracing/events/kmem/ion_heap_grow/enable
-    chmod 0666 /sys/kernel/debug/tracing/events/kmem/ion_heap_shrink/enable
-    chmod 0666 /sys/kernel/tracing/events/kmem/ion_heap_shrink/enable
-    chmod 0666 /sys/kernel/debug/tracing/events/ion/ion_stat/enable
-    chmod 0666 /sys/kernel/tracing/events/ion/ion_stat/enable
     chmod 0666 /sys/kernel/debug/tracing/events/mm_event/mm_event_record/enable
     chmod 0666 /sys/kernel/tracing/events/mm_event/mm_event_record/enable
     chmod 0666 /sys/kernel/debug/tracing/events/signal/signal_generate/enable
@@ -562,6 +560,8 @@ on property:sys.boot_completed=1
     chmod 0666 /sys/kernel/tracing/events/power/gpu_frequency/enable
     chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_work_period/enable
     chmod 0666 /sys/kernel/tracing/events/power/gpu_work_period/enable
+    chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_power_state/enable
+    chmod 0666 /sys/kernel/tracing/events/power/gpu_power_state/enable
 
 on property:persist.debug.atrace.boottrace=1
     start boottrace

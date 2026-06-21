@@ -19,13 +19,10 @@
 #include <functional>
 
 #include <android-base/logging.h>
-#include <com_android_input_flags.h>
+#include <jni.h>
 #include <processgroup/processgroup.h>
-#include "jni.h"
 
 namespace android {
-
-namespace input_flags = com::android::input::flags;
 
 namespace {
 
@@ -36,19 +33,16 @@ bool applyInputEventProfile() {
 
 class JvmAttacher {
 public:
-    JvmAttacher(JNIEnv* env, const std::string& name) {
-        if (env == nullptr) {
-            LOG(INFO) << "env is nullptr for thread " << name;
+    JvmAttacher(JavaVM* vm, const std::string& name) : mVm(vm) {
+        if (mVm == nullptr) {
             return;
         }
-        env->GetJavaVM(&mVm);
-        LOG_IF(FATAL, mVm == nullptr) << "Could not get JavaVM from provided JNIEnv";
-
         JavaVMAttachArgs args{
                 .version = JNI_VERSION_1_6,
                 .name = name.c_str(),
                 .group = nullptr,
         };
+        JNIEnv* env;
         if (mVm->AttachCurrentThread(&env, &args) != JNI_OK) {
             LOG(FATAL) << "Cannot attach thread " << name << " to Java VM.";
         }
@@ -67,16 +61,15 @@ private:
 } // namespace
 
 InputThread::InputThread(std::string name, std::function<void()> loop, std::function<void()> wake,
-                         bool isInCriticalPath, JNIEnv* env)
+                         bool isInCriticalPath, JavaVM* vm)
       : mThreadWake(wake) {
-    std::thread loopThread{[this, name, isInCriticalPath, loop, env] {
-        if (input_flags::enable_input_policy_profile() && isInCriticalPath) {
-            if (!applyInputEventProfile()) {
-                LOG(ERROR) << "Couldn't apply input policy profile for " << name;
-            }
+    std::thread loopThread{[this, name, isInCriticalPath, loop, vm] {
+        if (isInCriticalPath) {
+            const bool applied = applyInputEventProfile();
+            LOG_IF(ERROR, !applied) << "Couldn't apply input policy profile for " << name;
         }
 
-        JvmAttacher jvmAttacher(env, name);
+        JvmAttacher jvmAttacher(vm, name);
 
         while (!mStopThread) {
             loop();

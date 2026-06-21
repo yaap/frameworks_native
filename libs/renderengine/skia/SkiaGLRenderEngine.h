@@ -63,7 +63,7 @@ protected:
     bool supportsFastRotatedClipRRectAA() const override;
     bool supportsProtectedContentImpl() const override;
     bool useProtectedContextImpl(GrProtected isProtected) override;
-    void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;
+    void waitFenceImpl(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;
     base::unique_fd flushAndSubmit(SkiaGpuContext* context, sk_sp<SkSurface> dstSurface) override;
     void appendBackendSpecificInfoToDump(std::string& result) override;
 
@@ -71,6 +71,7 @@ private:
     SkiaGLRenderEngine(const RenderEngineCreationArgs& args, EGLDisplay display, EGLContext ctxt,
                        EGLSurface placeholder, EGLContext protectedContext,
                        EGLSurface protectedPlaceholder);
+    SkiaBackend backend() const override { return SkiaBackend::Ganesh; }
     bool waitGpuFence(base::borrowed_fd fenceFd);
     base::unique_fd flushGL();
     static EGLConfig chooseEglConfig(EGLDisplay display, int format, bool logConfig);

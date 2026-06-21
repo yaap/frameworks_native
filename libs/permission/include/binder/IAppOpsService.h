@@ -57,6 +57,10 @@ public:
     virtual bool shouldCollectNotes(int32_t opCode) = 0;
     virtual void startWatchingModeWithFlags(int32_t op, const String16& packageName,
             int32_t flags, const sp<IAppOpsCallback>& callback) = 0;
+    virtual int32_t checkOperationForDevice(int32_t code, int32_t uid,
+                                            const String16& packageName,
+                                            const std::optional<String16>& attributionTag,
+                                            int32_t virtualDeviceId) = 0;
 
     enum {
         CHECK_OPERATION_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION,
@@ -70,6 +74,7 @@ public:
         SHOULD_COLLECT_NOTES_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION+8,
         SET_CAMERA_AUDIO_RESTRICTION_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION+9,
         START_WATCHING_MODE_WITH_FLAGS_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION+10,
+        CHECK_OPERATION_FOR_DEVICE_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION+11,
     };
 
     enum {

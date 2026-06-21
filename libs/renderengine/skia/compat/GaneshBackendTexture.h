@@ -35,23 +35,32 @@ public:
 
     ~GaneshBackendTexture() override;
 
-    sk_sp<SkImage> makeImage(SkAlphaType alphaType, ui::Dataspace dataspace,
-                             TextureReleaseProc releaseImageProc,
-                             ReleaseContext releaseContext) override;
+    sk_sp<SkImage> makeImage(
+            SkAlphaType alphaType, ui::Dataspace dataspace, TextureReleaseProc releaseImageProc,
+            ReleaseContext releaseContext,
+            ftl::Flags<ColorSpaceOptions> options = ColorSpaceOptions::None) override;
 
-    sk_sp<SkSurface> makeSurface(ui::Dataspace dataspace, TextureReleaseProc releaseSurfaceProc,
-                                 ReleaseContext releaseContext) override;
+    sk_sp<SkSurface> makeSurface(
+            ui::Dataspace dataspace, TextureReleaseProc releaseSurfaceProc,
+            ReleaseContext releaseContext,
+            ftl::Flags<ColorSpaceOptions> options = ColorSpaceOptions::None) override;
+
+    std::string backendDebugInfo() const override;
 
 private:
     DISALLOW_COPY_AND_ASSIGN(GaneshBackendTexture);
 
-    void logFatalTexture(const char* msg, ui::Dataspace dataspace, SkColorType colorType);
+    SkColorType internalColorType() const { return mColorType; }
+
+    void logFatalTexture(const char* msg, ui::Dataspace dataspace, SkColorType colorType,
+                         SkAlphaType alphaType);
 
     const sk_sp<GrDirectContext> mGrContext;
     GrBackendTexture mBackendTexture;
     GrAHardwareBufferUtils::DeleteImageProc mDeleteProc;
     GrAHardwareBufferUtils::UpdateImageProc mUpdateProc;
     GrAHardwareBufferUtils::TexImageCtx mImageCtx;
+    SkColorType mColorType = kUnknown_SkColorType;
 };
 
 } // namespace android::renderengine::skia

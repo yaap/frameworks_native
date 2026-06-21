@@ -14,11 +14,53 @@
  * limitations under the License.
  */
 
-#include "include/gui/DisplayLuts.h"
+#include <android-base/stringprintf.h>
 #include <gui/DisplayLuts.h>
 #include <private/gui/ParcelUtils.h>
+#include <sys/mman.h>
+#include <algorithm>
 
 namespace android::gui {
+
+void DisplayLuts::dump(std::string& out) const {
+    using android::base::StringAppendF;
+    StringAppendF(&out, "DisplayLuts { fd=%d, offsets=[", fd.get());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        StringAppendF(&out, "%d%s", offsets[i], (i == offsets.size() - 1 ? "" : ", "));
+    }
+    out.append("], properties=[");
+    for (size_t i = 0; i < lutProperties.size(); ++i) {
+        const auto& entry = lutProperties[i];
+        StringAppendF(&out, "{dim=%d, size=%d, key=%d}%s", entry.dimension, entry.size,
+                      entry.samplingKey, (i == lutProperties.size() - 1 ? "" : ", "));
+    }
+    out.append("]");
+
+    if (fd.ok() && !offsets.empty()) {
+        int32_t fullLength = offsets.back();
+        const auto& lastProp = lutProperties.back();
+        if (lastProp.dimension == 1) {
+            fullLength += lastProp.size;
+        } else {
+            fullLength += (lastProp.size * lastProp.size * lastProp.size * 3);
+        }
+
+        size_t bufferSize = static_cast<size_t>(fullLength) * sizeof(float);
+        float* ptr = (float*)mmap(NULL, bufferSize, PROT_READ, MAP_SHARED, fd.get(), 0);
+        if (ptr != MAP_FAILED) {
+            out.append(", values=[");
+            for (int32_t i = 0; i < fullLength; ++i) {
+                StringAppendF(&out, "%f%s", ptr[i], (i == fullLength - 1 ? "" : ", "));
+            }
+            out.append("]");
+            munmap(ptr, bufferSize);
+        } else {
+            out.append(", [mmap failed]");
+        }
+    }
+
+    out.append(" }");
+}
 
 status_t DisplayLuts::Entry::readFromParcel(const android::Parcel* parcel) {
     if (parcel == nullptr) {

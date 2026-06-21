@@ -63,16 +63,36 @@ LimitedAxesImuSensor::LimitedAxesImuSensor(sensor_t const* list, size_t count,
 }
 
 bool LimitedAxesImuSensor::process(sensors_event_t* outEvent, const sensors_event_t& event) {
-    if (event.sensor == mImu3dSensor.getHandle()) {
+    // Only process events originating from the underlying physical IMU.
+    if (event.sensor != mImu3dSensor.getHandle()) {
+        return false;
+    }
+
+    // Handle primary sensor data (e.g., Accelerometer or Gyroscope).
+    if (event.type == mImu3dSensor.getType()) {
         *outEvent = event;
+
+        // Limited axes sensors append three float flags (all set to 1.0f in this implementation)
+        // to the data payload to indicate which physical axes are supported and reported.
         size_t imu3dDataSize = SensorServiceUtil::eventSizeBySensorType(mImu3dSensor.getType());
-        outEvent->data[0 + imu3dDataSize] = 1;
-        outEvent->data[1 + imu3dDataSize] = 1;
-        outEvent->data[2 + imu3dDataSize] = 1;
-        outEvent->sensor = mSensor.getHandle();
+        outEvent->data[0 + imu3dDataSize] = 1.0f; // X supported
+        outEvent->data[1 + imu3dDataSize] = 1.0f; // Y supported
+        outEvent->data[2 + imu3dDataSize] = 1.0f; // Z supported
+
+        // Re-stamp the event with this virtual sensor's type and unique handle.
         outEvent->type = mSensor.getType();
+        outEvent->sensor = mSensor.getHandle();
         return true;
     }
+
+    // Pass through metadata events. Re-stamp the handle so that clients registered
+    // for this virtual sensor can correctly associate the metadata with it.
+    if (event.type == SENSOR_TYPE_ADDITIONAL_INFO) {
+        *outEvent = event;
+        outEvent->sensor = mSensor.getHandle();
+        return true;
+    }
+
     return false;
 }
 

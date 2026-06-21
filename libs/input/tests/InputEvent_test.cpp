@@ -251,6 +251,23 @@ TEST_F(KeyEventTest, Properties) {
     ASSERT_EQ(newDisplayId, event.getDisplayId());
 }
 
+TEST_F(KeyEventTest, StreamOperator_WithUnknownKeycode) {
+    KeyEvent event;
+
+    static constexpr int32_t INVALID_KEYCODE = 9999;
+    static constexpr nsecs_t ARBITRARY_DOWN_TIME = 1;
+    static constexpr nsecs_t ARBITRARY_EVENT_TIME = 2;
+    const int32_t id = InputEvent::nextId();
+    // Initialize a KeyEvent with a keycode that is not in the list of known keycodes.
+    event.initialize(id, 0, AINPUT_SOURCE_GAMEPAD, DISPLAY_ID, INVALID_HMAC, AKEY_EVENT_ACTION_DOWN,
+                     AKEY_EVENT_FLAG_FROM_SYSTEM, INVALID_KEYCODE, 121, AMETA_ALT_ON, 1,
+                     ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME);
+    std::stringstream out;
+    out << event;
+
+    // The main goal is to check that << operator does not crash, and we aren't checking the output
+    // of it here.
+}
 
 // --- MotionEventTest ---
 
@@ -588,7 +605,29 @@ TEST_F(MotionEventTest, CopyFrom_DoNotKeepHistory) {
 
     ASSERT_EQ(event.getEventTime(), copy.getEventTime());
 
-    ASSERT_EQ(event.getX(0), copy.getX(0));
+    // Check that the raw pointer coords are the same as the last sample from the original event.
+    // This confirms that only the last sample was copied.
+    ASSERT_EQ(*event.getRawPointerCoords(0), *copy.getRawPointerCoords(0));
+    ASSERT_EQ(*event.getRawPointerCoords(1), *copy.getRawPointerCoords(1));
+}
+
+TEST_F(MotionEventTest, CopyFrom_DoNotKeepHistory_EventHasNoHistory) {
+    // Create an event with no history.
+    MotionEvent event;
+    event.initialize(mId, 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, HMAC,
+                     AMOTION_EVENT_ACTION_MOVE, 0, MotionFlag::WINDOW_IS_OBSCURED,
+                     AMOTION_EVENT_EDGE_FLAG_TOP, AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY,
+                     MotionClassification::NONE, mTransform, 2.0f, 2.1f,
+                     AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                     mRawTransform, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 2,
+                     mPointerProperties, mSamples[0].pointerCoords);
+    ASSERT_EQ(0U, event.getHistorySize());
+
+    MotionEvent copy;
+    copy.copyFrom(&event, /*keepHistory=*/false);
+
+    // The copied event should be identical to the original, since there was no history to discard.
+    ASSERT_EQ(event, copy);
 }
 
 TEST_F(MotionEventTest, CheckEventIdWithHistoryIsIncremented) {

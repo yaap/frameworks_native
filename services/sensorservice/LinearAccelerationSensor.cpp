@@ -50,7 +50,8 @@ bool LinearAccelerationSensor::process(sensors_event_t* outEvent,
         const sensors_event_t& event)
 {
     bool result = mGravitySensor.process(outEvent, event);
-    if (result && event.sensor == mGravitySensor.getAccelHandle()) {
+    if (result && event.type == mGravitySensor.getAccelType() &&
+            event.sensor == mGravitySensor.getAccelHandle()) {
         outEvent->data[0] = event.acceleration.x - outEvent->data[0];
         outEvent->data[1] = event.acceleration.y - outEvent->data[1];
         outEvent->data[2] = event.acceleration.z - outEvent->data[2];

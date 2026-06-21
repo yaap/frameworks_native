@@ -31,6 +31,7 @@
 #include "api_gen.h"
 #include "driver_gen.h"
 #include "debug_report.h"
+#include "private_data.h"
 #include "swapchain.h"
 
 namespace vulkan {
@@ -100,6 +101,11 @@ struct DeviceData {
     VkDevice driver_device;
     DeviceDriverTable driver;
     VkPhysicalDevice driver_physical_device;
+
+    std::vector<PrivateDataSlot *> private_data_slots GUARDED_BY(private_data_mutex);
+    std::mutex private_data_mutex;
+    uint32_t num_preallocated_private_data_slots = 0;
+    uint32_t next_preallocated_private_data_slot GUARDED_BY(private_data_mutex) = 0;
 };
 
 bool OpenHAL();
@@ -195,6 +201,33 @@ VKAPI_ATTR void GetPhysicalDeviceExternalFenceProperties(
     VkPhysicalDevice physicalDevice,
     const VkPhysicalDeviceExternalFenceInfo* pExternalFenceInfo,
     VkExternalFenceProperties* pExternalFenceProperties);
+
+VKAPI_ATTR void GetPhysicalDeviceProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    VkPhysicalDeviceProperties2KHR* pProperties);
+VKAPI_ATTR void GetPhysicalDeviceFormatProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    VkFormat format,
+    VkFormatProperties2KHR* pFormatProperties);
+VKAPI_ATTR VkResult GetPhysicalDeviceImageFormatProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    const VkPhysicalDeviceImageFormatInfo2KHR* pImageFormatInfo,
+    VkImageFormatProperties2KHR* pImageFormatProperties);
+VKAPI_ATTR void GetPhysicalDeviceMemoryProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    VkPhysicalDeviceMemoryProperties2KHR* pMemoryProperties);
+VKAPI_ATTR void GetPhysicalDeviceQueueFamilyProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    uint32_t *pQueueFamilyPropertyCount,
+    VkQueueFamilyProperties2KHR* pQueueFamilyProperties);
+VKAPI_ATTR void GetPhysicalDeviceFeatures2KHR(
+    VkPhysicalDevice physicalDevice,
+    VkPhysicalDeviceFeatures2KHR* pFeatures);
+VKAPI_ATTR void GetPhysicalDeviceSparseImageFormatProperties2KHR(
+    VkPhysicalDevice physicalDevice,
+    const VkPhysicalDeviceSparseImageFormatInfo2KHR* pFormatInfo,
+    uint32_t* pPropertyCount,
+    VkSparseImageFormatProperties2KHR* pProperties);
 
 template <typename DispatchableType>
 void StaticAssertDispatchable(DispatchableType) {

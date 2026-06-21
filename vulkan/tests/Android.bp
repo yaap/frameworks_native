@@ -7,6 +7,50 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+cc_defaults {
+    name: "vulkan_test_layer_defaults",
+
+    cflags: [
+        "-DLOG_TAG=\"VkLayer_testingLayer\"",
+        "-DVK_USE_PLATFORM_ANDROID_KHR",
+    ],
+
+    cppflags: [
+        "-Wno-c99-extensions",
+        "-Wno-c++98-compat-pedantic",
+        "-Wno-exit-time-destructors",
+        "-Wno-float-equal",
+        "-Wno-global-constructors",
+        "-Wno-zero-length-array",
+    ],
+
+    srcs: [
+        "vulkan_test_layer.cpp",
+    ],
+
+    shared_libs: [
+        "libvulkan",
+        "liblog",
+        "libbase",
+    ],
+}
+
+cc_library_shared {
+    name: "libVkLayer_testingLayer",
+    defaults: ["vulkan_test_layer_defaults"],
+    cflags: [
+        "-DTEST_LAYER_NAME=\"VK_LAYER_libVulkanTestLayer\"",
+    ],
+}
+
+cc_library_shared {
+    name: "layerwithout_libVkLayer_prefix",
+    defaults: ["vulkan_test_layer_defaults"],
+    cflags: [
+        "-DTEST_LAYER_NAME=\"VK_LAYER_libVulkanTestLayer_without_libVkLayer_prefix\"",
+    ],
+}
+
 cc_test {
     name: "libvulkan_test",
     test_suites: ["general-tests"],
@@ -24,7 +68,6 @@ cc_test {
         "-Wall",
         "-Werror",
     ],
-
     header_libs: [
         "hwvulkan_headers",
         "libvulkanprivate_headers-testing",
@@ -39,13 +82,13 @@ cc_test {
         "-Wno-global-constructors",
         "-Wno-zero-length-array",
     ],
-
     shared_libs: [
         "libbase",
         "libgraphicsenv",
         "liblog",
         "libmediandk",
         "libvulkan",
+        "libgraphicsenv",
     ],
 
     static_libs: [
@@ -54,4 +97,8 @@ cc_test {
         "liblog",
     ],
 
+    data_libs: [
+        "libVkLayer_testingLayer",
+        "layerwithout_libVkLayer_prefix",
+    ],
 }

@@ -20,7 +20,7 @@
 #include <semaphore.h>
 #include <thread>
 
-#include "LocklessQueue.h"
+#include <gui/LocklessQueue.h>
 
 namespace android {
 
@@ -30,12 +30,17 @@ public:
     ~BackgroundExecutor();
 
     static BackgroundExecutor& getInstance() {
-        static BackgroundExecutor instance(true);
+        static BackgroundExecutor instance(true, "BckgrndExec WL");
         return instance;
     }
 
     static BackgroundExecutor& getLowPriorityInstance() {
-        static BackgroundExecutor instance(false);
+        static BackgroundExecutor instance(false, "BckgrndExec LP");
+        return instance;
+    }
+
+    static BackgroundExecutor& getInstanceForTransaction() {
+        static BackgroundExecutor instance(true, "BckgrndExec HP");
         return instance;
     }
 
@@ -46,7 +51,7 @@ public:
     void flushQueue();
 
 private:
-    BackgroundExecutor(bool highPriority);
+    BackgroundExecutor(bool highPriority, const char* threadName);
 
     sem_t mSemaphore;
     std::atomic_bool mDone = false;

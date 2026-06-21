@@ -321,6 +321,7 @@ public:
 class MyBinderRpcTestBase : public BnBinderRpcTest {
 public:
     int port = 0;
+    int mClientUid = -1;
 
     Status sendString(const std::string& str) override {
         (void)str;
@@ -499,6 +500,8 @@ public:
     }
 
     Status blockingRecvInt(int* /*n*/) override { return Status::fromStatusT(UNKNOWN_TRANSACTION); }
+
+    Status getClientUid(int* /*uid*/) override { return Status::fromStatusT(UNKNOWN_TRANSACTION); }
 };
 
 } // namespace android

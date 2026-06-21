@@ -35,17 +35,21 @@ cc_test {
         "VelocityControl_test.cpp",
         "VelocityTracker_test.cpp",
         "VerifiedInputEvent_test.cpp",
+        "VirtualInputDevice_test.cpp",
     ],
     header_libs: [
         "flatbuffer_headers",
         "tensorflow_headers",
     ],
     static_libs: [
+        "libPlatformProperties",
         "libflagtest",
         "libgmock",
         "libgui_window_info_static",
         "libinput",
         "libkernelconfigs",
+        "libstatspull-fake",
+        "libstatssocket-fake",
         "libtflite_static",
         "libui-types",
         "libz", // needed by libkernelconfigs
@@ -73,7 +77,6 @@ cc_test {
         },
     },
     shared_libs: [
-        "libPlatformProperties",
         "libaconfig_storage_read_api_cc",
         "libbase",
         "libbinder",
@@ -95,14 +98,6 @@ cc_test {
         unit_test: true,
     },
     test_suites: ["device-tests"],
-    target: {
-        android: {
-            static_libs: [
-                "libstatslog_libinput",
-                "libstatssocket_lazy",
-            ],
-        },
-    },
     native_coverage: false,
 }
 
@@ -111,6 +106,7 @@ cc_test {
 // buildtime if something's wrong.
 cc_library_static {
     name: "StructLayout_test",
+    host_supported: true,
     srcs: ["StructLayout_test.cpp"],
     compile_multilib: "both",
     cflags: [

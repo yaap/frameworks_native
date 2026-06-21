@@ -26,4 +26,6 @@ parcelable CreateAppDataArgs {
     int previousAppId;
     @utf8InCpp String seInfo;
     int targetSdkVersion;
+    int pccId;
+    int previousPccId;
 }

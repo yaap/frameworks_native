@@ -29,10 +29,7 @@
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 #include <android/content/pm/IPackageManagerNative.h>
-#include <android/hardware/dumpstate/1.0/IDumpstateDevice.h>
-#include <android/hardware/dumpstate/1.1/IDumpstateDevice.h>
-#include <android/hardware/dumpstate/1.1/types.h>
-#include <android/hidl/manager/1.0/IServiceManager.h>
+#include <android/hidl/manager/1.2/IServiceManager.h>
 #include <android/os/IIncidentCompanion.h>
 #include <android_app_admin_flags.h>
 #include <android_os.h>
@@ -71,6 +68,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/capability.h>
+#include <sys/file.h>
 #include <sys/inotify.h>
 #include <sys/klog.h>
 #include <sys/mount.h>
@@ -101,8 +99,6 @@
 #include "DumpstateInternal.h"
 #include "DumpstateService.h"
 
-namespace dumpstate_hal_hidl_1_0 = android::hardware::dumpstate::V1_0;
-namespace dumpstate_hal_hidl = android::hardware::dumpstate::V1_1;
 namespace dumpstate_hal_aidl = aidl::android::hardware::dumpstate;
 
 using ::std::literals::chrono_literals::operator""ms;
@@ -114,6 +110,7 @@ using android::defaultServiceManager;
 using android::Dumpsys;
 using android::INVALID_OPERATION;
 using android::IServiceManager;
+using android::NAME_NOT_FOUND;
 using android::OK;
 using android::PhysicalDisplayId;
 using android::sp;
@@ -869,7 +866,8 @@ void Dumpstate::PrintHeader() const {
 
     printf("Kernel: ");
     DumpFileToFd(STDOUT_FILENO, "", "/proc/version");
-    printf("Command line: %s\n", strtok(cmdline_buf, "\n"));
+    char* saveptr;
+    printf("Command line: %s\n", strtok_r(cmdline_buf, "\n", &saveptr));
     printf("Bootconfig: ");
     DumpFileToFd(STDOUT_FILENO, "", "/proc/bootconfig");
     printf("Uptime: ");
@@ -1342,10 +1340,11 @@ static Dumpstate::RunStatus RunDumpsysTextByPriority(const std::string& title, i
              dumpsys.writeDumpHeader(STDOUT_FILENO, service, priority);
              dumpsys.writeDumpFooter(STDOUT_FILENO, service, std::chrono::milliseconds(1));
         } else {
-             status_t status = dumpsys.startDumpThread(Dumpsys::TYPE_DUMP | Dumpsys::TYPE_PID |
-                                                       Dumpsys::TYPE_CLIENTS | Dumpsys::TYPE_THREAD,
-                                                       service, args);
-             if (status == OK) {
+            status_t status =
+                dumpsys.startDumpThread(Dumpsys::TYPE_DUMP | Dumpsys::TYPE_PID |
+                                            Dumpsys::TYPE_CLIENTS | Dumpsys::TYPE_THREAD,
+                                        service, args, Dumpsys::ServiceBehavior::DUMP_IF_STARTED);
+            if (status == OK) {
                 dumpsys.writeDumpHeader(STDOUT_FILENO, service, priority);
                 std::chrono::duration<double> elapsed_seconds;
                 if (priority == IServiceManager::DUMP_FLAG_PRIORITY_HIGH &&
@@ -1362,6 +1361,9 @@ static Dumpstate::RunStatus RunDumpsysTextByPriority(const std::string& title, i
                 dumpsys.writeDumpFooter(STDOUT_FILENO, service, elapsed_seconds);
                 bool dump_complete = (status == OK);
                 dumpsys.stopDumpThread(dump_complete);
+            } else if (status == NAME_NOT_FOUND) {
+                MYLOGD("Failed to start dump thread for service: %s, status: %d",
+                       String8(service).c_str(), status);
             } else {
                 MYLOGE("Failed to start dump thread for service: %s, status: %d",
                        String8(service).c_str(), status);
@@ -1427,7 +1429,8 @@ static Dumpstate::RunStatus RunDumpsysProto(const std::string& title, int priori
             path.append("_HIGH");
         }
         path.append(kProtoExt);
-        status_t status = dumpsys.startDumpThread(Dumpsys::TYPE_DUMP, service, args);
+        status_t status = dumpsys.startDumpThread(Dumpsys::TYPE_DUMP, service, args,
+                                                  Dumpsys::ServiceBehavior::DUMP_IF_STARTED);
         if (status == OK) {
             status = ds.AddZipEntryFromFd(path, dumpsys.getDumpFd(), service_timeout);
             bool dumpTerminated = (status == OK);
@@ -1829,6 +1832,8 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
 
     MaybeAddSystemTraceToZip();
 
+    RunCommand("BPF PROGRAMS", {"/system/bin/bpftool",  "prog", "show"}, CommandOptions::AS_ROOT);
+
     // NOTE: tombstones are always added as separate entries in the zip archive
     // and are not interspersed with the main report.
     const bool tombstones_dumped = AddDumps(ds.tombstone_data_.begin(), ds.tombstone_data_.end(),
@@ -1884,12 +1889,16 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
     if (access(binder_transactions_path.c_str(), R_OK) != 0) {
         binder_transactions_path += "_hashed";
     }
+    std::string binder_state_path = binder_logs_dir + "/state";
+    if (access(binder_state_path.c_str(), R_OK) != 0) {
+        binder_state_path += "_hashed";
+    }
 
     DumpFile("BINDER FAILED TRANSACTION LOG", binder_logs_dir + "/failed_transaction_log");
     DumpFile("BINDER TRANSACTION LOG", binder_logs_dir + "/transaction_log");
     DumpFile("BINDER TRANSACTIONS", binder_transactions_path);
     DumpFile("BINDER STATS", binder_logs_dir + "/stats");
-    DumpFile("BINDER STATE", binder_logs_dir + "/state");
+    DumpFile("BINDER STATE", binder_state_path);
 
     ds.AddDir(SNAPSHOTCTL_LOG_DIR, false);
 
@@ -2500,29 +2509,6 @@ Dumpstate::RunStatus Dumpstate::DumpTraces(const char** path) {
     return RunStatus::OK;
 }
 
-static dumpstate_hal_hidl::DumpstateMode GetDumpstateHalModeHidl(
-    const Dumpstate::BugreportMode bugreport_mode) {
-    switch (bugreport_mode) {
-        case Dumpstate::BugreportMode::BUGREPORT_FULL:
-            return dumpstate_hal_hidl::DumpstateMode::FULL;
-        case Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE:
-            return dumpstate_hal_hidl::DumpstateMode::INTERACTIVE;
-        case Dumpstate::BugreportMode::BUGREPORT_REMOTE:
-            return dumpstate_hal_hidl::DumpstateMode::REMOTE;
-        case Dumpstate::BugreportMode::BUGREPORT_WEAR:
-            return dumpstate_hal_hidl::DumpstateMode::WEAR;
-        case Dumpstate::BugreportMode::BUGREPORT_TELEPHONY:
-            return dumpstate_hal_hidl::DumpstateMode::CONNECTIVITY;
-        case Dumpstate::BugreportMode::BUGREPORT_WIFI:
-            return dumpstate_hal_hidl::DumpstateMode::WIFI;
-        case Dumpstate::BugreportMode::BUGREPORT_ONBOARDING:
-        case Dumpstate::BugreportMode::BUGREPORT_BLUETOOTH:
-        case Dumpstate::BugreportMode::BUGREPORT_DEFAULT:
-            return dumpstate_hal_hidl::DumpstateMode::DEFAULT;
-    }
-    return dumpstate_hal_hidl::DumpstateMode::DEFAULT;
-}
-
 static dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode GetDumpstateHalModeAidl(
     const Dumpstate::BugreportMode bugreport_mode) {
     switch (bugreport_mode) {
@@ -2544,97 +2530,6 @@ static dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode GetDumpstateHalModeAi
             return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::DEFAULT;
     }
     return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::DEFAULT;
-}
-
-// BAD - See README.md: "Dumpstate philosophy: exec not link"
-// This should all be moved into a separate binary rather than have complex logic here.
-static void DoDumpstateBoardHidl(
-    const sp<dumpstate_hal_hidl_1_0::IDumpstateDevice> dumpstate_hal_1_0,
-    const std::vector<::ndk::ScopedFileDescriptor>& dumpstate_fds,
-    const Dumpstate::BugreportMode bugreport_mode,
-    const size_t timeout_sec) {
-
-    using ScopedNativeHandle =
-        std::unique_ptr<native_handle_t, std::function<void(native_handle_t*)>>;
-    ScopedNativeHandle handle(native_handle_create(static_cast<int>(dumpstate_fds.size()), 0),
-                              [](native_handle_t* handle) {
-                                  // we don't close file handle's here
-                                  // via native_handle_close(handle)
-                                  // instead we let dumpstate_fds close the file handles when
-                                  // dumpstate_fds gets destroyed
-                                  native_handle_delete(handle);
-                              });
-    if (handle == nullptr) {
-        MYLOGE("Could not create native_handle for dumpstate HAL\n");
-        return;
-    }
-
-    for (size_t i = 0; i < dumpstate_fds.size(); i++) {
-        handle.get()->data[i] = dumpstate_fds[i].get();
-    }
-
-    // Prefer version 1.1 if available. New devices launching with R are no longer allowed to
-    // implement just 1.0.
-    const char* descriptor_to_kill;
-    using DumpstateBoardTask = std::packaged_task<bool()>;
-    DumpstateBoardTask dumpstate_board_task;
-    sp<dumpstate_hal_hidl::IDumpstateDevice> dumpstate_hal(
-        dumpstate_hal_hidl::IDumpstateDevice::castFrom(dumpstate_hal_1_0));
-    if (dumpstate_hal != nullptr) {
-        MYLOGI("Using IDumpstateDevice v1.1 HIDL HAL");
-
-        dumpstate_hal_hidl::DumpstateMode dumpstate_hal_mode =
-            GetDumpstateHalModeHidl(bugreport_mode);
-
-        descriptor_to_kill = dumpstate_hal_hidl::IDumpstateDevice::descriptor;
-        dumpstate_board_task =
-            DumpstateBoardTask([timeout_sec, dumpstate_hal_mode, dumpstate_hal, &handle]() -> bool {
-                ::android::hardware::Return<dumpstate_hal_hidl::DumpstateStatus> status =
-                    dumpstate_hal->dumpstateBoard_1_1(handle.get(), dumpstate_hal_mode,
-                                                      SEC_TO_MSEC(timeout_sec));
-                if (!status.isOk()) {
-                    MYLOGE("dumpstateBoard failed: %s\n", status.description().c_str());
-                    return false;
-                } else if (status != dumpstate_hal_hidl::DumpstateStatus::OK) {
-                    MYLOGE("dumpstateBoard failed with DumpstateStatus::%s\n",
-                           dumpstate_hal_hidl::toString(status).c_str());
-                    return false;
-                }
-                return true;
-            });
-    } else {
-        MYLOGI("Using IDumpstateDevice v1.0 HIDL HAL");
-
-        descriptor_to_kill = dumpstate_hal_hidl_1_0::IDumpstateDevice::descriptor;
-        dumpstate_board_task = DumpstateBoardTask([dumpstate_hal_1_0, &handle]() -> bool {
-            ::android::hardware::Return<void> status =
-                dumpstate_hal_1_0->dumpstateBoard(handle.get());
-            if (!status.isOk()) {
-                MYLOGE("dumpstateBoard failed: %s\n", status.description().c_str());
-                return false;
-            }
-            return true;
-        });
-    }
-    auto result = dumpstate_board_task.get_future();
-    std::thread(std::move(dumpstate_board_task)).detach();
-
-    if (result.wait_for(std::chrono::seconds(timeout_sec)) != std::future_status::ready) {
-        MYLOGE("dumpstateBoard timed out after %zus, killing dumpstate HAL\n", timeout_sec);
-        if (!android::base::SetProperty(
-                "ctl.interface_restart",
-                android::base::StringPrintf("%s/default", descriptor_to_kill))) {
-            MYLOGE("Couldn't restart dumpstate HAL\n");
-        }
-    }
-    // Wait some time for init to kill dumpstate vendor HAL
-    constexpr size_t killing_timeout_sec = 10;
-    if (result.wait_for(std::chrono::seconds(killing_timeout_sec)) != std::future_status::ready) {
-        MYLOGE(
-            "killing dumpstateBoard timed out after %zus, continue and "
-            "there might be racing in content\n",
-            killing_timeout_sec);
-    }
 }
 
 static void DoDumpstateBoardAidl(
@@ -2726,20 +2621,6 @@ void Dumpstate::DumpstateBoard(int out_fd) {
     std::shared_ptr<dumpstate_hal_aidl::IDumpstateDevice> dumpstate_hal_handle_aidl(
         GetDumpstateBoardAidlService());
     if (dumpstate_hal_handle_aidl == nullptr) {
-        MYLOGI("No IDumpstateDevice AIDL implementation\n");
-    }
-
-    // get dumpstate HAL HIDL implementation, only if AIDL HAL implementation not found
-    sp<dumpstate_hal_hidl_1_0::IDumpstateDevice> dumpstate_hal_handle_hidl_1_0 = nullptr;
-    if (dumpstate_hal_handle_aidl == nullptr) {
-        dumpstate_hal_handle_hidl_1_0 = dumpstate_hal_hidl_1_0::IDumpstateDevice::getService();
-        if (dumpstate_hal_handle_hidl_1_0 == nullptr) {
-            MYLOGI("No IDumpstateDevice HIDL implementation\n");
-        }
-    }
-
-    // if neither HIDL nor AIDL implementation found, then return
-    if (dumpstate_hal_handle_hidl_1_0 == nullptr && dumpstate_hal_handle_aidl == nullptr) {
         MYLOGE("Could not find IDumpstateDevice implementation\n");
         return;
     }
@@ -2772,15 +2653,8 @@ void Dumpstate::DumpstateBoard(int out_fd) {
     // will kill the HAL and grab whatever it dumped in time.
     constexpr size_t timeout_sec = 45;
 
-    if (dumpstate_hal_handle_aidl != nullptr) {
-        DoDumpstateBoardAidl(dumpstate_hal_handle_aidl, dumpstate_fds, options_->bugreport_mode,
-                             timeout_sec);
-    } else if (dumpstate_hal_handle_hidl_1_0 != nullptr) {
-        // run HIDL HAL only if AIDL HAL not found
-        DoDumpstateBoardHidl(dumpstate_hal_handle_hidl_1_0, dumpstate_fds, options_->bugreport_mode,
-                             timeout_sec);
-    }
-
+    DoDumpstateBoardAidl(dumpstate_hal_handle_aidl, dumpstate_fds, options_->bugreport_mode,
+                         timeout_sec);
     if (mount_debugfs) {
         auto keep_debugfs_mounted =
             android::base::GetProperty("persist.dbg.keep_debugfs_mounted", "");
@@ -2922,20 +2796,11 @@ static void Vibrate(int duration_ms) {
     // clang-format on
 }
 
-static void MaybeResolveSymlink(std::string* path) {
-    std::string resolved_path;
-    if (android::base::Readlink(*path, &resolved_path)) {
-        *path = resolved_path;
-    }
-}
-
 /*
  * Prepares state like filename, screenshot path, etc in Dumpstate. Also initializes ZipWriter
  * and adds the version file. Return false if zip_file could not be open to write.
  */
 static bool PrepareToWriteToFile() {
-    MaybeResolveSymlink(&ds.bugreport_internal_dir_);
-
     std::string build_id = android::base::GetProperty("ro.build.id", "UNKNOWN_BUILD");
     std::string device_name = android::base::GetProperty("ro.product.name", "UNKNOWN_DEVICE");
     ds.base_name_ = StringPrintf("bugreport-%s-%s", device_name.c_str(), build_id.c_str());
@@ -3201,16 +3066,72 @@ void Dumpstate::SetOptions(std::unique_ptr<DumpOptions> options) {
     options_ = std::move(options);
 }
 
-void Dumpstate::Initialize() {
+static void MaybeResolveSymlink(std::string* path) {
+    std::string resolved_path;
+    if (android::base::Readlink(*path, &resolved_path)) {
+        *path = resolved_path;
+    }
+}
+
+Dumpstate::InitializeStatus Dumpstate::Initialize() {
+    // resolve the actual bugreport directory
+    MaybeResolveSymlink(&bugreport_internal_dir_);
+
+    auto lock_result = TryAcquireBugreportLock();
+    if (lock_result != Dumpstate::InitializeStatus::INIT_OK) {
+        return lock_result;
+    }
+
     /* gets the sequential id */
     uint32_t last_id = android::base::GetIntProperty(PROPERTY_LAST_ID, 0);
     id_ = ++last_id;
     android::base::SetProperty(PROPERTY_LAST_ID, std::to_string(last_id));
+
+    return Dumpstate::InitializeStatus::INIT_OK;
+}
+
+Dumpstate::InitializeStatus Dumpstate::TryAcquireBugreportLock() {
+    assert(global_bugreport_lock_.ok() &&
+           "We already hold bugreport-lock, Initialize() invoked twice?");
+
+    std::string bugreport_lock_pathname =
+        android::base::StringPrintf("%s/%s", bugreport_internal_dir_.c_str(), ".bugreport_lock");
+    create_parent_dirs(bugreport_lock_pathname.c_str());
+
+    MYLOGD("Acquiring bugreport-lock under: %s\n", bugreport_lock_pathname.c_str());
+    android::base::unique_fd bugreport_lock_fd(android::os::OpenForWrite(bugreport_lock_pathname));
+    if (bugreport_lock_fd.get() < 0) {
+        MYLOGE("Failed to create bugreport-lock : %s\n", strerror(errno));
+        return Dumpstate::InitializeStatus::INIT_ERROR;
+    }
+
+    if (flock(bugreport_lock_fd.get(), LOCK_EX | LOCK_NB) == -1) {
+        int reason = errno;
+
+        Dumpstate::InitializeStatus error_type;
+        if (reason == EWOULDBLOCK) {
+            MYLOGW("Failed to acquire bugreport-lock, another bugreport is already in-progress\n");
+            error_type = Dumpstate::InitializeStatus::LOCK_OCCUPIED;
+        } else {
+            MYLOGE("Lock bugreport-lock failed with error: %s\n", strerror(reason));
+            error_type = Dumpstate::InitializeStatus::INIT_ERROR;
+        }
+
+        return error_type;
+    }
+
+    // move the fd lock
+    global_bugreport_lock_.reset(bugreport_lock_fd.release());
+
+    return Dumpstate::InitializeStatus::INIT_OK;
 }
 
 Dumpstate::RunStatus Dumpstate::Run(int32_t calling_uid, const std::string& calling_package) {
+    assert(global_dump_lock_.ok() && "Initialize() was not invoked before invoking Run()");
+
     Dumpstate::RunStatus status = RunInternal(calling_uid, calling_package);
     HandleRunStatus(status);
+
     return status;
 }
 
@@ -3941,7 +3862,21 @@ Dumpstate::RunStatus Dumpstate::ParseCommandlineAndRun(int argc, char* argv[]) {
         // calling_uid and calling_package are for user consent to share the bugreport with
         // an app; they are irrelevant here because bugreport is triggered via command line.
         // Update Last ID before calling Run().
-        Initialize();
+        switch (Initialize()) {
+            case Dumpstate::InitializeStatus::INIT_OK:
+                break;
+            case Dumpstate::InitializeStatus::INIT_ERROR:
+                MYLOGE(
+                    "ParseCommandlineAndRun(): Unexpected error when initializing a new bugreport "
+                    "session\n");
+                return Dumpstate::RunStatus::ERROR;
+            case Dumpstate::InitializeStatus::LOCK_OCCUPIED:
+                MYLOGE(
+                    "ParseCommandlineAndRun(): A bugreport is undergoing somewhere else on the "
+                    "system. Aborting.\n");
+                return Dumpstate::RunStatus::ERROR;
+        }
+
         status = Run(0 /* calling_uid */, "" /* calling_package */);
     }
     return status;

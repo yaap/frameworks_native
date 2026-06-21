@@ -22,6 +22,7 @@ using android::BBinder;
 using android::IBinder;
 using android::OK;
 using android::sp;
+using android::TransactionCodeData;
 
 const void* kObjectId1 = reinterpret_cast<const void*>(1);
 const void* kObjectId2 = reinterpret_cast<const void*>(2);
@@ -94,4 +95,131 @@ TEST(Binder, LookupOrCreateWeakDropSp) {
     sp<IBinder> lookedUpBinder = binder->lookupOrCreateWeak(kObjectId1, make, &cookie2);
     EXPECT_EQ(&cookie2, sp<UniqueBinder>::cast(lookedUpBinder)->cookie);
     EXPECT_FALSE(deleted2);
+}
+
+TEST(Binder, GetFunctionName) {
+    auto binder = sp<BBinder>::make();
+
+    const char* const kFunctionNames[] = {"foo", "bar"};
+    alignas(16) TransactionCodeData data;
+    data.names = kFunctionNames;
+    data.count = 2;
+    binder->setTransactionCodeMap(&data);
+
+    EXPECT_EQ("foo", binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION));
+    EXPECT_EQ("bar", binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION + 1));
+}
+
+TEST(Binder, GetFunctionNameNotFound) {
+    auto binder = sp<BBinder>::make();
+    std::string expected = "#" + std::to_string(IBinder::FIRST_CALL_TRANSACTION);
+    EXPECT_EQ(expected, binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION));
+}
+
+TEST(Binder, GetFunctionNameInvalidCode) {
+    auto binder = sp<BBinder>::make();
+    const char* const kFunctionNames[] = {"foo", "bar"};
+    alignas(16) TransactionCodeData data;
+    data.names = kFunctionNames;
+    data.count = 2;
+    binder->setTransactionCodeMap(&data);
+
+    std::string expectedBefore = "#" + std::to_string(IBinder::FIRST_CALL_TRANSACTION - 1);
+    EXPECT_EQ(expectedBefore, binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION - 1));
+    std::string expectedAfter = "#" + std::to_string(IBinder::FIRST_CALL_TRANSACTION + 2);
+    EXPECT_EQ(expectedAfter, binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION + 2));
+    std::string expectedZero = "#0";
+    EXPECT_EQ(expectedZero, binder->getFunctionName(0));
+    std::string expectedNegative = "#" + std::to_string(static_cast<size_t>(-1));
+    EXPECT_EQ(expectedNegative, binder->getFunctionName(-1));
+}
+
+TEST(Binder, GetFunctionNameNullMap) {
+    auto binder = sp<BBinder>::make();
+    EXPECT_DEATH(binder->setTransactionCodeMap(nullptr), "TransactionCodeData pointer is null!");
+}
+
+TEST(Binder, SetTransactionCodeMapTwice) {
+    auto binder = sp<BBinder>::make();
+
+    const char* const kFunctionNames1[] = {"foo", "bar"};
+    alignas(16) TransactionCodeData data1;
+    data1.names = kFunctionNames1;
+    data1.count = 2;
+    binder->setTransactionCodeMap(&data1);
+
+    const char* const kFunctionNames2[] = {"baz", "qux"};
+    alignas(16) TransactionCodeData data2;
+    data2.names = kFunctionNames2;
+    data2.count = 2;
+    EXPECT_DEATH(binder->setTransactionCodeMap(&data2), "TransactionCodeData already set!");
+}
+
+TEST(Binder, GetFunctionNameMalformed) {
+    auto binder = sp<BBinder>::make();
+    alignas(16) TransactionCodeData malformedData;
+    malformedData.names = nullptr;
+    malformedData.count = 2;
+    binder->setTransactionCodeMap(&malformedData);
+    std::string expected = "#" + std::to_string(IBinder::FIRST_CALL_TRANSACTION);
+    EXPECT_EQ(expected, binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION));
+}
+
+class BinderTest : public ::testing::Test {
+public:
+    void setStability(const sp<BBinder>& binder, int16_t level) {
+        binder->getPrivateAccessor().setStability(level);
+    }
+
+    int16_t getStability(const sp<BBinder>& binder) {
+        return binder->getPrivateAccessor().getStability();
+    }
+};
+
+TEST_F(BinderTest, PackedDataFieldsInitialState) {
+    auto binder = sp<BBinder>::make();
+    EXPECT_EQ(0, getStability(binder)); // Corresponds to STABILITY_UNDECLARED
+    EXPECT_FALSE(binder->wasParceled());
+}
+
+TEST_F(BinderTest, PackedDataFieldsStability) {
+    auto binder = sp<BBinder>::make();
+    setStability(binder, 3); // Corresponds to STABILITY_VENDOR
+    EXPECT_EQ(3, getStability(binder));
+    setStability(binder, 12); // Corresponds to STABILITY_SYSTEM
+    EXPECT_EQ(12, getStability(binder));
+    setStability(binder, 0);
+    EXPECT_EQ(0, getStability(binder));
+    setStability(binder, -1);
+    EXPECT_EQ(0, getStability(binder));
+}
+
+TEST_F(BinderTest, PackedDataFieldsParceled) {
+    auto binder = sp<BBinder>::make();
+    binder->setParceled();
+    EXPECT_TRUE(binder->wasParceled());
+}
+
+TEST_F(BinderTest, PackedDataFieldsAllAtOnce) {
+    auto binder = sp<BBinder>::make();
+
+    // Set all packed fields
+    setStability(binder, 12); // Corresponds to STABILITY_SYSTEM
+    binder->setParceled();
+    const char* const kFunctionNames[] = {"foo"};
+    alignas(16) TransactionCodeData data;
+    data.names = kFunctionNames;
+    data.count = 1;
+    binder->setTransactionCodeMap(&data);
+
+    // Verify all fields
+    EXPECT_EQ(12, getStability(binder));
+    EXPECT_TRUE(binder->wasParceled());
+    EXPECT_EQ("foo", binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION));
+
+    // Change stability and verify others are unaffected
+    setStability(binder, 3); // Corresponds to STABILITY_VENDOR
+    EXPECT_EQ(3, getStability(binder));
+    EXPECT_TRUE(binder->wasParceled());
+    EXPECT_EQ("foo", binder->getFunctionName(IBinder::FIRST_CALL_TRANSACTION));
 }

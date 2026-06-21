@@ -23,7 +23,6 @@
 #if defined(__ANDROID__)
 #include <gui/SurfaceComposerClient.h>
 #endif
-#include <input/InputFlags.h>
 #include <input/Keyboard.h>
 #include <input/PrintTools.h>
 #include <unordered_set>
@@ -297,8 +296,7 @@ void PointerChoreographer::processPointerDeviceMotionEventLocked(NotifyMotionArg
     const float deltaY = newArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y);
     const vec2 filteredDelta = filterPointerMotionForAccessibilityLocked(pc, vec2{deltaX, deltaY});
     vec2 unconsumedDelta = pc.move(filteredDelta.x, filteredDelta.y);
-    if (InputFlags::connectedDisplaysCursorEnabled() &&
-        (std::abs(unconsumedDelta.x) > 0 || std::abs(unconsumedDelta.y) > 0)) {
+    if (std::abs(unconsumedDelta.x) > 0 || std::abs(unconsumedDelta.y) > 0) {
         handleUnconsumedDeltaLocked(pc, unconsumedDelta);
         // pointer may have moved to a different viewport
         newArgs.displayId = pc.getDisplayId();
@@ -429,7 +427,7 @@ void PointerChoreographer::processTouchscreenAndStylusEventLocked(const NotifyMo
         it->second->fade(PointerControllerInterface::Transition::GRADUAL);
     }
 
-    if (!mShowTouchesEnabled) {
+    if (!shouldShowTouchesOnDisplay(args.displayId)) {
         return;
     }
 
@@ -498,8 +496,9 @@ void PointerChoreographer::processStylusHoverEventLocked(const NotifyMotionArgs&
         // TODO(b/315815559): Do not fade and reset the icon if the hover exit will be followed
         //   immediately by a DOWN event.
         pc.fade(PointerControllerInterface::Transition::IMMEDIATE);
-        pc.updatePointerIcon(mShowTouchesEnabled ? PointerIconStyle::TYPE_SPOT_HOVER
-                                                 : PointerIconStyle::TYPE_NOT_SPECIFIED);
+        pc.updatePointerIcon(shouldShowTouchesOnDisplay(args.displayId)
+                                     ? PointerIconStyle::TYPE_SPOT_HOVER
+                                     : PointerIconStyle::TYPE_NOT_SPECIFIED);
     } else if (canUnfadeOnDisplay(args.displayId)) {
         pc.unfade(PointerControllerInterface::Transition::IMMEDIATE);
     }
@@ -619,6 +618,10 @@ void PointerChoreographer::dump(std::string& dump) {
     dump += "PointerChoreographer:\n";
     dump += StringPrintf(INDENT "Show Touches Enabled: %s\n",
                          mShowTouchesEnabled ? "true" : "false");
+    dump += INDENT "DisplaysWithShowTouchesForceEnabled: " +
+            dumpContainer(mDisplaysWithShowTouchesForceEnabled,
+                          [](const auto& displayId) { return displayId.toString(); });
+    dump += "\n";
     dump += StringPrintf(INDENT "Stylus PointerIcon Enabled: %s\n",
                          mStylusPointerIconEnabled ? "true" : "false");
     dump += StringPrintf(INDENT "Accessibility Pointer Motion Filter Enabled: %s\n",
@@ -661,13 +664,6 @@ const DisplayViewport* PointerChoreographer::findViewportByIdLocked(
 
 ui::LogicalDisplayId PointerChoreographer::getTargetMouseDisplayLocked(
         ui::LogicalDisplayId associatedDisplayId) const {
-    if (!InputFlags::connectedDisplaysCursorAndAssociatedDisplayCursorBugfixEnabled()) {
-        if (associatedDisplayId.isValid()) {
-            return associatedDisplayId;
-        }
-        return mCurrentMouseDisplayId.isValid() ? mCurrentMouseDisplayId
-                                                : ui::LogicalDisplayId::DEFAULT;
-    }
     // Associated display is not included in the topology, return this associated display.
     if (associatedDisplayId.isValid() &&
         mTopology.graph.find(associatedDisplayId) == mTopology.graph.end()) {
@@ -704,6 +700,17 @@ InputDeviceInfo* PointerChoreographer::findInputDeviceLocked(DeviceId deviceId) 
 
 bool PointerChoreographer::canUnfadeOnDisplay(ui::LogicalDisplayId displayId) {
     return mDisplaysWithPointersHidden.find(displayId) == mDisplaysWithPointersHidden.end();
+}
+
+bool PointerChoreographer::shouldShowTouchesOnDisplay(ui::LogicalDisplayId displayId) {
+    if (mShowTouchesEnabled) {
+        return true;
+    }
+    if (displayId == ui::LogicalDisplayId::INVALID) {
+        return false;
+    }
+    return mDisplaysWithShowTouchesForceEnabled.find(displayId) !=
+            mDisplaysWithShowTouchesForceEnabled.end();
 }
 
 std::mutex& PointerChoreographer::getLock() const {
@@ -745,7 +752,8 @@ PointerChoreographer::PointerDisplayChange PointerChoreographer::updatePointerCo
                 mousePointerIt->second->unfade(PointerControllerInterface::Transition::IMMEDIATE);
             }
         }
-        if (isFromSource(sources, AINPUT_SOURCE_TOUCHSCREEN) && mShowTouchesEnabled &&
+        if (isFromSource(sources, AINPUT_SOURCE_TOUCHSCREEN) &&
+            shouldShowTouchesOnDisplay(info.getAssociatedDisplayId()) &&
             info.getAssociatedDisplayId().isValid()) {
             touchDevicesToKeep.insert(info.getId());
         }
@@ -803,23 +811,6 @@ PointerChoreographer::calculatePointerDisplayChangeToNotify() {
     }
     mNotifiedPointerDisplayId = displayIdToNotify;
     return {{displayIdToNotify, cursorPosition}};
-}
-
-void PointerChoreographer::setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) {
-    if (InputFlags::connectedDisplaysCursorEnabled()) {
-        // In connected displays scenario, default mouse display will only be updated from topology.
-        return;
-    }
-    PointerDisplayChange pointerDisplayChange;
-
-    { // acquire lock
-        std::scoped_lock _l(getLock());
-
-        mCurrentMouseDisplayId = displayId;
-        pointerDisplayChange = updatePointerControllersLocked();
-    } // release lock
-
-    notifyPointerDisplayChange(pointerDisplayChange, mPolicy);
 }
 
 void PointerChoreographer::setDisplayViewports(const std::vector<DisplayViewport>& viewports) {
@@ -895,6 +886,27 @@ void PointerChoreographer::setShowTouchesEnabled(bool enabled) {
     notifyPointerDisplayChange(pointerDisplayChange, mPolicy);
 }
 
+void PointerChoreographer::setForceShowTouchesOnDisplay(ui::LogicalDisplayId displayId,
+                                                        bool enabled) {
+    PointerDisplayChange pointerDisplayChange;
+
+    { // acquire lock
+        std::scoped_lock _l(getLock());
+        bool modified;
+        if (enabled) {
+            auto [_, added] = mDisplaysWithShowTouchesForceEnabled.emplace(displayId);
+            modified = added;
+        } else {
+            modified = mDisplaysWithShowTouchesForceEnabled.erase(displayId);
+        }
+
+        pointerDisplayChange =
+                !mShowTouchesEnabled && modified ? updatePointerControllersLocked() : std::nullopt;
+    } // release lock
+
+    notifyPointerDisplayChange(pointerDisplayChange, mPolicy);
+}
+
 void PointerChoreographer::setStylusPointerIconEnabled(bool enabled) {
     PointerDisplayChange pointerDisplayChange;
 
@@ -936,7 +948,7 @@ bool PointerChoreographer::setPointerIcon(
     if (isFromSource(sources, AINPUT_SOURCE_STYLUS)) {
         auto it = mStylusPointersByDevice.find(deviceId);
         if (it != mStylusPointersByDevice.end()) {
-            if (mShowTouchesEnabled) {
+            if (shouldShowTouchesOnDisplay(displayId)) {
                 // If an app doesn't override the icon for the hovering stylus, show the hover icon.
                 auto* style = std::get_if<PointerIconStyle>(&icon);
                 if (style != nullptr && *style == PointerIconStyle::TYPE_NOT_SPECIFIED) {

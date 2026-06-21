@@ -27,12 +27,15 @@
 #include <ui/GraphicBuffer.h>
 #include <utils/Errors.h>
 
+#include "Utils/Dumper.h"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <thread>
 
 namespace android {
@@ -58,10 +61,18 @@ class VirtualDisplayThreadManager;
  */
 class VirtualDisplayThread : public std::enable_shared_from_this<VirtualDisplayThread> {
 public:
-    using Task = std::function<void()>;
+    static constexpr const char* kInternalContextName = "Internal";
+
+    struct Task {
+        std::function<void()> work;
+        std::string contextName;
+        std::string label;
+    };
 
     static std::shared_ptr<VirtualDisplayThread> create();
     void destroy();
+
+    void dump(utils::Dumper& dumper) const;
 
     /**
      * An RAII handle to a VirtualDisplayThread.
@@ -79,7 +90,8 @@ public:
         Client& operator=(Client&&) = delete;
 
         bool isFrozen() const;
-        void submitWork(Task&& task);
+        void submitWork(const std::string& contextName, const std::string& label,
+                        std::function<void()>&& work);
 
     private:
         friend VirtualDisplayThreadManager;
@@ -100,7 +112,8 @@ private:
     static void vdThreadMain(std::shared_ptr<VirtualDisplayThread> self);
     bool vdThreadPollAndWork();
 
-    void submitWorkLocked(Task&& task);
+    void submitWorkLocked(const std::string& contextName, const std::string& label,
+                          std::function<void()>&& work);
     void clearQueueLocked();
 
     std::thread mThread;
@@ -108,9 +121,12 @@ private:
     mutable std::mutex mWorkMutex;
     std::condition_variable mCondVar;
     std::atomic<State> mState = INITIALIZING;
-    std::queue<std::function<void()>> mWorkQueue;
+    std::queue<Task> mWorkQueue;
     bool mIsWorking = false;
+    std::string mCurrentTaskContextName;
+    std::string mCurrentTaskLabel;
     std::chrono::time_point<std::chrono::steady_clock> mLastWorkStartedTimeNs;
+    uint64_t mTotalTasksProcessed = 0;
 };
 
 } // namespace android

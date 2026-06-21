@@ -27,6 +27,7 @@
 #include <utils/Tokenizer.h>
 #include <utils/Unicode.h>
 #include <map>
+#include <unordered_map>
 
 // Maximum number of keys supported by KeyCharacterMaps
 #define MAX_KEYS 8192
@@ -128,7 +129,7 @@ public:
 
     /* Maps some Android key code to another Android key code. This mapping is applied after
      * scanCode and usageCodes are mapped to corresponding Android Keycode */
-    void setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping);
+    void setKeyRemapping(const std::unordered_map<int32_t, int32_t>& keyRemapping);
 
     /* Maps a scan code and usage code to a key code, in case this key map overrides
      * the mapping in some way. */
@@ -232,7 +233,8 @@ private:
     std::string mLoadFileName;
     bool mLayoutOverlayApplied = false;
 
-    std::map<int32_t /* fromAndroidKeyCode */, int32_t /* toAndroidKeyCode */> mKeyRemapping;
+    std::unordered_map<int32_t /* fromAndroidKeyCode */, int32_t /* toAndroidKeyCode */>
+            mKeyRemapping;
     std::map<int32_t /* fromScanCode */, int32_t /* toAndroidKeyCode */> mKeysByScanCode;
     std::map<int32_t /* fromHidUsageCode */, int32_t /* toAndroidKeyCode */> mKeysByUsageCode;
 

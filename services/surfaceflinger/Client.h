@@ -52,9 +52,14 @@ private:
 
     binder::Status mirrorSurface(const sp<IBinder>& mirrorFromHandle,
                                  const sp<IBinder>& stopAtHandle,
+                                 const sp<IBinder>& cropByHandle,
                                  gui::CreateSurfaceResult* outResult) override;
 
-    binder::Status mirrorDisplay(int64_t displayId, gui::CreateSurfaceResult* outResult) override;
+    binder::Status mirrorLayerStack(int64_t displayId,
+                                    gui::CreateSurfaceResult* outSurfaceResult) override;
+
+    binder::Status mirrorDisplay(int64_t displayId,
+                                 gui::CreateSurfaceResult* outSurfaceResult) override;
 
     binder::Status getSchedulingPolicy(gui::SchedulingPolicy* outPolicy) override;
 

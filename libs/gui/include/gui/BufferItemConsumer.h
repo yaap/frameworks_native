@@ -21,6 +21,8 @@
 #include <gui/BufferQueue.h>
 #include <gui/ConsumerBase.h>
 
+#include <functional>
+
 #define ANDROID_GRAPHICS_BUFFERITEMCONSUMER_JNI_ID "mBufferItemConsumer"
 
 namespace android {
@@ -38,9 +40,10 @@ class BufferItemConsumer: public ConsumerBase
 {
   public:
     typedef ConsumerBase::FrameAvailableListener FrameAvailableListener;
+    typedef BufferFreedCallback BufferFreedCallback;
 
     struct BufferFreedListener : public virtual RefBase {
-        virtual void onBufferFreed(const wp<GraphicBuffer>& graphicBuffer) = 0;
+        virtual void onBufferFreed(const sp<GraphicBuffer>& graphicBuffer) = 0;
     };
 
     enum { DEFAULT_MAX_BUFFERS = -1 };
@@ -65,6 +68,24 @@ class BufferItemConsumer: public ConsumerBase
 
     ~BufferItemConsumer() override;
 
+    // See ConsumerBase::abandon
+    virtual void abandon() override;
+    void abandon(BufferFreedCallback onBufferFreed);
+
+    // See ConsumerBase::setMaxAcquiredBufferCount
+    virtual status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers) override;
+    status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers, BufferFreedCallback onBufferFreed);
+
+    // See ConsumerBase::discardFreeBuffers
+    virtual status_t discardFreeBuffers() override;
+    status_t discardFreeBuffers(BufferFreedCallback onBufferFreed);
+
+    // See ConsumerBase::detachBuffer
+    virtual status_t detachBuffer(int slot) override __attribute((
+            deprecated("Please use the GraphicBuffer variant--slots are deprecated.")));
+    virtual status_t detachBuffer(const sp<GraphicBuffer>& buffer) override;
+    status_t detachBuffer(const sp<GraphicBuffer>& buffer, BufferFreedCallback onBufferFreed);
+
     // setBufferFreedListener sets the listener object that will be notified
     // when an old buffer is being freed.
     void setBufferFreedListener(const wp<BufferFreedListener>& listener);
@@ -81,8 +102,11 @@ class BufferItemConsumer: public ConsumerBase
     //
     // If waitForFence is true, and the acquired BufferItem has a valid fence object,
     // acquireBuffer will wait on the fence with no timeout before returning.
-    status_t acquireBuffer(BufferItem* item, nsecs_t presentWhen,
-            bool waitForFence = true);
+    status_t acquireBuffer(BufferItem* item, nsecs_t presentWhen, bool waitForFence = true,
+                           std::optional<BufferFreedCallback> onBufferFreed = std::nullopt);
+
+    status_t acquireBuffer(BufferItem* item, nsecs_t presentWhen, uint64_t maxFrameNumber,
+                           std::optional<BufferFreedCallback> onBufferFreed = std::nullopt);
 
     // Transfer ownership of a buffer to the BufferQueue. On NO_ERROR, the buffer
     // is considered as if it were acquired. Buffer must not be null.
@@ -98,11 +122,15 @@ class BufferItemConsumer: public ConsumerBase
     // acquired by acquireBuffer. Once a BufferItem is released, the caller must
     // not access any members of the BufferItem, and should immediately remove
     // all of its references to the BufferItem itself.
-    status_t releaseBuffer(const BufferItem &item,
-            const sp<Fence>& releaseFence = Fence::NO_FENCE);
+    status_t releaseBuffer(const BufferItem& item, const sp<Fence>& releaseFence = Fence::NO_FENCE,
+                           std::optional<BufferFreedCallback> onBufferFreed = std::nullopt);
 
     status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
-                           const sp<Fence>& releaseFence = Fence::NO_FENCE);
+                           const sp<Fence>& releaseFence = Fence::NO_FENCE,
+                           std::optional<BufferFreedCallback> onBufferFreed = std::nullopt);
+
+    // From ConsumerBase's IConsumerListener:
+    virtual void onBuffersReleased() override;
 
     void onFirstRef() override;
 
@@ -124,9 +152,10 @@ private:
     void initializeConsumer();
 
     status_t releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
-                                     const sp<Fence>& releaseFence);
+                                     const sp<Fence>& releaseFence,
+                                     BufferFreedCallback onBufferFreed);
 
-    void freeBufferLocked(int slotIndex) override;
+    wp<BufferFreedListener> getBufferFreedListener();
 
     uint64_t mConsumerUsage;
     int mBufferCount;

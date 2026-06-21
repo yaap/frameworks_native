@@ -62,7 +62,8 @@ typedef android::sp<android::IGraphicBufferProducer> MediaParcelableSurfaceType;
 
 namespace mediaflagtools {
 sp<MediaSurfaceType> nativeWindowToSurfaceType(ANativeWindow* anw);
-sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp);
+sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp,
+                                       bool controlledByApp = false);
 sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<MediaSurfaceType>& mst);
 sp<SurfaceType> mediaSurfaceToCameraSurfaceType(const sp<MediaSurfaceType>& mst,
                                                 bool controlledByApp = false);

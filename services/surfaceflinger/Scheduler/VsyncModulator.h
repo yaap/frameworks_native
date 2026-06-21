@@ -89,7 +89,7 @@ private:
     enum class VsyncConfigType { Early, EarlyGpu, Late };
 
     VsyncConfigType getNextVsyncConfigType() const REQUIRES(mMutex);
-    const VsyncConfig& getNextVsyncConfig() const REQUIRES(mMutex);
+    std::pair<const VsyncConfig&, VsyncConfigType> getNextVsyncConfig() const REQUIRES(mMutex);
     [[nodiscard]] VsyncConfig updateVsyncConfig() EXCLUDES(mMutex);
     [[nodiscard]] VsyncConfig updateVsyncConfigLocked() REQUIRES(mMutex);
 

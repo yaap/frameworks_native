@@ -1,94 +1,94 @@
 LIBBINDER_NDK { # introduced=29
   global:
-    AIBinder_associateClass;
-    AIBinder_Class_define;
-    AIBinder_Class_setOnDump;
-    AIBinder_DeathRecipient_delete;
-    AIBinder_DeathRecipient_new;
-    AIBinder_debugGetRefCount;
-    AIBinder_decStrong;
-    AIBinder_dump;
+    AIBinder_associateClass; # artless
+    AIBinder_Class_define; # artless
+    AIBinder_Class_setOnDump; # artless
+    AIBinder_DeathRecipient_delete; # artless
+    AIBinder_DeathRecipient_new; # artless
+    AIBinder_debugGetRefCount; # artless
+    AIBinder_decStrong; # artless
+    AIBinder_dump; # artless
     AIBinder_fromJavaBinder;
-    AIBinder_getCallingPid;
-    AIBinder_getCallingUid;
-    AIBinder_getClass;
-    AIBinder_getUserData;
-    AIBinder_incStrong;
-    AIBinder_isAlive;
-    AIBinder_isRemote;
-    AIBinder_linkToDeath;
-    AIBinder_new;
-    AIBinder_ping;
-    AIBinder_prepareTransaction;
+    AIBinder_getCallingPid; # artless
+    AIBinder_getCallingUid; # artless
+    AIBinder_getClass; # artless
+    AIBinder_getUserData; # artless
+    AIBinder_incStrong; # artless
+    AIBinder_isAlive; # artless
+    AIBinder_isRemote; # artless
+    AIBinder_linkToDeath; # artless
+    AIBinder_new; # artless
+    AIBinder_ping; # artless
+    AIBinder_prepareTransaction; # artless
     AIBinder_toJavaBinder;
-    AIBinder_transact;
-    AIBinder_unlinkToDeath;
-    AIBinder_Weak_delete;
-    AIBinder_Weak_new;
-    AIBinder_Weak_promote;
-    AParcel_delete;
-    AParcel_getDataPosition;
-    AParcel_readBool;
-    AParcel_readBoolArray;
-    AParcel_readByte;
-    AParcel_readByteArray;
-    AParcel_readChar;
-    AParcel_readCharArray;
-    AParcel_readDouble;
-    AParcel_readDoubleArray;
-    AParcel_readFloat;
-    AParcel_readFloatArray;
-    AParcel_readInt32;
-    AParcel_readInt32Array;
-    AParcel_readInt64;
-    AParcel_readInt64Array;
-    AParcel_readParcelableArray;
-    AParcel_readParcelFileDescriptor;
-    AParcel_readStatusHeader;
-    AParcel_readString;
-    AParcel_readStringArray;
-    AParcel_readStrongBinder;
-    AParcel_readUint32;
-    AParcel_readUint32Array;
-    AParcel_readUint64;
-    AParcel_readUint64Array;
-    AParcel_setDataPosition;
-    AParcel_writeBool;
-    AParcel_writeBoolArray;
-    AParcel_writeByte;
-    AParcel_writeByteArray;
-    AParcel_writeChar;
-    AParcel_writeCharArray;
-    AParcel_writeDouble;
-    AParcel_writeDoubleArray;
-    AParcel_writeFloat;
-    AParcel_writeFloatArray;
-    AParcel_writeInt32;
-    AParcel_writeInt32Array;
-    AParcel_writeInt64;
-    AParcel_writeInt64Array;
-    AParcel_writeParcelableArray;
-    AParcel_writeParcelFileDescriptor;
-    AParcel_writeStatusHeader;
-    AParcel_writeString;
-    AParcel_writeStringArray;
-    AParcel_writeStrongBinder;
-    AParcel_writeUint32;
-    AParcel_writeUint32Array;
-    AParcel_writeUint64;
-    AParcel_writeUint64Array;
-    AStatus_delete;
-    AStatus_fromExceptionCode;
-    AStatus_fromExceptionCodeWithMessage;
-    AStatus_fromServiceSpecificError;
-    AStatus_fromServiceSpecificErrorWithMessage;
-    AStatus_fromStatus;
-    AStatus_getExceptionCode;
-    AStatus_getMessage;
-    AStatus_getServiceSpecificError;
-    AStatus_getStatus;
-    AStatus_isOk;
-    AStatus_newOk;
+    AIBinder_transact; # artless
+    AIBinder_unlinkToDeath; # artless
+    AIBinder_Weak_delete; # artless
+    AIBinder_Weak_new; # artless
+    AIBinder_Weak_promote; # artless
+    AParcel_delete; # artless
+    AParcel_getDataPosition; # artless
+    AParcel_readBool; # artless
+    AParcel_readBoolArray; # artless
+    AParcel_readByte; # artless
+    AParcel_readByteArray; # artless
+    AParcel_readChar; # artless
+    AParcel_readCharArray; # artless
+    AParcel_readDouble; # artless
+    AParcel_readDoubleArray; # artless
+    AParcel_readFloat; # artless
+    AParcel_readFloatArray; # artless
+    AParcel_readInt32; # artless
+    AParcel_readInt32Array; # artless
+    AParcel_readInt64; # artless
+    AParcel_readInt64Array; # artless
+    AParcel_readParcelableArray; # artless
+    AParcel_readParcelFileDescriptor; # artless
+    AParcel_readStatusHeader; # artless
+    AParcel_readString; # artless
+    AParcel_readStringArray; # artless
+    AParcel_readStrongBinder; # artless
+    AParcel_readUint32; # artless
+    AParcel_readUint32Array; # artless
+    AParcel_readUint64; # artless
+    AParcel_readUint64Array; # artless
+    AParcel_setDataPosition; # artless
+    AParcel_writeBool; # artless
+    AParcel_writeBoolArray; # artless
+    AParcel_writeByte; # artless
+    AParcel_writeByteArray; # artless
+    AParcel_writeChar; # artless
+    AParcel_writeCharArray; # artless
+    AParcel_writeDouble; # artless
+    AParcel_writeDoubleArray; # artless
+    AParcel_writeFloat; # artless
+    AParcel_writeFloatArray; # artless
+    AParcel_writeInt32; # artless
+    AParcel_writeInt32Array; # artless
+    AParcel_writeInt64; # artless
+    AParcel_writeInt64Array; # artless
+    AParcel_writeParcelableArray; # artless
+    AParcel_writeParcelFileDescriptor; # artless
+    AParcel_writeStatusHeader; # artless
+    AParcel_writeString; # artless
+    AParcel_writeStringArray; # artless
+    AParcel_writeStrongBinder; # artless
+    AParcel_writeUint32; # artless
+    AParcel_writeUint32Array; # artless
+    AParcel_writeUint64; # artless
+    AParcel_writeUint64Array; # artless
+    AStatus_delete; # artless
+    AStatus_fromExceptionCode; # artless
+    AStatus_fromExceptionCodeWithMessage; # artless
+    AStatus_fromServiceSpecificError; # artless
+    AStatus_fromServiceSpecificErrorWithMessage; # artless
+    AStatus_fromStatus; # artless
+    AStatus_getExceptionCode; # artless
+    AStatus_getMessage; # artless
+    AStatus_getServiceSpecificError; # artless
+    AStatus_getStatus; # artless
+    AStatus_isOk; # artless
+    AStatus_newOk; # artless
     ABinderProcess_joinThreadPool; # systemapi llndk
     ABinderProcess_setThreadPoolMaxThreadCount; # systemapi llndk
     ABinderProcess_startThreadPool; # systemapi llndk
@@ -99,10 +99,10 @@ LIBBINDER_NDK { # introduced=29
 
 LIBBINDER_NDK30 { # introduced=30
   global:
-    AIBinder_getExtension;
-    AIBinder_setExtension;
-    AStatus_getDescription;
-    AStatus_deleteDescription;
+    AIBinder_getExtension; # artless
+    AIBinder_setExtension; # artless
+    AStatus_getDescription; # artless
+    AStatus_deleteDescription; # artless
     AParcel_fromJavaParcel;
 
     AIBinder_markSystemStability; # systemapi
@@ -131,25 +131,25 @@ LIBBINDER_NDK31 { # introduced=31
     AIBinder_forceDowngradeToSystemStability; # systemapi
     AIBinder_forceDowngradeToVendorStability; # llndk
 
-    AIBinder_Class_getDescriptor;
-    AIBinder_Weak_clone;
-    AIBinder_Weak_lt;
-    AIBinder_lt;
-    AParcel_appendFrom;
-    AParcel_create;
-    AParcel_getDataSize;
-    AParcel_reset;
+    AIBinder_Class_getDescriptor; # artless
+    AIBinder_Weak_clone; # artless
+    AIBinder_Weak_lt; # artless
+    AIBinder_lt; # artless
+    AParcel_appendFrom; # artless
+    AParcel_create; # artless
+    AParcel_getDataSize; # artless
+    AParcel_reset; # artless
 };
 
 LIBBINDER_NDK33 { # introduced=33
   global:
-    AIBinder_Class_disableInterfaceTokenHeader;
-    AIBinder_DeathRecipient_setOnUnlinked;
-    AIBinder_isHandlingTransaction;
+    AIBinder_Class_disableInterfaceTokenHeader; # artless
+    AIBinder_DeathRecipient_setOnUnlinked; # artless
+    AIBinder_isHandlingTransaction; # artless
     AIBinder_setInheritRt; # systemapi llndk
     AIBinder_setMinSchedulerPolicy; # systemapi llndk
-    AParcel_marshal;
-    AParcel_unmarshal;
+    AParcel_marshal; # artless
+    AParcel_unmarshal; # artless
 };
 
 LIBBINDER_NDK34 { # introduced=UpsideDownCake
@@ -163,69 +163,83 @@ LIBBINDER_NDK34 { # introduced=UpsideDownCake
 
 LIBBINDER_NDK35 { # introduced=VanillaIceCream
   global:
-    APersistableBundle_readFromParcel;
-    APersistableBundle_writeToParcel;
-    APersistableBundle_new;
-    APersistableBundle_dup;
-    APersistableBundle_delete;
-    APersistableBundle_isEqual;
-    APersistableBundle_size;
-    APersistableBundle_erase;
-    APersistableBundle_putBoolean;
-    APersistableBundle_putInt;
-    APersistableBundle_putLong;
-    APersistableBundle_putDouble;
-    APersistableBundle_putString;
-    APersistableBundle_putBooleanVector;
-    APersistableBundle_putIntVector;
-    APersistableBundle_putLongVector;
-    APersistableBundle_putDoubleVector;
-    APersistableBundle_putStringVector;
-    APersistableBundle_putPersistableBundle;
-    APersistableBundle_getBoolean;
-    APersistableBundle_getInt;
-    APersistableBundle_getLong;
-    APersistableBundle_getDouble;
-    APersistableBundle_getString;
-    APersistableBundle_getBooleanVector;
-    APersistableBundle_getIntVector;
-    APersistableBundle_getLongVector;
-    APersistableBundle_getDoubleVector;
-    APersistableBundle_getStringVector;
-    APersistableBundle_getPersistableBundle;
-    APersistableBundle_getBooleanKeys;
-    APersistableBundle_getIntKeys;
-    APersistableBundle_getLongKeys;
-    APersistableBundle_getDoubleKeys;
-    APersistableBundle_getStringKeys;
-    APersistableBundle_getBooleanVectorKeys;
-    APersistableBundle_getIntVectorKeys;
-    APersistableBundle_getLongVectorKeys;
-    APersistableBundle_getDoubleVectorKeys;
-    APersistableBundle_getStringVectorKeys;
-    APersistableBundle_getPersistableBundleKeys;
+    APersistableBundle_readFromParcel; # artless
+    APersistableBundle_writeToParcel; # artless
+    APersistableBundle_new; # artless
+    APersistableBundle_dup; # artless
+    APersistableBundle_delete; # artless
+    APersistableBundle_isEqual; # artless
+    APersistableBundle_size; # artless
+    APersistableBundle_erase; # artless
+    APersistableBundle_putBoolean; # artless
+    APersistableBundle_putInt; # artless
+    APersistableBundle_putLong; # artless
+    APersistableBundle_putDouble; # artless
+    APersistableBundle_putString; # artless
+    APersistableBundle_putBooleanVector; # artless
+    APersistableBundle_putIntVector; # artless
+    APersistableBundle_putLongVector; # artless
+    APersistableBundle_putDoubleVector; # artless
+    APersistableBundle_putStringVector; # artless
+    APersistableBundle_putPersistableBundle; # artless
+    APersistableBundle_getBoolean; # artless
+    APersistableBundle_getInt; # artless
+    APersistableBundle_getLong; # artless
+    APersistableBundle_getDouble; # artless
+    APersistableBundle_getString; # artless
+    APersistableBundle_getBooleanVector; # artless
+    APersistableBundle_getIntVector; # artless
+    APersistableBundle_getLongVector; # artless
+    APersistableBundle_getDoubleVector; # artless
+    APersistableBundle_getStringVector; # artless
+    APersistableBundle_getPersistableBundle; # artless
+    APersistableBundle_getBooleanKeys; # artless
+    APersistableBundle_getIntKeys; # artless
+    APersistableBundle_getLongKeys; # artless
+    APersistableBundle_getDoubleKeys; # artless
+    APersistableBundle_getStringKeys; # artless
+    APersistableBundle_getBooleanVectorKeys; # artless
+    APersistableBundle_getIntVectorKeys; # artless
+    APersistableBundle_getLongVectorKeys; # artless
+    APersistableBundle_getDoubleVectorKeys; # artless
+    APersistableBundle_getStringVectorKeys; # artless
+    APersistableBundle_getPersistableBundleKeys; # artless
     AServiceManager_openDeclaredPassthroughHal; # systemapi llndk
 };
 
 LIBBINDER_NDK36 { # introduced=36
   global:
-    AIBinder_Class_setTransactionCodeToFunctionNameMap;
-    AIBinder_Class_getFunctionName;
-    ABinderRpc_registerAccessorProvider; # systemapi
-    ABinderRpc_unregisterAccessorProvider; # systemapi
-    ABinderRpc_Accessor_new; # systemapi
-    ABinderRpc_Accessor_delegateAccessor; #systemapi
-    ABinderRpc_Accessor_delete; # systemapi
-    ABinderRpc_Accessor_asBinder; # systemapi
-    ABinderRpc_Accessor_fromBinder; # systemapi
-    ABinderRpc_ConnectionInfo_new; # systemapi
-    ABinderRpc_ConnectionInfo_delete; # systemapi
+    AIBinder_Class_setTransactionCodeToFunctionNameMap; # artless
+    AIBinder_Class_getFunctionName; # artless
+    ABinderRpc_registerAccessorProvider; # systemapi llndk
+    ABinderRpc_unregisterAccessorProvider; # systemapi llndk
+    ABinderRpc_Accessor_new; # systemapi llndk
+    ABinderRpc_Accessor_delegateAccessor; #systemapi llndk
+    ABinderRpc_Accessor_delete; # systemapi llndk
+    ABinderRpc_Accessor_asBinder; # systemapi llndk
+    ABinderRpc_Accessor_fromBinder; # systemapi llndk
+    ABinderRpc_ConnectionInfo_new; # systemapi llndk
+    ABinderRpc_ConnectionInfo_delete; # systemapi llndk
 };
 
 LIBBINDER_NDK37 { # introduced=37
   global:
+    ABinderProcess_disableBackgroundScheduling; # systemapi llndk
     AServiceManager_checkServiceAccess; # systemapi llndk
     AIBinder_setMinRpcThreads; # systemapi
+    AServiceManager_registerLazyServiceWithFlags; # systemapi llndk
+    AIBinder_FrozenStateChangeCallback_new;
+    AIBinder_FrozenStateChangeCallback_delete;
+    AIBinder_addFrozenStateChangeCallback;
+    AIBinder_removeFrozenStateChangeCallback;
+    AIBinder_requiresVintfDeclaration; # systemapi llndk
+    AIBinder_isVendorStable; # systemapi llndk
+    AIBinder_isSystemStable; # systemapi llndk
+    APersistableBundle_putByteVector;
+    APersistableBundle_getByteVector;
+    APersistableBundle_getByteVectorKeys;
+    AParcel_getDataCapacity;
+    AParcel_setDataCapacity;
 };
 
 LIBBINDER_NDK_PLATFORM {
@@ -235,7 +249,6 @@ LIBBINDER_NDK_PLATFORM {
         AIBinder_fromPlatformBinder*;
         AIBinder_toPlatformBinder*;
         AParcel_viewPlatformParcel*;
-        ABinderProcess_disableBackgroundScheduling;
     };
   local:
     *;

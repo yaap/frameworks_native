@@ -30,6 +30,7 @@
 #include <utils/RefBase.h>
 #include <utils/Looper.h>
 #include <utils/String8.h>
+#include <utils/SystemClock.h>
 
 #include <binder/BinderService.h>
 
@@ -50,9 +51,9 @@ class SensorService::SensorEventConnection:
     friend class SensorService;
 
 public:
-    SensorEventConnection(const sp<SensorService>& service, uid_t uid, String8 packageName,
-                          bool isDataInjectionMode, const String16& opPackageName,
-                          const String16& attributionTag);
+    SensorEventConnection(const sp<SensorService>& service, uid_t uid, pid_t pid,
+                          String8 packageName, bool isDataInjectionMode,
+                          const String16& opPackageName, const String16& attributionTag);
 
     status_t sendEvents(sensors_event_t const* buffer, size_t count, sensors_event_t* scratch,
                         wp<const SensorEventConnection> const * mapFlushEventsToConnections = nullptr);
@@ -68,11 +69,16 @@ public:
     bool needsWakeLock();
     void resetWakeLockRefCount();
     String8 getPackageName() const;
+    const String16& getOpPackageName() const { return mOpPackageName; }
 
     uid_t getUid() const { return mUid; }
+    pid_t getPid() const { return mPid; }
     // cap/uncap existing connection depending on the state of the mic toggle.
     void onMicSensorAccessChanged(bool isMicToggleOn);
+    void onSensorAccessChanged(bool hasAccess);
     userid_t getUserId() const { return mUserId; }
+    void getSensorDurationStats(int32_t handle, int64_t* totalDurationNs,
+                                int64_t* activeDurationNs);
 
 private:
     virtual ~SensorEventConnection();
@@ -148,7 +154,8 @@ private:
     void uncapRates();
     sp<SensorService> const mService;
     sp<BitTube> mChannel;
-    uid_t mUid;
+    const uid_t mUid;
+    const pid_t mPid;
     mutable Mutex mConnectionLock;
     // Number of events from wake up sensors which are still pending and haven't been delivered to
     // the corresponding application. It is incremented by one unit for each write to the socket.
@@ -165,7 +172,38 @@ private:
     bool mDead;
 
     bool mDataInjectionMode;
-    struct FlushInfo {
+    struct SensorConnectionRecord {
+        struct UsageStats {
+            // Time (elapsedRealtimeNano) when the sensor was enabled for this connection.
+            nsecs_t mStartTime;
+            // Wall clock time (seconds since epoch) when the sensor was enabled.
+            time_t mRegistrationTime;
+            // Sum of durations while the UID was in an active state.
+            nsecs_t mTotalActiveTime;
+            // Start time of the current (or most recent) active period.
+            nsecs_t mLastActiveSnapshot;
+            // True if the UID is currently in an active state for this sensor.
+            bool mIsActive;
+
+            UsageStats() : mStartTime(0), mRegistrationTime(0), mTotalActiveTime(0),
+                           mLastActiveSnapshot(0), mIsActive(false) {}
+
+            UsageStats(nsecs_t startTime, time_t registrationTime, bool isActive)
+                : mStartTime(startTime), mRegistrationTime(registrationTime),
+                  mTotalActiveTime(0), mLastActiveSnapshot(isActive ? startTime : 0),
+                  mIsActive(isActive) {}
+
+            // Returns the total duration and the active duration in nanoseconds since registration.
+            void getDuration(int64_t* totalNs, int64_t* activeNs) const {
+                nsecs_t now = elapsedRealtimeNano();
+                *totalNs = now - mStartTime;
+                *activeNs = mTotalActiveTime;
+                if (mIsActive) {
+                    *activeNs += now - mLastActiveSnapshot;
+                }
+            }
+        };
+
         // The number of flush complete events dropped for this sensor is stored here.  They are
         // sent separately before the next batch of events.
         int mPendingFlushEventsToSend;
@@ -174,10 +212,14 @@ private:
         // the events for the sensor are sent on that *connection*.
         bool mFirstFlushPending;
 
-        FlushInfo() : mPendingFlushEventsToSend(0), mFirstFlushPending(false) {}
+        UsageStats mStats;
+
+        SensorConnectionRecord() : mPendingFlushEventsToSend(0), mFirstFlushPending(false) {}
+        SensorConnectionRecord(const UsageStats& stats)
+            : mPendingFlushEventsToSend(0), mFirstFlushPending(false), mStats(stats) {}
     };
     // protected by SensorService::mLock. Key for this map is the sensor handle.
-    std::unordered_map<int32_t, FlushInfo> mSensorInfo;
+    std::unordered_map<int32_t, SensorConnectionRecord> mSensorInfo;
 
     sensors_event_t *mEventCache;
     int mCacheSize, mMaxCacheSize;

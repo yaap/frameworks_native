@@ -34,13 +34,16 @@ use ffi::{
     AHardwareBuffer_readFromParcel, AHardwareBuffer_writeToParcel, ARect,
 };
 use std::fmt::{self, Debug, Formatter};
-use std::mem::{forget, ManuallyDrop};
+use std::mem::{forget, size_of, ManuallyDrop};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::raw::c_int;
 use std::ptr::{self, null_mut, NonNull};
 use std::{ffi::c_void, rc::Rc};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Ref};
 
 /// Wrapper around a C `AHardwareBuffer_Desc`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Immutable, IntoBytes, FromBytes, KnownLayout)]
+#[repr(transparent)]
 pub struct HardwareBufferDescription(AHardwareBuffer_Desc);
 
 impl HardwareBufferDescription {
@@ -109,6 +112,14 @@ impl Default for HardwareBufferDescription {
             rfu1: 0,
         })
     }
+}
+
+/// The marshalled representation of a `HardwareBuffer`.
+pub struct AhbInfo {
+    /// The file descriptors associated with the buffer.
+    pub fds: Vec<OwnedFd>,
+    /// The data associated with the buffer's description.
+    pub data: Vec<u8>,
 }
 
 /// Wrapper around an opaque C `AHardwareBuffer`.
@@ -459,6 +470,63 @@ impl HardwareBuffer {
         };
         status_result(status)?;
         Ok(fence)
+    }
+}
+
+impl TryFrom<HardwareBuffer> for AhbInfo {
+    type Error = StatusCode;
+
+    /// Marshals the `HardwareBuffer` into an `AhbInfo`.
+    ///
+    /// The returned data can be used to reconstruct the `HardwareBuffer`, potentially in another
+    /// process. The serialization format is not stable, and shouldn't be used across APEXes.
+    fn try_from(buffer: HardwareBuffer) -> Result<Self, Self::Error> {
+        let description = buffer.description();
+        let handle = buffer.cloned_native_handle().ok_or(StatusCode::BAD_VALUE)?;
+
+        let desc_slice: &[u8] = description.as_bytes();
+        let ints_bytes: &[u8] = handle.ints().as_bytes();
+
+        // Data format: [[description bytes] [ints bytes]]
+        let mut data = Vec::with_capacity(desc_slice.len() + ints_bytes.len());
+        data.extend_from_slice(desc_slice);
+        data.extend_from_slice(ints_bytes);
+
+        // We take ownership of the file descriptors from the cloned handle.
+        let fds = handle.into_fds();
+
+        Ok(Self { fds, data })
+    }
+}
+
+impl TryFrom<AhbInfo> for HardwareBuffer {
+    type Error = StatusCode;
+
+    /// Unmarshals a `HardwareBuffer` from an `AhbInfo`.
+    ///
+    /// This function will consume the file descriptors in `AhbInfo`.
+    fn try_from(ahb_info: AhbInfo) -> Result<Self, Self::Error> {
+        let AhbInfo { fds, data } = ahb_info;
+
+        if data.len() < size_of::<AHardwareBuffer_Desc>() {
+            return Err(StatusCode::BAD_VALUE);
+        }
+        let (desc_slice, ints_bytes) = data.split_at(size_of::<AHardwareBuffer_Desc>());
+
+        let description = Ref::<&[u8], HardwareBufferDescription>::from_bytes(desc_slice)
+            .map_err(|_| StatusCode::BAD_VALUE)?;
+
+        let c_int_size = size_of::<c_int>();
+        if ints_bytes.len() % c_int_size != 0 {
+            return Err(StatusCode::BAD_VALUE);
+        }
+        let num_ints = ints_bytes.len() / c_int_size;
+        let mut ints = vec![0; num_ints];
+        ints.as_bytes_mut().copy_from_slice(ints_bytes);
+
+        let handle = NativeHandle::new(fds, &ints).ok_or(StatusCode::BAD_VALUE)?;
+
+        Self::create_from_handle(&handle, &description)
     }
 }
 
@@ -861,5 +929,33 @@ mod test {
         .unwrap();
 
         drop(plane_guards);
+    }
+
+    #[test]
+    fn marshal_unmarshal() {
+        let buffer_description = HardwareBufferDescription::new(
+            128,
+            128,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        );
+        let buffer =
+            HardwareBuffer::new(&buffer_description).expect("Failed to create buffer for marshal");
+        // Get the actual description after creation, as stride might be adjusted by the system.
+        let original_desc = buffer.description();
+
+        let ahb_info = AhbInfo::try_from(buffer).expect("Failed to marshal buffer");
+
+        assert!(!ahb_info.fds.is_empty(), "Marshaled buffer should have file descriptors");
+        assert!(!ahb_info.data.is_empty(), "Marshaled buffer should have data");
+
+        // TryFrom implementation takes ownership of the FDs.
+        let unmarshaled_buffer =
+            HardwareBuffer::try_from(ahb_info).expect("Failed to unmarshal buffer");
+
+        let new_desc = unmarshaled_buffer.description();
+        assert_eq!(original_desc, new_desc);
     }
 }

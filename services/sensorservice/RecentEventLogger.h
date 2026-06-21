@@ -21,8 +21,9 @@
 #include "SensorServiceUtils.h"
 
 #include <hardware/sensors.h>
-#include <utils/String8.h>
 
+
+#include <string>
 #include <mutex>
 
 namespace android {

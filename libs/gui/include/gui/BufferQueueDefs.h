@@ -25,11 +25,7 @@ namespace android {
     class BufferQueueCore;
 
     namespace BufferQueueDefs {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     typedef std::vector<BufferSlot> SlotsType;
-#else
-    typedef BufferSlot SlotsType[NUM_BUFFER_SLOTS];
-#endif
     } // namespace BufferQueueDefs
 } // namespace android
 

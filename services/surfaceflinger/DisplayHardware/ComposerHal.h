@@ -50,6 +50,7 @@
 #include <aidl/android/hardware/graphics/composer3/Luts.h>
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
 #include <aidl/android/hardware/graphics/composer3/ReadbackBufferAttributes.h>
+#include <aidl/android/hardware/graphics/composer3/VsyncSample.h>
 
 #include <optional>
 
@@ -57,6 +58,7 @@
 #pragma clang diagnostic pop // ignored "-Wconversion -Wextra"
 
 namespace android {
+
 namespace HWC2 {
 struct ComposerCallback;
 } // namespace HWC2
@@ -69,7 +71,7 @@ namespace V2_1 = hardware::graphics::composer::V2_1;
 namespace V2_2 = hardware::graphics::composer::V2_2;
 namespace V2_3 = hardware::graphics::composer::V2_3;
 namespace V2_4 = hardware::graphics::composer::V2_4;
-namespace V3_0 = ::aidl::android::hardware::graphics::composer3;
+namespace composer3 = ::aidl::android::hardware::graphics::composer3;
 
 using types::V1_0::ColorTransform;
 using types::V1_0::Transform;
@@ -93,7 +95,6 @@ using PerFrameMetadata = IComposerClient::PerFrameMetadata;
 using PerFrameMetadataKey = IComposerClient::PerFrameMetadataKey;
 using PerFrameMetadataBlob = IComposerClient::PerFrameMetadataBlob;
 using AidlTransform = ::aidl::android::hardware::graphics::common::Transform;
-using DisplayConfiguration = V3_0::DisplayConfiguration;
 using aidl::android::hardware::graphics::common::Hdr;
 using android::ScreenPartStatus;
 
@@ -110,13 +111,14 @@ public:
         DisplayBrightnessCommand,
         KernelIdleTimer,
         PhysicalDisplayOrientation,
+        DisplayCommandModeset,
     };
 
     virtual bool isSupported(OptionalFeature) const = 0;
     virtual bool isVrrSupported() const = 0;
+    virtual bool isDisplayCommandModesetSupported() const = 0;
 
-    virtual std::vector<aidl::android::hardware::graphics::composer3::Capability>
-    getCapabilities() = 0;
+    virtual std::vector<composer3::Capability> getCapabilities() = 0;
     virtual std::string dumpDebugInfo() = 0;
 
     virtual void registerCallback(HWC2::ComposerCallback& callback) = 0;
@@ -136,14 +138,14 @@ public:
 
     virtual Error getActiveConfig(Display display, Config* outConfig) = 0;
     virtual Error getChangedCompositionTypes(Display display, std::vector<Layer>* outLayers,
-                                             std::vector<V3_0::Composition>* outTypes) = 0;
+                                             std::vector<composer3::Composition>* outTypes) = 0;
     virtual Error getColorModes(Display display, std::vector<ColorMode>* outModes) = 0;
     virtual Error getDisplayAttribute(Display display, Config config,
                                       IComposerClient::Attribute attribute, int32_t* outValue) = 0;
     virtual Error getDisplayConfigs(Display display, std::vector<Config>* outConfigs) = 0;
 
     virtual Error getDisplayConfigurations(Display, int32_t maxFrameIntervalNs,
-                                           std::vector<DisplayConfiguration>*) = 0;
+                                           std::vector<composer3::DisplayConfiguration>*) = 0;
 
     virtual Error getDisplayName(Display display, std::string* outName) = 0;
 
@@ -206,12 +208,9 @@ public:
                                         const std::vector<IComposerClient::Rect>& damage) = 0;
     virtual Error setLayerBlendMode(Display display, Layer layer,
                                     IComposerClient::BlendMode mode) = 0;
-    virtual Error setLayerColor(
-            Display display, Layer layer,
-            const aidl::android::hardware::graphics::composer3::Color& color) = 0;
-    virtual Error setLayerCompositionType(
-            Display display, Layer layer,
-            aidl::android::hardware::graphics::composer3::Composition type) = 0;
+    virtual Error setLayerColor(Display display, Layer layer, const composer3::Color& color) = 0;
+    virtual Error setLayerCompositionType(Display display, Layer layer,
+                                          composer3::Composition type) = 0;
     virtual Error setLayerDataspace(Display display, Layer layer, Dataspace dataspace) = 0;
     virtual Error setLayerDisplayFrame(Display display, Layer layer,
                                        const IComposerClient::Rect& frame) = 0;
@@ -265,8 +264,8 @@ public:
                                        const DisplayBrightnessOptions& options) = 0;
 
     // Composer HAL 2.4
-    virtual Error getDisplayCapabilities(Display display,
-                                         std::vector<V3_0::DisplayCapability>* outCapabilities) = 0;
+    virtual Error getDisplayCapabilities(
+            Display display, std::vector<composer3::DisplayCapability>* outCapabilities) = 0;
     virtual V2_4::Error getDisplayConnectionType(
             Display display, IComposerClient::DisplayConnectionType* outType) = 0;
     virtual V2_4::Error getDisplayVsyncPeriod(Display display,
@@ -289,7 +288,8 @@ public:
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) = 0;
 
     virtual Error getClientTargetProperty(
-            Display display, V3_0::ClientTargetPropertyWithBrightness* outClientTargetProperty) = 0;
+            Display display,
+            composer3::ClientTargetPropertyWithBrightness* outClientTargetProperty) = 0;
 
     // AIDL Composer
     virtual Error setLayerBrightness(Display display, Layer layer, float brightness) = 0;
@@ -305,7 +305,7 @@ public:
     virtual Error setIdleTimerEnabled(Display displayId, std::chrono::milliseconds timeout) = 0;
     virtual Error getPhysicalDisplayOrientation(Display displayId,
                                                 AidlTransform* outDisplayOrientation) = 0;
-    virtual Error getOverlaySupport(V3_0::OverlayProperties* outProperties) = 0;
+    virtual Error getOverlaySupport(composer3::OverlayProperties* outProperties) = 0;
     virtual void onHotplugConnect(Display) = 0;
     virtual void onHotplugDisconnect(Display) = 0;
     virtual Error getHdrConversionCapabilities(
@@ -316,20 +316,25 @@ public:
     virtual Error notifyExpectedPresent(Display, nsecs_t expectedPresentTime,
                                         int32_t frameIntervalNs) = 0;
     virtual Error getRequestedLuts(Display display, std::vector<Layer>* outLayers,
-                                   std::vector<V3_0::DisplayLuts::LayerLut>* outLuts) = 0;
-    virtual Error setLayerLuts(Display display, Layer layer, V3_0::Luts& luts) = 0;
+                                   std::vector<composer3::DisplayLuts::LayerLut>* outLuts) = 0;
+    virtual Error setLayerLuts(Display display, Layer layer, composer3::Luts& luts) = 0;
     virtual Error getMaxLayerPictureProfiles(Display display, int32_t* outMaxProfiles) = 0;
     virtual Error setDisplayPictureProfileId(Display display, PictureProfileId id) = 0;
     virtual Error setLayerPictureProfileId(Display display, Layer layer, PictureProfileId id) = 0;
     virtual Error startHdcpNegotiation(Display display,
                                        const aidl::android::hardware::drm::HdcpLevels& levels) = 0;
     virtual Error getLuts(Display display, const std::vector<sp<GraphicBuffer>>&,
-                          std::vector<V3_0::Luts>*) = 0;
-    virtual Error getReadbackBufferAttributes(Display display,
-                                              V3_0::ReadbackBufferAttributes* outAttributes) = 0;
+                          std::vector<composer3::Luts>*) = 0;
+    virtual Error getReadbackBufferAttributes(
+            Display display, composer3::ReadbackBufferAttributes* outAttributes) = 0;
     virtual Error setReadbackBuffer(Display display, const sp<GraphicBuffer>& buffer,
                                     int acquireFence) = 0;
     virtual Error getReadbackBufferFence(Display display, int* outReleaseFence) = 0;
+    virtual Error getDisplayKnownVsyncSample(Display display,
+                                             composer3::VsyncSample* outVsyncSample) = 0;
+    virtual Error setDisplayMode(Display display, Config modeId, bool seamless) = 0;
+    virtual Error setDisplayModes(const std::vector<std::pair<Display, Config>>& requests,
+                                  bool seamless) = 0;
 };
 
 } // namespace Hwc2

@@ -54,7 +54,6 @@ struct DisplayEventReceiver::Passkey final {};
 
 auto DisplayEventReceiver::make(std::weak_ptr<SFController> controller,
                                 const sp<gui::ISurfaceComposer>& client, PollFdThread& pollFdThread,
-                                gui::ISurfaceComposer::VsyncSource source,
                                 const sp<IBinder>& layerHandle,
                                 const ftl::Flags<gui::ISurfaceComposer::EventRegistration>& events)
         -> base::expected<std::shared_ptr<DisplayEventReceiver>, std::string> {
@@ -64,8 +63,8 @@ auto DisplayEventReceiver::make(std::weak_ptr<SFController> controller,
     if (instance == nullptr) {
         return base::unexpected("Failed to construct a DisplayEventReceiver"s);
     }
-    if (auto result = instance->init(std::move(controller), client, pollFdThread, source,
-                                     layerHandle, events);
+    if (auto result =
+                instance->init(std::move(controller), client, pollFdThread, layerHandle, events);
         !result) {
         return base::unexpected("Failed to init a DisplayEventReceiver: " + result.error());
     }
@@ -78,17 +77,15 @@ DisplayEventReceiver::DisplayEventReceiver(Passkey passkey) {
 
 [[nodiscard]] auto DisplayEventReceiver::init(
         std::weak_ptr<SFController> controller, const sp<gui::ISurfaceComposer>& client,
-        PollFdThread& pollFdThread,
-
-        gui::ISurfaceComposer::VsyncSource source, const sp<IBinder>& layerHandle,
+        PollFdThread& pollFdThread, const sp<IBinder>& layerHandle,
         const ftl::Flags<gui::ISurfaceComposer::EventRegistration>& events)
         -> base::expected<void, std::string> {
     using namespace std::string_literals;
 
     sp<gui::IDisplayEventConnection> displayEventConnection;
     auto result = client->createDisplayEventConnection(
-            source, std::bit_cast<gui::ISurfaceComposer::EventRegistration>(events.get()),
-            layerHandle, &displayEventConnection);
+            std::bit_cast<gui::ISurfaceComposer::EventRegistration>(events.get()), layerHandle,
+            &displayEventConnection);
 
     if (!result.isOk() || displayEventConnection == nullptr) {
         return base::unexpected("failed to create the display event connection"s);

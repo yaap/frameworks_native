@@ -33,6 +33,8 @@ std::string vkAbp2021GetSupportCpuOnly();
 std::string vkAbp2022GetSupport();
 std::string vkVpa15GetSupport();
 std::string vkVpa16GetSupport();
+std::string vkVra17GetSupport();
+std::string vkAvp2025GetSupport();
 
 // Returns a json string that enumerates support for any of the Vulkan profiles
 // specified in the above functions

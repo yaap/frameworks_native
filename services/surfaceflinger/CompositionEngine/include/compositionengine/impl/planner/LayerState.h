@@ -76,6 +76,7 @@ enum class LayerStateField : uint32_t {
     CachingHint           = 1u << 20,
     DimmingEnabled        = 1u << 21,
     BlursDisabled         = 1u << 22,
+    IsTextureSamplingBehind = 1u << 23,
 };
 // clang-format on
 
@@ -237,8 +238,9 @@ public:
     Rect getDisplayFrame() const { return mDisplayFrame.get(); }
     const Region& getVisibleRegion() const { return mVisibleRegion.get(); }
     bool hasBlurBehind() const {
-        return (mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty()) &&
-                !mIsBlursDisabled.get();
+        return ((mBackgroundBlurRadius.get() > 0 || !mBlurRegions.get().empty()) &&
+                !mIsBlursDisabled.get()) ||
+                isTextureSamplingBehind();
     }
     int32_t getBackgroundBlurRadius() const { return mBackgroundBlurRadius.get(); }
     aidl::android::hardware::graphics::composer3::Composition getCompositionType() const {
@@ -268,6 +270,8 @@ public:
     bool isDimmingEnabled() const { return mIsDimmingEnabled.get(); }
 
     float getFps() const { return getOutputLayer()->getLayerFE().getCompositionState()->fps; }
+
+    bool isTextureSamplingBehind() const { return mIsTextureSamplingBehind.get(); }
 
     void dump(std::string& result) const;
     std::optional<std::string> compare(const LayerState& other) const;
@@ -447,6 +451,11 @@ private:
     OutputLayerState<uint64_t, LayerStateField::Buffer> mFrameNumber{
             [](auto layer) { return layer->getLayerFE().getCompositionState()->frameNumber; }};
 
+    // LayerStateField::Buffer perhaps not quite true but seems most likely to capture the intention
+    OutputLayerState<uint64_t, LayerStateField::Buffer> mRenderCommandBufferFrameId{[](auto layer) {
+        return layer->getLayerFE().getCompositionState()->renderCommandBufferFrameId;
+    }};
+
     int64_t mFramesSinceBufferUpdate = 0;
 
     OutputLayerState<half4, LayerStateField::SolidColor>
@@ -473,13 +482,18 @@ private:
                                           std::string str;
                                           base::StringAppendF(&str,
                                                               "{radius=%du, cornerRadii=[%f, %f, "
-                                                              "%f, %f], alpha=%f, rect=[%d, "
+                                                              "%f, %f, %f, %f, %f, %f], alpha=%f, "
+                                                              "rect=[%d, "
                                                               "%d, %d, %d]",
                                                               region.blurRadius,
-                                                              region.cornerRadiusTL,
-                                                              region.cornerRadiusTR,
-                                                              region.cornerRadiusBL,
-                                                              region.cornerRadiusBR, region.alpha,
+                                                              region.cornerRadiusTLX,
+                                                              region.cornerRadiusTLY,
+                                                              region.cornerRadiusTRX,
+                                                              region.cornerRadiusTRY,
+                                                              region.cornerRadiusBLX,
+                                                              region.cornerRadiusBLY,
+                                                              region.cornerRadiusBRX,
+                                                              region.cornerRadiusBRY, region.alpha,
                                                               region.left, region.top, region.right,
                                                               region.bottom);
                                           result.push_back(str);
@@ -513,7 +527,12 @@ private:
     OutputLayerState<bool, LayerStateField::BlursDisabled> mIsBlursDisabled{
             [](auto layer) { return layer->getState().ignoreBlur; }};
 
-    static const constexpr size_t kNumNonUniqueFields = 21;
+    OutputLayerState<bool, LayerStateField::IsTextureSamplingBehind> mIsTextureSamplingBehind{
+            [](auto layer) {
+                return layer->getLayerFE().getCompositionState()->isTextureSamplingBehind;
+            }};
+
+    static const constexpr size_t kNumNonUniqueFields = 23;
 
     std::array<StateInterface*, kNumNonUniqueFields> getNonUniqueFields() {
         std::array<const StateInterface*, kNumNonUniqueFields> constFields =
@@ -527,12 +546,29 @@ private:
     }
 
     std::array<const StateInterface*, kNumNonUniqueFields> getNonUniqueFields() const {
-        return {&mDisplayFrame,   &mSourceCrop,     &mBufferTransform,      &mBlendMode,
-                &mAlpha,          &mLayerMetadata,  &mVisibleRegion,        &mOutputDataspace,
-                &mPixelFormat,    &mColorTransform, &mCompositionType,      &mSidebandStream,
-                &mBuffer,         &mSolidColor,     &mBackgroundBlurRadius, &mBlurRegions,
-                &mFrameNumber,    &mIsProtected,    &mCachingHint,          &mIsDimmingEnabled,
-                &mIsBlursDisabled};
+        return {&mDisplayFrame,
+                &mSourceCrop,
+                &mBufferTransform,
+                &mBlendMode,
+                &mAlpha,
+                &mLayerMetadata,
+                &mVisibleRegion,
+                &mOutputDataspace,
+                &mPixelFormat,
+                &mColorTransform,
+                &mCompositionType,
+                &mSidebandStream,
+                &mBuffer,
+                &mSolidColor,
+                &mBackgroundBlurRadius,
+                &mBlurRegions,
+                &mFrameNumber,
+                &mIsProtected,
+                &mCachingHint,
+                &mIsDimmingEnabled,
+                &mIsBlursDisabled,
+                &mRenderCommandBufferFrameId,
+                &mIsTextureSamplingBehind};
     }
 };
 

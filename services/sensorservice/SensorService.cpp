@@ -19,6 +19,7 @@
 #include <android-base/strings.h>
 #include <android/content/pm/IPackageManagerNative.h>
 #include <android/util/ProtoOutputStream.h>
+#include <android_hardware_flags.h>
 #include <binder/ActivityManager.h>
 #include <binder/BinderService.h>
 #include <binder/IServiceManager.h>
@@ -46,6 +47,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <utils/Errors.h>
 #include <utils/SystemClock.h>
 
 #include <condition_variable>
@@ -512,6 +514,9 @@ void SensorService::onUidStateChanged(uid_t uid, UidState state) {
     for (const sp<SensorEventConnection>& conn : connLock.getActiveConnections()) {
         if (conn->getUid() == uid) {
             dev.setUidStateForConnection(conn.get(), state);
+            // Update sensor subscriptions if needed
+            bool hasAccess = hasSensorAccessLocked(conn->getUid(), conn->getOpPackageName());
+            conn->onSensorAccessChanged(hasAccess);
         }
     }
 
@@ -568,6 +573,30 @@ bool SensorService::registerVirtualSensor(std::shared_ptr<SensorInterface> s, bo
 }
 
 SensorService::~SensorService() {
+    ALOGI("SensorService destructor starting");
+    if (android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+
+        std::vector<sp<hardware::sensor::ISensorClientListener>> listenersToUnregister;
+        {
+            Mutex::Autolock _l(mBinderStateRecipientsLock);
+            listenersToUnregister.reserve(mBinderStateRecipients.size());
+            for (const auto& pair : mBinderStateRecipients) {
+                listenersToUnregister.push_back(pair.first);
+            }
+        }
+
+        if (!listenersToUnregister.empty()) {
+            ALOGI("Unregistering %zu client listeners during shutdown.",
+                  listenersToUnregister.size());
+            for (const auto& listener : listenersToUnregister) {
+                // unregisterClientListener locks mStateLock internally, but it's fine as
+                // the destructor does not hold the lock in this loop.
+                unregisterClientListener(listener);
+            }
+            ALOGI("Finished unregistering all client listeners.");
+        }
+    }
+
     for (auto && entry : mRecentEvent) {
         delete entry.second;
     }
@@ -680,6 +709,26 @@ status_t SensorService::dump(int fd, const Vector<String16>& args) {
             }
             result.appendFormat("Sensor Privacy: %s\n",
                     mSensorPrivacyPolicy->isSensorPrivacyEnabled() ? "enabled" : "disabled");
+            if (android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+                Mutex::Autolock _l(mBinderStateRecipientsLock);
+                result.appendFormat("\n--- Client Listeners (%zu registered) ---\n",
+                                    mBinderStateRecipients.size());
+                if (mBinderStateRecipients.empty()) {
+                    result.append("  (No clients registered)\n");
+                } else {
+                    int i = 0;
+                    for (const auto& entry : mBinderStateRecipients) {
+                        const sp<ClientStateRecipient>& recipient = entry.second;
+
+                        const ClientStateRecipient* clientRecipient =
+                                static_cast<const ClientStateRecipient*>(recipient.get());
+
+                        result.appendFormat(" Client %d [PID: %d, UID: %d, IsFrozen: %s]\n", i++,
+                                            clientRecipient->getPid(), clientRecipient->getUid(),
+                                            clientRecipient->isFrozen() ? "true" : "false");
+                    }
+                }
+            }
 
             const auto& activeConnections = connLock.getActiveConnections();
             result.appendFormat("%zd open event connections\n", activeConnections.size());
@@ -1617,7 +1666,7 @@ sp<ISensorEventConnection> SensorService::createSensorEventConnection(const Stri
             (packageName == "") ? String8::format("unknown_package_pid_%d", pid) : packageName;
     String16 connOpPackageName =
             (opPackageName == String16("")) ? String16(connPackageName) : opPackageName;
-    sp<SensorEventConnection> result(new SensorEventConnection(this, uid, connPackageName,
+    sp<SensorEventConnection> result(new SensorEventConnection(this, uid, pid, connPackageName,
                                                                isInjectionMode(requestedMode),
                                                                connOpPackageName, attributionTag));
     if (isInjectionMode(requestedMode)) {
@@ -1868,6 +1917,158 @@ int SensorService::setOperationParameter(
         }
     }
     return NO_ERROR;
+}
+
+void SensorService::ClientStateRecipient::binderDied(const wp<IBinder>& /*who*/) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return;
+    }
+    sp<SensorService> service = mService.promote();
+    if (service != nullptr) {
+        service->onClientDied(mListener);
+    } else {
+        ALOGW("SensorService already destroyed, cannot process client death.");
+    }
+}
+
+void SensorService::ClientStateRecipient::onStateChanged(const wp<IBinder>& /*who*/, State state) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return;
+    }
+    bool isFrozen = (state == IBinder::FrozenStateChangeCallback::State::FROZEN);
+
+    Mutex::Autolock _l(mFrozenStateLock);
+    if (mIsFrozen == isFrozen) {
+        return;
+    }
+    mIsFrozen = isFrozen;
+    sp<SensorService> service = mService.promote();
+    if (service != nullptr) {
+        if (service->getLooper() != nullptr) {
+            sp<MessageHandler> handler = new FrozenStateChangeHandler(mService, mPid, isFrozen);
+            service->getLooper()->sendMessage(handler, Message(0));
+        }
+    } else {
+        ALOGW("SensorService already destroyed, cannot process client state change.");
+    }
+}
+
+void SensorService::onClientFrozenStateChange(pid_t pid, bool isFrozen) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return;
+    }
+    SensorDevice& dev(SensorDevice::getInstance());
+    std::vector<void*> connectionIdents;
+
+    ConnectionSafeAutolock connLock = mConnectionHolder.lock(mLock);
+    for (const sp<SensorEventConnection>& conn : connLock.getActiveConnections()) {
+        if (conn->getPid() == pid) {
+            dev.setFrozenStateForConnection(conn.get(), isFrozen);
+        }
+    }
+}
+
+void SensorService::onClientDied(const sp<hardware::sensor::ISensorClientListener>& listener) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return;
+    }
+    unregisterClientListener(listener);
+}
+
+status_t SensorService::registerClientListener(
+        const sp<android::hardware::sensor::ISensorClientListener>& listener) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return INVALID_OPERATION;
+    }
+    if (listener == nullptr) {
+        return BAD_VALUE;
+    }
+
+    pid_t pid = IPCThreadState::self()->getCallingPid();
+    uid_t uid = IPCThreadState::self()->getCallingUid();
+
+    Mutex::Autolock _l(mBinderStateRecipientsLock);
+
+    if (mBinderStateRecipients.count(listener)) {
+        ALOGW("Listener already registered (pid=%d, uid=%d). Ignoring duplicate registration.", pid,
+              uid);
+        return ALREADY_EXISTS;
+    }
+
+    sp<ClientStateRecipient> recipient = new ClientStateRecipient(this, listener, pid, uid);
+    sp<IBinder> binder = IInterface::asBinder(listener);
+
+    status_t err = binder->linkToDeath(recipient);
+    if (err != OK) {
+        ALOGW("Failed to linkToDeath for listener (pid=%d, uid=%d), error=%d. "
+              "Aborting registration.",
+              pid, uid, err);
+        return err;
+    }
+
+    status_t frozenErr = binder->addFrozenStateChangeCallback(recipient);
+    if (frozenErr != OK) {
+        ALOGE("Failed to addFrozenStateChangeCallback (pid=%d, uid=%d), error=%d. "
+              "Cleaning up linkToDeath and aborting registration.",
+              pid, uid, frozenErr);
+        binder->unlinkToDeath(recipient); // Rollback linkToDeath
+        return frozenErr;
+    }
+
+    mBinderStateRecipients[listener] = recipient;
+
+    return OK;
+}
+
+status_t SensorService::unregisterClientListener(
+        const sp<android::hardware::sensor::ISensorClientListener>& listener) {
+    if (!android::hardware::flags::suspend_sensor_event_delivery_on_frozen_pid()) {
+        return UNKNOWN_TRANSACTION;
+    }
+
+    if (listener == nullptr) {
+        return BAD_VALUE;
+    }
+
+    sp<IBinder> binder = IInterface::asBinder(listener);
+    if (binder == nullptr) {
+        return BAD_VALUE;
+    }
+
+    sp<ClientStateRecipient> recipient;
+    {
+        Mutex::Autolock _l(mBinderStateRecipientsLock);
+
+        auto it = mBinderStateRecipients.find(listener);
+        if (it != mBinderStateRecipients.end()) {
+            recipient = it->second;
+            mBinderStateRecipients.erase(it);
+            ALOGD("Unregistering client listener for PID %d", recipient->getPid());
+        } else {
+            return NAME_NOT_FOUND;
+        }
+    }
+
+    if (recipient != nullptr) {
+        // Detach from binder notifications. Do this without holding mStateLock to prevent ANR.
+        binder->unlinkToDeath(recipient);
+        status_t removeErr = binder->removeFrozenStateChangeCallback(recipient);
+        if (removeErr != OK && removeErr != DEAD_OBJECT) {
+            // DEAD_OBJECT is expected if the client is already gone.
+            ALOGW("Failed to remove frozen state change callback, error=%d", removeErr);
+        }
+    }
+    return OK;
+}
+
+bool SensorService::isPidFrozen(pid_t pid) {
+    Mutex::Autolock _l(mBinderStateRecipientsLock);
+    for (const auto& it : mBinderStateRecipients) {
+        if (it.second->getPid() == pid) {
+            return it.second->isFrozen();
+        }
+    }
+    return false;
 }
 
 status_t SensorService::resetToNormalMode() {
@@ -2187,13 +2388,18 @@ status_t SensorService::disable(const sp<SensorEventConnection>& connection, int
         return mInitCheck;
 
     Mutex::Autolock _l(mLock);
+    int64_t totalDurationNs = 0;
+    int64_t activeDurationNs = 0;
+    connection->getSensorDurationStats(handle, &totalDurationNs, &activeDurationNs);
+
     status_t err = cleanupWithoutDisableLocked(connection, handle);
     if (err == NO_ERROR) {
         std::shared_ptr<SensorInterface> sensor = getSensorInterfaceFromHandle(handle);
         err = sensor != nullptr ? sensor->activate(connection.get(), false) : status_t(BAD_VALUE);
     }
     mLastNSensorRegistrations.editItemAt(mNextSensorRegIndex) =
-            SensorRegistrationInfo(handle, connection->getPackageName(), 0, 0, /*activate=*/ false, err);
+            SensorRegistrationInfo(handle, connection->getPackageName(), 0, 0, /*activate=*/false,
+                                   err, totalDurationNs, activeDurationNs);
     mNextSensorRegIndex = (mNextSensorRegIndex + 1) % SENSOR_REGISTRATIONS_BUF_SIZE;
     return err;
 }

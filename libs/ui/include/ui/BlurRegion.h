@@ -26,10 +26,14 @@ namespace android {
 
 struct BlurRegion {
     uint32_t blurRadius;
-    float cornerRadiusTL;
-    float cornerRadiusTR;
-    float cornerRadiusBL;
-    float cornerRadiusBR;
+    float cornerRadiusTLX;
+    float cornerRadiusTLY;
+    float cornerRadiusTRX;
+    float cornerRadiusTRY;
+    float cornerRadiusBLX;
+    float cornerRadiusBLY;
+    float cornerRadiusBRX;
+    float cornerRadiusBRY;
     float alpha;
     int left;
     int top;
@@ -37,9 +41,14 @@ struct BlurRegion {
     int bottom;
 
     inline bool operator==(const BlurRegion& other) const {
-        return blurRadius == other.blurRadius && cornerRadiusTL == other.cornerRadiusTL &&
-                cornerRadiusTR == other.cornerRadiusTR && cornerRadiusBL == other.cornerRadiusBL &&
-                cornerRadiusBR == other.cornerRadiusBR && alpha == other.alpha &&
+        return blurRadius == other.blurRadius && cornerRadiusTLX == other.cornerRadiusTLX &&
+                cornerRadiusTLY == other.cornerRadiusTLY &&
+                cornerRadiusTRX == other.cornerRadiusTRX &&
+                cornerRadiusTRY == other.cornerRadiusTRY &&
+                cornerRadiusBLX == other.cornerRadiusBLX &&
+                cornerRadiusBLY == other.cornerRadiusBLY &&
+                cornerRadiusBRX == other.cornerRadiusBRX &&
+                cornerRadiusBRY == other.cornerRadiusBRY && alpha == other.alpha &&
                 left == other.left && top == other.top && right == other.right &&
                 bottom == other.bottom;
     }
@@ -47,19 +56,32 @@ struct BlurRegion {
     inline bool operator!=(const BlurRegion& other) const { return !(*this == other); }
 };
 
-static inline void PrintTo(const BlurRegion& blurRegion, ::std::ostream* os) {
+namespace {
+// A newline character followed by N*4 spaces.
+static inline constexpr std::string IndentedNewline(uint8_t indent) {
+    return "\n" + std::string(static_cast<size_t>(indent * 4), ' ');
+}
+} // namespace
+
+static inline void PrintTo(const BlurRegion& blurRegion, ::std::ostream* os,
+                           const uint8_t currentIndent = 0) {
+    const std::string newline = IndentedNewline(currentIndent + 1);
     *os << "BlurRegion {";
-    *os << "\n    .blurRadius = " << blurRegion.blurRadius;
-    *os << "\n    .cornerRadiusTL = " << blurRegion.cornerRadiusTL;
-    *os << "\n    .cornerRadiusTR = " << blurRegion.cornerRadiusTR;
-    *os << "\n    .cornerRadiusBL = " << blurRegion.cornerRadiusBL;
-    *os << "\n    .cornerRadiusBR = " << blurRegion.cornerRadiusBR;
-    *os << "\n    .alpha = " << blurRegion.alpha;
-    *os << "\n    .left = " << blurRegion.left;
-    *os << "\n    .top = " << blurRegion.top;
-    *os << "\n    .right = " << blurRegion.right;
-    *os << "\n    .bottom = " << blurRegion.bottom;
-    *os << "\n}";
+    *os << newline << ".blurRadius = " << blurRegion.blurRadius;
+    *os << newline << ".cornerRadiusTLX = " << blurRegion.cornerRadiusTLX;
+    *os << newline << ".cornerRadiusTLY = " << blurRegion.cornerRadiusTLY;
+    *os << newline << ".cornerRadiusTRX = " << blurRegion.cornerRadiusTRX;
+    *os << newline << ".cornerRadiusTRY = " << blurRegion.cornerRadiusTRY;
+    *os << newline << ".cornerRadiusBLX = " << blurRegion.cornerRadiusBLX;
+    *os << newline << ".cornerRadiusBLY = " << blurRegion.cornerRadiusBLY;
+    *os << newline << ".cornerRadiusBRX = " << blurRegion.cornerRadiusBRX;
+    *os << newline << ".cornerRadiusBRY = " << blurRegion.cornerRadiusBRY;
+    *os << newline << ".alpha = " << blurRegion.alpha;
+    *os << newline << ".left = " << blurRegion.left;
+    *os << newline << ".top = " << blurRegion.top;
+    *os << newline << ".right = " << blurRegion.right;
+    *os << newline << ".bottom = " << blurRegion.bottom;
+    *os << IndentedNewline(currentIndent) << "}";
 }
 
 // copied from skia/src/core/SkBlurMask.cpp
@@ -77,9 +99,12 @@ namespace std {
 template <>
 struct hash<android::BlurRegion> {
     size_t operator()(const android::BlurRegion& region) const {
-        return android::hashCombine(region.blurRadius, region.cornerRadiusTL, region.cornerRadiusTR,
-                                    region.cornerRadiusBL, region.cornerRadiusBR, region.alpha,
-                                    region.left, region.top, region.right, region.bottom);
+        return android::hashCombine(region.blurRadius, region.cornerRadiusTLX,
+                                    region.cornerRadiusTLY, region.cornerRadiusTRX,
+                                    region.cornerRadiusTRY, region.cornerRadiusBLX,
+                                    region.cornerRadiusBLY, region.cornerRadiusBRX,
+                                    region.cornerRadiusBRY, region.alpha, region.left, region.top,
+                                    region.right, region.bottom);
     }
 };
 } // namespace std

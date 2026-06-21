@@ -58,12 +58,12 @@ public:
     inline DeviceId getId() const { return mId; }
     inline int32_t getControllerNumber() const { return mControllerNumber; }
     inline virtual int32_t getGeneration() const { return mGeneration; }
-    inline const std::string getName() const { return mIdentifier.name; }
-    inline const std::string getDescriptor() { return mIdentifier.descriptor; }
+    inline const std::string& getName() const { return mIdentifier.name; }
+    inline const std::string& getDescriptor() const { return mIdentifier.descriptor; }
     inline std::optional<std::string> getBluetoothAddress() const {
         return mIdentifier.bluetoothAddress;
     }
-    inline const std::string getLocation() const { return mIdentifier.location; }
+    inline const std::string& getLocation() const { return mIdentifier.location; }
     inline ftl::Flags<InputDeviceClass> getClasses() const { return mClasses; }
     inline virtual uint32_t getSources() const { return mSources; }
     inline bool hasEventHubDevices() const { return !mDevices.empty(); }
@@ -219,9 +219,11 @@ private:
     std::optional<std::string> mAssociatedDisplayUniqueIdByDescriptor;
     std::optional<std::string> mAssociatedDeviceType;
     std::optional<DisplayViewport> mAssociatedViewport;
+    std::unordered_map<int32_t /* fromKeyCode */, int32_t /* toKeyCode */> mKeyRemapping;
     bool mHasMic;
     bool mDropUntilNextSync;
     std::optional<bool> mShouldSmoothScroll;
+    std::optional<int32_t> mPrimaryDirectionalMotionAxis;
     std::filesystem::path mSysfsRootPath;
 
     typedef int32_t (InputMapper::*GetStateFunc)(uint32_t sourceMask, int32_t code);
@@ -341,14 +343,17 @@ public:
 
     inline bool hasMscEvent(int mscEvent) const { return mEventHub->hasMscEvent(mId, mscEvent); }
 
-    inline void setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping) const {
+    inline void setKeyRemapping(const std::unordered_map<int32_t, int32_t>& keyRemapping) {
         mEventHub->setKeyRemapping(mId, keyRemapping);
     }
 
-    inline status_t mapKey(int32_t scanCode, int32_t usageCode, int32_t metaState,
-                           int32_t* outKeycode, int32_t* outMetaState, uint32_t* outFlags) const {
-        return mEventHub->mapKey(mId, scanCode, usageCode, metaState, outKeycode, outMetaState,
-                                 outFlags);
+    inline void setAxisRemapping(const std::unordered_map<int32_t, int32_t>& axisRemapping) {
+        mEventHub->setAxisRemapping(mId, axisRemapping);
+    }
+
+    inline std::optional<MappedKey> mapKey(int32_t scanCode, int32_t usageCode,
+                                           int32_t metaState) const {
+        return mEventHub->mapKey(mId, scanCode, usageCode, metaState);
     }
     inline status_t mapAxis(int32_t scanCode, AxisInfo* outAxisInfo) const {
         return mEventHub->mapAxis(mId, scanCode, outAxisInfo);
@@ -457,9 +462,9 @@ public:
     inline status_t enableDevice() { return mEventHub->enableDevice(mId); }
     inline status_t disableDevice() { return mEventHub->disableDevice(mId); }
 
-    inline const std::string getName() const { return mDevice.getName(); }
-    inline const std::string getDescriptor() { return mDevice.getDescriptor(); }
-    inline const std::string getLocation() { return mDevice.getLocation(); }
+    inline const std::string& getName() const { return mDevice.getName(); }
+    inline const std::string& getDescriptor() const { return mDevice.getDescriptor(); }
+    inline const std::string& getLocation() const { return mDevice.getLocation(); }
     inline bool isExternal() const { return mDevice.isExternal(); }
     inline bool isVirtualDevice() const { return mDevice.isVirtualDevice(); }
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
