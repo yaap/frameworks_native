@@ -992,7 +992,9 @@ status_t BufferQueueProducer::queueBuffer(int slot,
             &getFrameTimestamps);
     const Region& surfaceDamage = input.getSurfaceDamage();
     const HdrMetadata& hdrMetadata = input.getHdrMetadata();
+#if COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
     const std::optional<PictureProfileHandle>& pictureProfileHandle =
+#endif
             input.getPictureProfileHandle();
 
     if (acquireFence == nullptr) {
