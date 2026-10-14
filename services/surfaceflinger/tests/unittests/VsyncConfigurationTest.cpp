@@ -20,9 +20,8 @@
 #include <gmock/gmock.h>
 #include <log/log.h>
 #include <chrono>
-#include <string>
 #include <thread>
-#include <unordered_map>
+#include <utility>
 
 #include <scheduler/Time.h>
 
@@ -47,6 +46,11 @@ public:
     TestableWorkDuration(Fps currentFps, Duration minSfDuration, Duration maxSfDuration,
                          Duration appDuration)
           : impl::WorkDuration(currentFps, minSfDuration, maxSfDuration, appDuration) {}
+
+protected:
+    // The per-refresh-rate overrides may be set on the test device; keep the expectations
+    // deterministic by not reading the property service.
+    impl::DurationOverrides getDurationOverrides() const override { return {}; }
 };
 
 class TestableWorkDurationWithFpsOverrides : public impl::WorkDuration {
@@ -54,20 +58,16 @@ public:
     TestableWorkDurationWithFpsOverrides(Fps currentFps, nsecs_t sfDuration, nsecs_t appDuration,
                                          nsecs_t sfEarlyDuration, nsecs_t appEarlyDuration,
                                          nsecs_t sfEarlyGlDuration, nsecs_t appEarlyGlDuration,
-                                         std::unordered_map<std::string, nsecs_t> overrides)
+                                         impl::DurationOverrides overrides)
           : impl::WorkDuration(currentFps, sfDuration, appDuration, sfEarlyDuration,
                                appEarlyDuration, sfEarlyGlDuration, appEarlyGlDuration, 0),
             mOverrides(std::move(overrides)) {}
 
 protected:
-    std::optional<nsecs_t> getDurationOverride(const char* basePropName, int fps) const override {
-        const auto it = mOverrides.find(std::string(basePropName) + '.' + std::to_string(fps));
-        if (it == mOverrides.end()) return std::nullopt;
-        return it->second;
-    }
+    impl::DurationOverrides getDurationOverrides() const override { return mOverrides; }
 
 private:
-    const std::unordered_map<std::string, nsecs_t> mOverrides;
+    const impl::DurationOverrides mOverrides;
 };
 
 class WorkDurationTest : public testing::Test {
@@ -227,25 +227,82 @@ TEST_F(WorkDurationTest, workDurationIsARange) {
 }
 
 TEST_F(WorkDurationTest, getConfigsForRefreshRate_perFpsOverrides) {
-    TestableWorkDurationWithFpsOverrides workDuration(60_Hz, 10'500'000, 20'500'000, 16'000'000,
-                                                      16'500'000, 13'500'000, 21'000'000,
-                                                      {{"debug.sf.late.sf.duration.90", 7'000'000},
-                                                       {"debug.sf.earlyGl.app.duration.90",
-                                                        8'000'000}});
+    TestableWorkDurationWithFpsOverrides workDuration(
+            60_Hz, 10'500'000, 20'500'000, 16'000'000, 16'500'000, 13'500'000, 21'000'000,
+            {{"debug.sf.late.sf.duration", {{24, 16'666'666}, {60, 15'666'666}, {90, 7'000'000}}},
+             {"debug.sf.earlyGl.app.duration", {{60, 8'000'000}}}});
 
+    // Exact matches win; the durations without an override keep the constructor values.
     auto offsets = workDuration.getConfigsForRefreshRate(60_Hz);
-    EXPECT_EQ(offsets.late.sfWorkDuration, 10'500'000ns);
-    EXPECT_EQ(offsets.late.appWorkDuration, 20'500'000ns);
-    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 21'000'000ns);
-
-    offsets = workDuration.getConfigsForRefreshRate(90_Hz);
-    EXPECT_EQ(offsets.late.sfWorkDuration, 7'000'000ns);
-    EXPECT_EQ(offsets.late.sfOffset, 4'111'111);
-    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 8'000'000ns);
+    EXPECT_EQ(offsets.late.sfWorkDuration, 15'666'666ns);
     EXPECT_EQ(offsets.late.appWorkDuration, 20'500'000ns);
     EXPECT_EQ(offsets.early.sfWorkDuration, 16'000'000ns);
     EXPECT_EQ(offsets.early.appWorkDuration, 16'500'000ns);
     EXPECT_EQ(offsets.earlyGpu.sfWorkDuration, 13'500'000ns);
+    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 8'000'000ns);
+
+    offsets = workDuration.getConfigsForRefreshRate(90_Hz);
+    EXPECT_EQ(offsets.late.sfWorkDuration, 7'000'000ns);
+    EXPECT_EQ(offsets.late.sfOffset, 4'111'111);
+    EXPECT_EQ(offsets.late.appWorkDuration, 20'500'000ns);
+    EXPECT_EQ(offsets.early.sfWorkDuration, 16'000'000ns);
+    EXPECT_EQ(offsets.early.appWorkDuration, 16'500'000ns);
+    EXPECT_EQ(offsets.earlyGpu.sfWorkDuration, 13'500'000ns);
+    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 8'000'000ns);  // the closest override is .60
+
+    // 24 Hz matches exactly, and 10 Hz uses the closest override (24 Hz).
+    EXPECT_EQ(workDuration.getConfigsForRefreshRate(24_Hz).late.sfWorkDuration, 16'666'666ns);
+    EXPECT_EQ(workDuration.getConfigsForRefreshRate(10_Hz).late.sfWorkDuration, 16'666'666ns);
+}
+
+TEST_F(WorkDurationTest, getConfigsForRefreshRate_closestFpsOverrides) {
+    TestableWorkDurationWithFpsOverrides workDuration(
+            60_Hz, 10'500'000, 20'500'000, 16'000'000, 16'500'000, 13'500'000, 21'000'000,
+            {{"debug.sf.late.sf.duration",
+              {{20, 16'500'000},
+               {24, 16'666'666},
+               {30, 16'666'666},
+               {40, 16'500'000},
+               {60, 15'666'666},
+               {90, 13'111'111},
+               {120, 10'333'333},
+               {144, 10'347'222}}},
+             {"debug.sf.early.app.duration", {{60, 16'666'666}, {144, 10'333'333}}}});
+
+    const auto sfDurationFor = [&](Fps fps) {
+        return workDuration.getConfigsForRefreshRate(fps).late.sfWorkDuration;
+    };
+
+    // Exact matches.
+    EXPECT_EQ(sfDurationFor(60_Hz), 15'666'666ns);
+    EXPECT_EQ(sfDurationFor(90_Hz), 13'111'111ns);
+    EXPECT_EQ(sfDurationFor(120_Hz), 10'333'333ns);
+
+    // Rates without an override use the closest one, whether it is lower or higher.
+    EXPECT_EQ(sfDurationFor(10_Hz), 16'500'000ns);   // .20
+    EXPECT_EQ(sfDurationFor(15_Hz), 16'500'000ns);   // .20
+    EXPECT_EQ(sfDurationFor(48_Hz), 16'500'000ns);   // .40, delta 8 vs .60
+    EXPECT_EQ(sfDurationFor(96_Hz), 13'111'111ns);   // .90, delta 6 vs .120
+    EXPECT_EQ(sfDurationFor(165_Hz), 10'347'222ns);  // .144, the highest available
+
+    // Fractional rates are resolved against the actual frequency, not a rounded integer.
+    EXPECT_EQ(sfDurationFor(22.5_Hz), 16'666'666ns);  // .24, delta 1.5 vs .20
+    EXPECT_EQ(sfDurationFor(59.94_Hz), 15'666'666ns); // .60
+
+    // Equidistant rates are resolved towards the lower one.
+    EXPECT_EQ(sfDurationFor(50_Hz), 16'500'000ns);  // .40 vs .60
+
+    // Each property is resolved independently, with the constructor values as fallback.
+    const auto offsets = workDuration.getConfigsForRefreshRate(10_Hz);
+    EXPECT_EQ(offsets.late.sfWorkDuration, 16'500'000ns);
+    EXPECT_EQ(offsets.late.sfOffset, 83'500'000);
+    EXPECT_EQ(offsets.late.appWorkDuration, 20'500'000ns);
+    EXPECT_EQ(offsets.early.sfWorkDuration, 16'000'000ns);
+    EXPECT_EQ(offsets.early.appWorkDuration, 16'666'666ns);  // .60
+    EXPECT_EQ(offsets.earlyGpu.sfWorkDuration, 13'500'000ns);
+    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 21'000'000ns);
+
+    EXPECT_EQ(workDuration.getConfigsForRefreshRate(120_Hz).early.appWorkDuration, 10'333'333ns);
 }
 
 class TestablePhaseOffsets : public impl::PhaseOffsets {

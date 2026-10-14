@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -47,6 +48,10 @@ public:
 };
 
 namespace impl {
+
+// Durations set for individual refresh rates via "<property>.<fps>" properties, keyed by the
+// property name and the refresh rate.
+using DurationOverrides = std::map<std::string, std::map<int, nsecs_t>, std::less<>>;
 
 /*
  * This is a common implementation for both phase offsets and durations.
@@ -153,7 +158,10 @@ protected:
                  nsecs_t appEarlyDuration, nsecs_t sfEarlyGpuDuration, nsecs_t appEarlyGpuDuration,
                  nsecs_t hwcMinWorkDuration);
 
-    virtual std::optional<nsecs_t> getDurationOverride(const char* basePropName, int fps) const;
+    // Reads the durations set for individual refresh rates via "<property>.<fps>" properties.
+    // Called when the offsets for a refresh rate are constructed, i.e. once per refresh rate.
+    // Virtual so that unit tests don't read the property service.
+    virtual DurationOverrides getDurationOverrides() const;
 
 private:
     VsyncConfigSet constructOffsets(nsecs_t vsyncDuration) const override;
